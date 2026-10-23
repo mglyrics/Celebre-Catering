@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Meal {
+  id               String   @id @default(uuid())
+  code             String   @unique // e.g. "Sale-01" to "Sale-18"
+  name             String
+  category         String   // "mix_box" | "sandwich_box"
+  ingredients      String   // Exact Arabic ingredients text
+  distributorPrice Float    // Public price
+  factoryPrice     Float    // Confidential factory cost
+  hasJuice         Boolean  @default(true)
+  isActive         Boolean  @default(true)
+  image            String?
+  version          Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("meals")
+}
+
+model Booking {
+  id                   String        @id @default(uuid())
+  bookingCode          String        @unique // e.g. "CLB-2026-XXXX"
+  securityCode         String        // 4-digit verification code
+  customerName         String
+  customerPhone        String
+  customerWhatsapp     String?
+  preferredContact     String        @default("whatsapp") // "whatsapp" | "phone"
+  eventName            String
+  eventDate            String
+  deliveryTime         String
+  deliveryGovernorate  String
+  deliveryAddress      String
+  notes                String?
+  totalMealsCount      Int
+  totalDistributorPrice Float
+  totalFactoryPrice    Float?
+  profitMargin         Float?
+  paidAmount           Float         @default(0)
+  remainingAmount      Float
+  status               String        @default("INITIAL") // INITIAL, PENDING_CONFIRMATION, CONFIRMED, IN_PRODUCTION, READY_FOR_DELIVERY, DELIVERED, CANCELLED
+  statusNotes          String?
+  version              Int           @default(1)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  items                BookingItem[]
+  payments             Payment[]
+  factoryOrders        FactoryOrder[]
+  auditLogs            AuditLog[]
+
+  @@map("bookings")
+}
+
+model BookingItem {
+  id                    String   @id @default(uuid())
+  bookingId             String
+  booking               Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  mealId                String?
+  mealCode              String
+  mealName              String
+  category              String
+  ingredients           String
+  quantity              Int
+  drinkOption           String   @default("standard") // standard, no_juice, pepsi
+  baseDistributorPrice  Float
+  unitDistributorPrice  Float
+  totalDistributorPrice Float
+  baseFactoryPrice      Float?
+  unitFactoryPrice      Float?
+  totalFactoryPrice     Float?
+  createdAt             DateTime @default(now())
+
+  @@map("booking_items")
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  bookingId     String
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount        Float
+  method        String   // cash, vodafone_cash, instapay, bank_transfer, other
+  date          String
+  notes         String?
+  receiptNumber String?
+  createdAt     DateTime @default(now())
+
+  @@map("payments")
+}
+
+model FactoryOrder {
+  id              String   @id @default(uuid())
+  orderNumber     String   @unique // e.g. "FO-2026-001"
+  bookingId       String
+  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingCode     String
+  version         Int      @default(1)
+  status          String   @default("PENDING") // PENDING, PREPARING, COMPLETED
+  eventDate       String
+  deliveryTime    String
+  deliveryLocation String
+  itemsJson       String   // JSON string of kitchen items without distributor profit margins
+  packagingNotes  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("factory_orders")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  bookingId   String?
+  booking     Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  action      String
+  performedBy String
+  details     String
+  timestamp   DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+model AdminUser {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("admin") // super_admin, admin, factory
+  createdAt    DateTime @default(now())
+
+  @@map("admin_users")
+}

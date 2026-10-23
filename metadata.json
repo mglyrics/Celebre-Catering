@@ -1,0 +1,8 @@
+{
+  "name": "CÉLÈBRE Catering Management Platform",
+  "description": "منصة سيليبري لإدارة كاترينج المناسبات وحجوزات الوجبات وأوامر تشغيل المصنع ومتابعة الطلبات.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
