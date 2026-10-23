@@ -312,6 +312,57 @@ export const db = {
 
     memoryDB.bookings.unshift(newBooking);
 
+    if (databaseUrl) {
+      try {
+        await prisma.booking.create({
+          data: {
+            id: newBooking.id,
+            bookingCode: newBooking.bookingCode,
+            securityCode: newBooking.securityCode,
+            customerName: newBooking.customerName,
+            customerPhone: newBooking.customerPhone,
+            customerWhatsapp: newBooking.customerWhatsapp,
+            preferredContact: newBooking.preferredContact,
+            eventName: newBooking.eventName,
+            eventDate: newBooking.eventDate,
+            deliveryTime: newBooking.deliveryTime,
+            deliveryGovernorate: newBooking.deliveryGovernorate,
+            deliveryAddress: newBooking.deliveryAddress,
+            notes: newBooking.notes,
+            totalMealsCount: newBooking.totalMealsCount,
+            totalDistributorPrice: newBooking.totalDistributorPrice,
+            totalFactoryPrice: newBooking.totalFactoryPrice,
+            profitMargin: newBooking.profitMargin,
+            paidAmount: 0,
+            remainingAmount: newBooking.remainingAmount,
+            status: 'INITIAL',
+            statusNotes: newBooking.statusNotes,
+            version: 1,
+            items: {
+              create: validatedItems.map(it => ({
+                mealId: it.mealId,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice,
+                unitFactoryPrice: it.unitFactoryPrice,
+                totalFactoryPrice: it.totalFactoryPrice,
+              })),
+            },
+          },
+        });
+      } catch (err: any) {
+        // Fallback to local storage if PostgreSQL connection or table is pending
+        console.warn('[DB] Prisma booking create skipped/fallback:', err.message);
+      }
+    }
+
     this.addAuditLog({
       bookingId: newBooking.id,
       action: 'إنشاء حجز مبدئي',
