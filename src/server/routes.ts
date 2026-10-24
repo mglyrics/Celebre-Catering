@@ -55,6 +55,25 @@ function requireRole(allowedRoles: ('super_admin' | 'admin' | 'factory')[]) {
 // PUBLIC ROUTES
 // -----------------------------------------------------------------------------
 
+// API Root Status
+apiRouter.get('/', (_req, res) => {
+  res.json({
+    name: 'Celebre Catering API',
+    status: 'healthy',
+    version: '2.1.0',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Health check endpoint
+apiRouter.get('/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    database: db.isPostgres() ? 'postgresql' : 'resilient_storage',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Public app configuration & contact info
 apiRouter.get('/config', (req, res) => {
   res.json({
