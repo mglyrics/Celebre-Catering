@@ -131,26 +131,28 @@ apiRouter.post('/bookings', async (req, res) => {
       deliveryAddress,
       notes,
       items,
-    } = req.body;
+    } = req.body || {};
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
     // Validation
     if (!customerName || typeof customerName !== 'string' || customerName.trim().length < 2) {
-      res.status(400).json({ error: 'يرجى إدخال اسم العميل بشكل صحيح' });
+      res.status(400).json({ success: false, error: 'يرجى إدخال اسم العميل بشكل صحيح' });
       return;
     }
 
     if (!customerPhone || typeof customerPhone !== 'string' || customerPhone.trim().length < 10) {
-      res.status(400).json({ error: 'يرجى إدخال رقم هاتف صحيح (11 رقم)' });
+      res.status(400).json({ success: false, error: 'يرجى إدخال رقم هاتف صحيح (11 رقم)' });
       return;
     }
 
     if (!eventName || !eventDate || !deliveryTime || !deliveryGovernorate || !deliveryAddress) {
-      res.status(400).json({ error: 'يرجى استكمال جميع بيانات المناسبة ومكان وموعد التسليم' });
+      res.status(400).json({ success: false, error: 'يرجى استكمال جميع بيانات المناسبة ومكان وموعد التسليم' });
       return;
     }
 
     if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'يجب اختيار وجبة واحدة على الأقل لإتمام الحجز' });
+      res.status(400).json({ success: false, error: 'يجب اختيار وجبة واحدة على الأقل لإتمام الحجز' });
       return;
     }
 
@@ -170,11 +172,18 @@ apiRouter.post('/bookings', async (req, res) => {
     });
 
     // STEP 2: Build formatted WhatsApp message and direct link
-    const { messageText, directUrl: whatsappUrl } = buildBookingWhatsAppMessage(booking);
+    let whatsappUrl = '';
+    let messageText = '';
+    try {
+      const wa = buildBookingWhatsAppMessage(booking);
+      whatsappUrl = wa.directUrl;
+      messageText = wa.messageText;
+    } catch (waErr: any) {
+      console.warn('[WhatsApp Build Warning]:', waErr?.message || waErr);
+    }
     const messengerUrl = 'https://m.me/celebre.catering';
 
     // STEP 3: Safe, non-blocking Meta automated notification attempt
-    // CRITICAL: Any failure in Meta API or network never drops the database booking!
     let metaDispatchResult: {
       attempted: boolean;
       delivered: boolean;
@@ -205,8 +214,11 @@ apiRouter.post('/bookings', async (req, res) => {
       persistenceConfirmed: true,
     });
   } catch (err: any) {
-    console.error('Error creating booking:', err);
-    res.status(400).json({ error: err.message || 'حدث خطأ أثناء حفظ الحجز' });
+    console.error('[Booking Create Error]:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message || 'حدث خطأ في الخادم أثناء حفظ بيانات الحجز. يرجى المحاولة مرة أخرى.' 
+    });
   }
 });
 

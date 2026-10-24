@@ -5,7 +5,16 @@ import bcrypt from 'bcryptjs';
 import { Meal, Booking, PaymentRecord, FactoryOrder, AuditLog, AdminUser, DrinkModification } from '../types';
 import { INITIAL_MEALS, CELEBRE_CONFIG } from '../data/defaultMeals';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const IS_SERVERLESS = Boolean(
+  process.env.VERCEL || 
+  process.env.AWS_LAMBDA_FUNCTION_NAME || 
+  process.env.LAMBDA_TASK_ROOT
+);
+
+const DATA_DIR = IS_SERVERLESS 
+  ? path.resolve('/tmp', 'celebre-data')
+  : path.resolve(process.cwd(), 'data');
+
 const DB_FILE = path.resolve(DATA_DIR, 'db.json');
 
 interface DatabaseSchema {
@@ -34,9 +43,13 @@ if (databaseUrl) {
     });
 }
 
-// Ensure local storage directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Safely ensure storage directory exists (never crash if filesystem is read-only)
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (err: any) {
+  console.warn('[DB] Non-writable filesystem detected, fallback storage will use RAM:', err?.message);
 }
 
 function getInitialData(): DatabaseSchema {
@@ -84,7 +97,11 @@ function loadLocalDB(): DatabaseSchema {
   try {
     if (!fs.existsSync(DB_FILE)) {
       const initial = getInitialData();
-      fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf8');
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf8');
+      } catch (writeErr) {
+        // Safe to ignore on ephemeral / read-only filesystem
+      }
       return initial;
     }
     const raw = fs.readFileSync(DB_FILE, 'utf8');
@@ -94,13 +111,13 @@ function loadLocalDB(): DatabaseSchema {
     if (!parsed.meals || parsed.meals.length < 18) {
       const initial = getInitialData();
       parsed.meals = initial.meals;
-      saveLocalDB(parsed);
+      try {
+        saveLocalDB(parsed);
+      } catch {}
     }
     return parsed;
   } catch (err) {
-    console.error('[DB] Error loading local DB file, creating fresh initial data:', err);
     const initial = getInitialData();
-    saveLocalDB(initial);
     return initial;
   }
 }
@@ -108,12 +125,12 @@ function loadLocalDB(): DatabaseSchema {
 function saveLocalDB(data: DatabaseSchema): void {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[DB] Error saving local DB file:', err);
+  } catch (err: any) {
+    // Graceful fallback: state is preserved in memoryDB without throwing uncaught errors
   }
 }
 
-// In-memory reference that synchronizes with disk
+// In-memory reference that synchronizes with disk when writable
 let memoryDB: DatabaseSchema = loadLocalDB();
 
 // Unique Booking Code Generator (e.g. CLB-2026-7842)

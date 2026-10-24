@@ -65,10 +65,21 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
     setBooking(null);
 
     try {
-      const res = await fetch(`/api/bookings/track?code=${encodeURIComponent(c.trim())}&verify=${encodeURIComponent(v.trim())}`);
-      const data = await res.json();
+      const res = await fetch(`/api/bookings/track?code=${encodeURIComponent(c.trim())}&verify=${encodeURIComponent(v.trim())}`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {}
+      }
       if (!res.ok) {
-        throw new Error(data.error || 'لم يتم العثور على حجز يطابق هذه البيانات');
+        throw new Error(data?.error || `تعذر الاستعلام عن الحجز (كود ${res.status})`);
+      }
+      if (!data?.booking) {
+        throw new Error('لم يتم العثور على بيانات لهذا الحجز');
       }
       setBooking(data.booking);
     } catch (err: any) {

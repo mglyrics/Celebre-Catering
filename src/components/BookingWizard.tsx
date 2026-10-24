@@ -199,6 +199,9 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
   };
 
   const handleSubmitOrder = async () => {
+    // Prevent duplicate clicks if already processing
+    if (isSubmitting) return;
+
     setIsSubmitting(true);
     setErrorMsg(null);
 
@@ -223,17 +226,48 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
 
       const res = await fetch('/api/bookings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      // Safe response reading: NEVER call res.json() blindly on non-JSON responses
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          console.error('[Booking Submit] JSON parse error:', jsonErr);
+        }
+      } else {
+        // Read text safely to avoid throwing SyntaxError: Unexpected token
+        const rawText = await res.text().catch(() => '');
+        console.warn('[Booking Submit] Non-JSON response received:', res.status, rawText.slice(0, 120));
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || 'فشل في حفظ الحجز');
+        const serverError = data?.error || data?.message;
+        if (serverError && typeof serverError === 'string') {
+          throw new Error(serverError);
+        }
+        if (res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(`تعذر حفظ الحجز مؤقتاً في خادم المنصة (كود ${res.status}). يرجى المحاولة مجدداً أو التواصل مباشرة عبر واتساب.`);
+        }
+        throw new Error(`تعذر إتمام الحجز (كود الخطأ: ${res.status}). يرجى مراجعة البيانات والمحاولة مجدداً.`);
+      }
+
+      // Strict validation: Verify booking was truly saved with an authoritative booking code
+      if (!data || !data.success || !data.booking || !data.booking.bookingCode) {
+        throw new Error('لم يتم استلام تأكيد حفظ الحجز بشكل سليم من الخادم. لم يتم إنشاء الحجز بعد.');
       }
 
       onOrderSuccess(data.booking, data.whatsappUrl);
     } catch (err: any) {
+      console.error('[Booking Submit Final Error]:', err);
       setErrorMsg(err.message || 'حدث خطأ غير متوقع أثناء إرسال الحجز');
     } finally {
       setIsSubmitting(false);
