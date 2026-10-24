@@ -383,6 +383,23 @@ apiRouter.post('/admin/bookings/:id/factory-order', requireAuth, requireRole(['s
 apiRouter.get('/admin/factory-orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const orders = await db.getFactoryOrders();
+
+    if (req.user?.role === 'factory') {
+      // Redact financial costs for kitchen staff - only show checklist and quantities
+      const sanitized = orders.map(fo => {
+        const { factoryCostTotal, ...safeOrder } = fo;
+        return {
+          ...safeOrder,
+          items: safeOrder.items.map(it => {
+            const { unitFactoryPrice, totalFactoryPrice, ...kitchenItem } = it;
+            return kitchenItem;
+          }),
+        };
+      });
+      res.json(sanitized);
+      return;
+    }
+
     res.json(orders);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

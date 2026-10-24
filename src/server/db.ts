@@ -457,14 +457,34 @@ export const db = {
     const current = memoryDB.bookings[idx];
     const prevStatus = current.status;
 
-    // Recalculate remainingAmount if totalDistributorPrice or paidAmount changed
-    const totalDistributor = updates.totalDistributorPrice !== undefined ? updates.totalDistributorPrice : current.totalDistributorPrice;
+    // Recalculate totals if items changed
+    let totalMealsCount = updates.totalMealsCount !== undefined ? updates.totalMealsCount : current.totalMealsCount;
+    let totalDistributor = updates.totalDistributorPrice !== undefined ? updates.totalDistributorPrice : current.totalDistributorPrice;
+    let totalFactory = updates.totalFactoryPrice !== undefined ? updates.totalFactoryPrice : (current.totalFactoryPrice || 0);
+
+    if (updates.items && Array.isArray(updates.items)) {
+      totalMealsCount = 0;
+      totalDistributor = 0;
+      totalFactory = 0;
+      updates.items.forEach(it => {
+        totalMealsCount += it.quantity;
+        totalDistributor += it.totalDistributorPrice;
+        totalFactory += (it.totalFactoryPrice || 0);
+      });
+    }
+
+    const profitMargin = totalDistributor - totalFactory;
     const paidAmount = updates.paidAmount !== undefined ? updates.paidAmount : current.paidAmount;
     const remainingAmount = Math.max(0, totalDistributor - paidAmount);
 
     const updated: Booking = {
       ...current,
       ...updates,
+      totalMealsCount,
+      totalDistributorPrice: totalDistributor,
+      totalFactoryPrice: totalFactory,
+      profitMargin,
+      paidAmount,
       remainingAmount,
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
@@ -561,15 +581,18 @@ export const db = {
       eventDate: booking.eventDate,
       deliveryTime: booking.deliveryTime,
       deliveryLocation: `${booking.deliveryGovernorate} - ${booking.deliveryAddress}`,
-      // Strictly include only kitchen/factory required information:
-      // quantities, meal codes, ingredients list, drink option, packaging notes.
-      // NO distributor prices or profit margins!
+      factoryCostTotal: booking.totalFactoryPrice || 0,
+      // Strictly separate kitchen information:
+      // quantities, meal codes, ingredients list, drink option, packaging notes, factory unit cost
+      // STRICTLY NO distributor prices or profit margins!
       items: booking.items.map(item => ({
         mealCode: item.mealCode,
         mealName: item.mealName,
         quantity: item.quantity,
         drinkOption: item.drinkOption,
         ingredients: item.ingredients,
+        unitFactoryPrice: item.unitFactoryPrice,
+        totalFactoryPrice: item.totalFactoryPrice,
         specialInstructions: item.drinkOption === 'no_juice' 
           ? 'بدون عصير' 
           : item.drinkOption === 'pepsi' 

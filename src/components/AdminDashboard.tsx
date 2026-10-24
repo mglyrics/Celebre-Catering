@@ -76,6 +76,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Edit Meal State
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
 
+  // Edit Booking State
+  const [isEditBookingModalOpen, setIsEditBookingModalOpen] = useState(false);
+  const [editEventDate, setEditEventDate] = useState('');
+  const [editDeliveryTime, setEditDeliveryTime] = useState('');
+  const [editDeliveryAddress, setEditDeliveryAddress] = useState('');
+  const [editStatus, setEditStatus] = useState<BookingStatus>('INITIAL');
+  const [editNotes, setEditNotes] = useState('');
+
   // Selected Factory Order for printing
   const [printingFactoryOrder, setPrintingFactoryOrder] = useState<FactoryOrder | null>(null);
 
@@ -232,6 +240,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     } catch (err) {
       console.error('Error issuing factory order:', err);
+    }
+  };
+
+  const handleOpenEditBooking = (b: Booking) => {
+    setEditEventDate(b.eventDate);
+    setEditDeliveryTime(b.deliveryTime);
+    setEditDeliveryAddress(b.deliveryAddress);
+    setEditStatus(b.status);
+    setEditNotes(b.notes || '');
+    setIsEditBookingModalOpen(true);
+  };
+
+  const handleSaveBookingEdits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking) return;
+
+    try {
+      const res = await fetch(`/api/admin/bookings/${selectedBooking.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          eventDate: editEventDate,
+          deliveryTime: editDeliveryTime,
+          deliveryAddress: editDeliveryAddress,
+          status: editStatus,
+          notes: editNotes,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedBooking(data.booking);
+        setIsEditBookingModalOpen(false);
+        loadAllData();
+      }
+    } catch (err) {
+      console.error('Error saving booking edits:', err);
     }
   };
 
@@ -987,8 +1035,15 @@ APP_URL="https://celebre-eg.com"`}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
+                  onClick={() => handleOpenEditBooking(selectedBooking)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
+                  <span>تعديل بيانات الحجز والموعد</span>
+                </button>
+                <button
                   onClick={() => handleIssueFactoryOrder(selectedBooking.id)}
-                  className="px-4 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl"
+                  className="px-4 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-xs"
                 >
                   إصدار أمر تشغيل للمصنع
                 </button>
@@ -1054,6 +1109,99 @@ APP_URL="https://celebre-eg.com"`}
                     className="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg"
                   >
                     حفظ الدفعة
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Booking Modal */}
+        {isEditBookingModalOpen && selectedBooking && (
+          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-2xl p-5 shadow-2xl space-y-4 text-xs">
+              <div className="flex items-center justify-between border-b pb-2">
+                <h4 className="font-bold text-sm text-[#7A0C2E]">تعديل بيانات الحجز {selectedBooking.bookingCode}</h4>
+                <button onClick={() => setIsEditBookingModalOpen(false)} className="p-1 hover:bg-slate-100 rounded">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveBookingEdits} className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">تاريخ التسليم</label>
+                    <input
+                      type="date"
+                      required
+                      value={editEventDate}
+                      onChange={(e) => setEditEventDate(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">وقت التسليم</label>
+                    <input
+                      type="time"
+                      required
+                      value={editDeliveryTime}
+                      onChange={(e) => setEditDeliveryTime(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">حالة الحجز</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as BookingStatus)}
+                    className="w-full px-3 py-2 border rounded-lg font-bold bg-[#FAF8F5]"
+                  >
+                    <option value="INITIAL">INITIAL (حجز مبدئي)</option>
+                    <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (قيد المراجعة)</option>
+                    <option value="CONFIRMED">CONFIRMED (مؤكد)</option>
+                    <option value="IN_PRODUCTION">IN_PRODUCTION (جاري التجهيز بالمصنع)</option>
+                    <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY (جاهز للتسليم)</option>
+                    <option value="DELIVERED">DELIVERED (تم التسليم)</option>
+                    <option value="CANCELLED">CANCELLED (ملغي)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">مكان وعنوان التسليم</label>
+                  <input
+                    type="text"
+                    required
+                    value={editDeliveryAddress}
+                    onChange={(e) => setEditDeliveryAddress(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">ملاحظات التجهيز والتغليف</label>
+                  <textarea
+                    rows={2}
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditBookingModalOpen(false)}
+                    className="px-3 py-1.5 text-slate-600"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-lg transition-colors"
+                  >
+                    حفظ التعديلات والتحديث
                   </button>
                 </div>
               </form>

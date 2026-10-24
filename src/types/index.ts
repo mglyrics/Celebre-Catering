@@ -61,12 +61,15 @@ export interface FactoryOrder {
   eventDate: string;
   deliveryTime: string;
   deliveryLocation: string;
+  factoryCostTotal?: number; // total at factory prices
   items: {
     mealCode: string;
     mealName: string;
     quantity: number;
     drinkOption: DrinkModification;
     ingredients: string;
+    unitFactoryPrice?: number;
+    totalFactoryPrice?: number;
     specialInstructions?: string;
   }[];
   packagingNotes: string;

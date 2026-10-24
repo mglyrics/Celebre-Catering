@@ -255,6 +255,64 @@
   ],
   "bookings": [
     {
+      "id": "bk-1792836649872-937",
+      "bookingCode": "CLB-2026-9024",
+      "securityCode": "7699",
+      "customerName": "المستشار شريف فوزي",
+      "customerPhone": "01223344556",
+      "customerWhatsapp": "01223344556",
+      "preferredContact": "whatsapp",
+      "eventName": "حفل خطوبة فندقي",
+      "eventDate": "2026-11-28",
+      "deliveryTime": "18:15",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "فندق الفورسيزونز - قاعة النيل الكبرى (تعديل رقم 1)",
+      "notes": "تحديث أخير: تسليم الوجبات في تمام 6:15 مساءً",
+      "items": [
+        {
+          "mealId": "meal-3",
+          "mealCode": "Sale-03",
+          "mealName": "ميكس بوكس 03 - جاتوه وجبنة رومي وتركي مدخن",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط جبنة رومي + سندوتش فرنساوي وسط تركي مدخن + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 40,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 60,
+          "unitDistributorPrice": 60,
+          "totalDistributorPrice": 2400,
+          "baseFactoryPrice": 41,
+          "unitFactoryPrice": 41,
+          "totalFactoryPrice": 1640
+        },
+        {
+          "mealId": "meal-17",
+          "mealCode": "Sale-17",
+          "mealName": "سندوتش بوكس 17 - كفتة مشوية وفراخ بانية وسط",
+          "ingredients": "سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيره + منديل معطر",
+          "category": "sandwich_box",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 55,
+          "unitDistributorPrice": 65,
+          "totalDistributorPrice": 1950,
+          "baseFactoryPrice": 43,
+          "unitFactoryPrice": 53,
+          "totalFactoryPrice": 1590
+        }
+      ],
+      "totalMealsCount": 70,
+      "totalDistributorPrice": 4350,
+      "totalFactoryPrice": 3230,
+      "profitMargin": 1120,
+      "paidAmount": 2000,
+      "remainingAmount": 2350,
+      "status": "READY_FOR_DELIVERY",
+      "statusNotes": "تم الانتهاء من تجهيز وتغليف كافة الوجبات في المصنع، الوجبات جاهزة للشحن والتسليم.",
+      "version": 4,
+      "createdAt": "2026-10-24T10:10:49.872Z",
+      "updatedAt": "2026-10-24T10:10:50.244Z"
+    },
+    {
       "id": "bk-1792754396125-793",
       "bookingCode": "CLB-2026-2579",
       "securityCode": "2406",
@@ -386,9 +444,159 @@
       "updatedAt": "2026-10-23T10:01:22.951Z"
     }
   ],
-  "payments": [],
-  "factoryOrders": [],
+  "payments": [
+    {
+      "id": "pay-1792836650055",
+      "bookingId": "bk-1792836649872-937",
+      "amount": 2000,
+      "method": "vodafone_cash",
+      "date": "2026-10-24",
+      "notes": "عربون تأكيد حفل الخطوبة",
+      "receiptNumber": "VF-987654321",
+      "createdAt": "2026-10-24T10:10:50.055Z"
+    }
+  ],
+  "factoryOrders": [
+    {
+      "id": "fo-1792836650076",
+      "orderNumber": "FO-2026-102",
+      "bookingId": "bk-1792836649872-937",
+      "bookingCode": "CLB-2026-9024",
+      "version": 2,
+      "status": "COMPLETED",
+      "eventDate": "2026-11-28",
+      "deliveryTime": "18:15",
+      "deliveryLocation": "الجيزة - فندق الفورسيزونز - قاعة النيل الكبرى (تعديل رقم 1)",
+      "factoryCostTotal": 3230,
+      "items": [
+        {
+          "mealCode": "Sale-03",
+          "mealName": "ميكس بوكس 03 - جاتوه وجبنة رومي وتركي مدخن",
+          "quantity": 40,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط جبنة رومي + سندوتش فرنساوي وسط تركي مدخن + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 41,
+          "totalFactoryPrice": 1640,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-17",
+          "mealName": "سندوتش بوكس 17 - كفتة مشوية وفراخ بانية وسط",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "ingredients": "سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيره + منديل معطر",
+          "unitFactoryPrice": 53,
+          "totalFactoryPrice": 1590,
+          "specialInstructions": "استبدال العصير بكانز بيبسي"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تحديث أخير: تسليم الوجبات في تمام 6:15 مساءً",
+      "createdAt": "2026-10-24T10:10:50.076Z",
+      "updatedAt": "2026-10-24T10:10:50.244Z"
+    },
+    {
+      "id": "fo-1792836650066",
+      "orderNumber": "FO-2026-101",
+      "bookingId": "bk-1792836649872-937",
+      "bookingCode": "CLB-2026-9024",
+      "version": 1,
+      "status": "PENDING",
+      "eventDate": "2026-11-28",
+      "deliveryTime": "18:00",
+      "deliveryLocation": "الجيزة - فندق الفورسيزونز - قاعة النيل الكبرى (تعديل رقم 1)",
+      "factoryCostTotal": 3230,
+      "items": [
+        {
+          "mealCode": "Sale-03",
+          "mealName": "ميكس بوكس 03 - جاتوه وجبنة رومي وتركي مدخن",
+          "quantity": 40,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط جبنة رومي + سندوتش فرنساوي وسط تركي مدخن + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 41,
+          "totalFactoryPrice": 1640,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-17",
+          "mealName": "سندوتش بوكس 17 - كفتة مشوية وفراخ بانية وسط",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "ingredients": "سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيره + منديل معطر",
+          "unitFactoryPrice": 53,
+          "totalFactoryPrice": 1590,
+          "specialInstructions": "استبدال العصير بكانز بيبسي"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تم تعديل الموعد إلى 6:00 مساءً بناءً على طلب العميل",
+      "createdAt": "2026-10-24T10:10:50.066Z",
+      "updatedAt": "2026-10-24T10:10:50.066Z"
+    }
+  ],
   "auditLogs": [
+    {
+      "id": "log-1792836650244-78",
+      "timestamp": "2026-10-24T10:10:50.244Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "تحديث حالة أمر المصنع",
+      "performedBy": "مسؤول تشغيل المصنع",
+      "details": "تم تحديث حالة أمر المصنع FO-2026-102 إلى COMPLETED"
+    },
+    {
+      "id": "log-1792836650240-546",
+      "timestamp": "2026-10-24T10:10:50.240Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "تحديث حالة أمر المصنع",
+      "performedBy": "مسؤول تشغيل المصنع",
+      "details": "تم تحديث حالة أمر المصنع FO-2026-102 إلى PREPARING"
+    },
+    {
+      "id": "log-1792836650076-595",
+      "timestamp": "2026-10-24T10:10:50.076Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر المصنع رقم FO-2026-102 (الإصدار 2) بإجمالي 70 وجبة بدون إظهار هوامش الربح."
+    },
+    {
+      "id": "log-1792836650072-57",
+      "timestamp": "2026-10-24T10:10:50.072Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "تعديل الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تحديث الحجز (الإصدار v4)"
+    },
+    {
+      "id": "log-1792836650066-510",
+      "timestamp": "2026-10-24T10:10:50.066Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر المصنع رقم FO-2026-101 (الإصدار 1) بإجمالي 70 وجبة بدون إظهار هوامش الربح."
+    },
+    {
+      "id": "log-1792836650055-476",
+      "timestamp": "2026-10-24T10:10:50.055Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تحصيل مبلغ 2000 ج (vodafone_cash). المتبقي: 2350 ج."
+    },
+    {
+      "id": "log-1792836650050-987",
+      "timestamp": "2026-10-24T10:10:50.050Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "تعديل الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تحديث الحجز (الإصدار v2)"
+    },
+    {
+      "id": "log-1792836649872-333",
+      "timestamp": "2026-10-24T10:10:49.872Z",
+      "bookingId": "bk-1792836649872-937",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-9024 بإجمالي 70 وجبة وقيمة 4350 جنيه."
+    },
     {
       "id": "log-1792754396125-656",
       "timestamp": "2026-10-23T11:19:56.125Z",
@@ -424,5 +632,5 @@
       "passwordHash": "$2b$10$mx0KIHYhV3ljbIHpIeqBae3wTes3rtkXMv00Rmwd7/y13c8Xui/Ue"
     }
   ],
-  "factoryOrderCounter": 100
+  "factoryOrderCounter": 102
 }
