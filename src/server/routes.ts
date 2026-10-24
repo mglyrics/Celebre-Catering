@@ -3,6 +3,15 @@ import jwt from 'jsonwebtoken';
 import { db } from './db';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import { AdminUser } from '../types';
+import {
+  handleMetaWebhookVerification,
+  handleMetaWebhookEvent,
+  getMetaDiagnosticStatus,
+  buildBookingWhatsAppMessage,
+  notifyBookingViaMeta,
+  META_CONFIG,
+} from './metaService';
+import { generateMenuPdfHtml } from './menuPdfGenerator';
 
 export const apiRouter = Router();
 
@@ -50,13 +59,49 @@ apiRouter.get('/config', (req, res) => {
   res.json({
     ...CELEBRE_CONFIG,
     currentYear: 2026,
-    version: '2.0.0',
+    version: '2.1.0',
     meta: {
       supabaseReady: true,
       databaseType: db.isPostgres() ? 'PostgreSQL' : 'Resilient File/Memory DB',
       customDomain: 'https://celebre-eg.com',
+      metaWebhookEndpoint: '/api/webhooks/meta',
+      messengerLink: 'https://m.me/celebre.catering',
+      whatsappNumber: CELEBRE_CONFIG.whatsappNumber,
     }
   });
+});
+
+// Official Central Menu PDF / HTML Generator Endpoint
+apiRouter.get('/menu/pdf', async (req, res) => {
+  try {
+    const { download, print } = req.query;
+    const meals = await db.getMeals(false);
+    const html = generateMenuPdfHtml(meals, print === 'true');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (download === 'true') {
+      res.setHeader('Content-Disposition', 'attachment; filename="Celebre-Catering-Official-Menu.html"');
+    }
+    res.send(html);
+  } catch (err: any) {
+    console.error('Error rendering menu PDF HTML:', err);
+    res.status(500).json({ error: 'تعذر توليد قائمة المنيو الرسمية' });
+  }
+});
+
+// Meta Webhook Verification (GET /api/webhooks/meta) - Standard Meta Graph API handshake
+apiRouter.get('/webhooks/meta', (req, res) => {
+  handleMetaWebhookVerification(req, res);
+});
+
+// Meta Webhook Event Ingestion (POST /api/webhooks/meta) - Messenger & WhatsApp Cloud
+apiRouter.post('/webhooks/meta', (req, res) => {
+  handleMetaWebhookEvent(req, res);
+});
+
+// Transparent Meta Integration Diagnostic Status
+apiRouter.get('/meta/status', (req, res) => {
+  res.json(getMetaDiagnosticStatus());
 });
 
 // Public meals list (Strictly excludes factoryPrice)
@@ -109,6 +154,7 @@ apiRouter.post('/bookings', async (req, res) => {
       return;
     }
 
+    // STEP 1: Persist safely in PostgreSQL / database FIRST (100% authoritative)
     const booking = await db.createBooking({
       customerName,
       customerPhone,
@@ -123,34 +169,40 @@ apiRouter.post('/bookings', async (req, res) => {
       items,
     });
 
-    // Generate WhatsApp direct text with full order summary
-    const itemsSummary = booking.items.map(it => 
-      `• ${it.mealCode} (${it.quantity} وجبة) - ${it.drinkOption === 'no_juice' ? 'بدون عصير (-5ج)' : it.drinkOption === 'pepsi' ? 'بيبسي (+10ج)' : 'عصير بخيرة'}: ${it.totalDistributorPrice} ج`
-    ).join('%0A');
+    // STEP 2: Build formatted WhatsApp message and direct link
+    const { messageText, directUrl: whatsappUrl } = buildBookingWhatsAppMessage(booking);
+    const messengerUrl = 'https://m.me/celebre.catering';
 
-    const whatsappMessage = `*طلب حجز جديد - Celebre Catering*%0A%0A` +
-      `*رقم الحجز:* ${booking.bookingCode}%0A` +
-      `*اسم العميل:* ${booking.customerName}%0A` +
-      `*رقم الموبايل:* ${booking.customerPhone}%0A` +
-      `*المناسبة:* ${booking.eventName}%0A` +
-      `*تاريخ التسليم:* ${booking.eventDate}%0A` +
-      `*وقت التسليم:* ${booking.deliveryTime}%0A` +
-      `*العنوان:* ${booking.deliveryGovernorate} - ${booking.deliveryAddress}%0A%0A` +
-      `*تفاصيل الوجبات:*%0A${itemsSummary}%0A%0A` +
-      `*إجمالي عدد الوجبات:* ${booking.totalMealsCount}%0A` +
-      `*إجمالي المبلغ:* ${booking.totalDistributorPrice} جنيه مصري%0A` +
-      `*ملاحظات:* ${booking.notes || 'لا يوجد'}%0A%0A` +
-      `متابعة الحجز على الرابط: https://celebre-eg.com/track?code=${booking.bookingCode}`;
+    // STEP 3: Safe, non-blocking Meta automated notification attempt
+    // CRITICAL: Any failure in Meta API or network never drops the database booking!
+    let metaDispatchResult: {
+      attempted: boolean;
+      delivered: boolean;
+      channel: 'DIRECT_LINK_FALLBACK' | 'META_GRAPH_API';
+      note: string;
+    } = {
+      attempted: false,
+      delivered: false,
+      channel: 'DIRECT_LINK_FALLBACK',
+      note: 'الحجز مسجل في قاعدة البيانات ومحمي من أي انقطاع خارجي.',
+    };
 
-    const whatsappUrl = `https://wa.me/${CELEBRE_CONFIG.whatsappNumber}?text=${whatsappMessage}`;
+    try {
+      metaDispatchResult = await notifyBookingViaMeta(booking);
+    } catch (metaErr: any) {
+      console.warn('[Meta Dispatch Non-blocking Warning]:', metaErr?.message || metaErr);
+    }
 
-    // Return sanitized booking info
+    // Return sanitized booking info (stripping factory price and profit margin)
     const { totalFactoryPrice, profitMargin, ...clientBooking } = booking;
     res.status(201).json({
       success: true,
       booking: clientBooking,
       whatsappUrl,
-      whatsappMessage: decodeURIComponent(whatsappMessage),
+      whatsappMessage: messageText,
+      messengerUrl,
+      metaStatus: metaDispatchResult,
+      persistenceConfirmed: true,
     });
   } catch (err: any) {
     console.error('Error creating booking:', err);

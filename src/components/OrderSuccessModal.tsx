@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
 import { Booking } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
-import { CheckCircle2, MessageCircle, Copy, Check, ExternalLink, Search, Phone, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  MessageCircle,
+  Copy,
+  Check,
+  ExternalLink,
+  Search,
+  Phone,
+  ShieldCheck,
+  Send,
+} from 'lucide-react';
 
 interface OrderSuccessModalProps {
   booking: Booking | null;
@@ -20,16 +30,30 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
 
   if (!booking) return null;
 
+  const messengerUrl = 'https://m.me/celebre.catering';
+
   const handleCopySummary = () => {
-    const text = `طلب حجز سيليبري كاترينج\nرقم الحجز: ${booking.bookingCode}\nرمز التحقق: ${booking.securityCode}\nالعميل: ${booking.customerName}\nالموبايل: ${booking.customerPhone}\nالمناسبة: ${booking.eventName}\nالموعد: ${booking.eventDate} (${booking.deliveryTime})\nالعنوان: ${booking.deliveryGovernorate} - ${booking.deliveryAddress}\nإجمالي الوجبات: ${booking.totalMealsCount}\nالمبلغ: ${booking.totalDistributorPrice} جنيه\nرابط المتابعة: https://celebre-eg.com/track?code=${booking.bookingCode}`;
+    const text =
+      `طلب حجز سيليبري كاترينج\n` +
+      `رقم الحجز: ${booking.bookingCode}\n` +
+      `رمز التحقق السري: ${booking.securityCode}\n` +
+      `العميل: ${booking.customerName}\n` +
+      `الموبايل: ${booking.customerPhone}\n` +
+      `المناسبة: ${booking.eventName}\n` +
+      `الموعد: ${booking.eventDate} (${booking.deliveryTime})\n` +
+      `العنوان: ${booking.deliveryGovernorate} - ${booking.deliveryAddress}\n` +
+      `إجمالي الوجبات: ${booking.totalMealsCount} بوكس\n` +
+      `المبلغ التقديري: ${booking.totalDistributorPrice} جنيه مصري\n` +
+      `رابط المتابعة: https://celebre-eg.com/track?code=${booking.bookingCode}&verify=${booking.securityCode}\n` +
+      `الخط الساخن: 01284484868`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border-2 border-[#C59B27]/40 overflow-hidden text-center p-6 sm:p-8 space-y-6">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border-2 border-[#C59B27]/40 overflow-hidden text-center p-6 sm:p-8 space-y-5">
         
         {/* Success Icon */}
         <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
@@ -42,36 +66,45 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
             تم تسجيل حجزك المبدئي بنجاح!
           </h3>
           <p className="text-xs sm:text-sm text-slate-600">
-            تم حفظ الطلب في قاعدة بيانات Celebre Catering برقم فريد
+            تم حفظ الطلب مركزياً في قاعدة بيانات Celebre Catering
           </p>
         </div>
 
-        {/* Credentials Box */}
+        {/* Booking Credentials Box */}
         <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-[#E8DCC0] space-y-3">
           <div className="flex items-center justify-between border-b border-[#E8DCC0] pb-2">
-            <span className="text-xs font-bold text-slate-500">رقم الحجز المعتمد:</span>
+            <span className="text-xs font-bold text-slate-600">رقم الحجز المعتمد:</span>
             <span className="font-mono font-black text-lg text-[#7A0C2E] bg-white px-3 py-1 rounded-lg border border-[#EBDDC3]">
               {booking.bookingCode}
             </span>
           </div>
 
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500">رمز التحقق السري للمتابعة:</span>
+            <span className="text-xs font-bold text-slate-600">رمز التحقق السري للمتابعة:</span>
             <span className="font-mono font-black text-base text-[#C59B27] bg-white px-3 py-0.5 rounded-lg border border-[#EBDDC3]">
               {booking.securityCode}
             </span>
           </div>
         </div>
 
+        {/* Persistence Assurance Banner */}
+        <div className="flex items-start gap-2.5 p-3 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-xl text-right text-xs">
+          <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+          <div>
+            <strong className="font-bold block">الحجز مسجل ومحمي 100%:</strong>
+            <span>طلبك محفوظ بالكامل في قاعدة البيانات برقم الحجز الموضح أعلاه، ولن يُفقد حتى لو لم تتم المراسلة أو انقطع الاتصال.</span>
+          </div>
+        </div>
+
         {/* Order Details Brief */}
-        <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200 text-right space-y-1">
+        <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200 text-right space-y-1.5">
           <div className="flex justify-between">
             <span>عدد الوجبات:</span>
-            <strong className="text-slate-800">{booking.totalMealsCount} بوكس</strong>
+            <strong className="text-slate-800 font-bold">{booking.totalMealsCount} بوكس</strong>
           </div>
           <div className="flex justify-between">
-            <span>إجمالي القيمة التقديرية:</span>
-            <strong className="text-[#7A0C2E] font-bold">{booking.totalDistributorPrice} جنيه مصري</strong>
+            <span>إجمالي القيمة التقديرية (سعر الموزع):</span>
+            <strong className="text-[#7A0C2E] font-black">{booking.totalDistributorPrice} جنيه مصري</strong>
           </div>
           <div className="flex justify-between">
             <span>موعد ومكان التسليم:</span>
@@ -79,8 +112,9 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           </div>
         </div>
 
-        {/* Primary Action: Send to WhatsApp */}
-        <div className="space-y-2.5">
+        {/* Primary Messaging Actions */}
+        <div className="space-y-2.5 pt-1">
+          {/* WhatsApp Direct Link with Pre-filled Message */}
           <a
             href={whatsappUrl}
             target="_blank"
@@ -92,6 +126,19 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
             <ExternalLink className="w-4 h-4 text-emerald-200" />
           </a>
 
+          {/* Meta Messenger Direct Link */}
+          <a
+            href={messengerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-[#0084FF] hover:bg-[#0070D6] text-white font-black text-sm rounded-xl shadow-md hover:shadow-lg transition-all"
+          >
+            <Send className="w-4 h-4 text-blue-100" />
+            <span>مراسلة الإدارة عبر Messenger (Facebook)</span>
+            <ExternalLink className="w-4 h-4 text-blue-200" />
+          </a>
+
+          {/* Secondary Actions: Copy Summary & Order Tracking */}
           <div className="flex gap-2">
             <button
               onClick={handleCopySummary}

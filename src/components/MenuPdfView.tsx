@@ -1,7 +1,18 @@
 import React, { useRef } from 'react';
 import { Meal } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
-import { Printer, Download, X, Phone, Globe, CheckCircle2, Share2 } from 'lucide-react';
+import {
+  Printer,
+  Download,
+  X,
+  Phone,
+  Globe,
+  CheckCircle2,
+  Share2,
+  ExternalLink,
+  MessageCircle,
+  Send,
+} from 'lucide-react';
 
 interface MenuPdfViewProps {
   isOpen: boolean;
@@ -14,38 +25,58 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
 
   if (!isOpen) return null;
 
-  const mixBoxMeals = meals.filter(m => m.category === 'mix_box' && m.isActive);
-  const sandwichBoxMeals = meals.filter(m => m.category === 'sandwich_box' && m.isActive);
+  const mixBoxMeals = meals
+    .filter((m) => m.category === 'mix_box' && m.isActive)
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+  const sandwichBoxMeals = meals
+    .filter((m) => m.category === 'sandwich_box' && m.isActive)
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
   const handlePrint = () => {
-    window.print();
+    // Open printable endpoint directly in new window or use current window print
+    window.open('/api/menu/pdf?print=true', '_blank');
+  };
+
+  const handleDownload = () => {
+    window.location.href = '/api/menu/pdf?download=true';
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border-2 border-[#C59B27]/40 flex flex-col max-h-[95vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border-2 border-[#C59B27]/40 flex flex-col max-h-[96vh] overflow-hidden">
         
         {/* Floating Top Controls (No-Print) */}
-        <div className="no-print bg-[#7A0C2E] text-white px-6 py-3.5 flex items-center justify-between border-b border-[#C59B27]/30">
+        <div className="no-print bg-gradient-to-r from-[#7A0C2E] to-[#94133A] text-white px-5 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-[#C59B27]/30">
           <div className="flex items-center gap-2">
-            <h3 className="font-extrabold text-base sm:text-lg">
+            <h3 className="font-extrabold text-sm sm:text-base">
               المنيو الرسمي المعتمد لـ Celebre Catering (PDF)
             </h3>
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl transition-all border border-white/20"
+              title="تحميل نسخة قابلة للفتح دون إنترنت"
+            >
+              <Download className="w-3.5 h-3.5 text-[#DFC066]" />
+              <span>تحميل المنيو</span>
+            </button>
+
+            <button
               onClick={handlePrint}
-              className="flex items-center gap-2 px-4 py-2 bg-[#C59B27] hover:bg-[#AA820A] text-slate-900 font-black text-xs sm:text-sm rounded-xl transition-all shadow-md"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#C59B27] hover:bg-[#AA820A] text-slate-900 font-black text-xs sm:text-sm rounded-xl transition-all shadow-md"
             >
               <Printer className="w-4 h-4 text-slate-900" />
-              <span>طباعة / حفظ كـ PDF</span>
+              <span>طباعة / حفظ PDF</span>
             </button>
+
             <button
               onClick={onClose}
               className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -55,7 +86,7 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
           
           {/* Header with Official Logo & Contact */}
           <div className="border-b-2 border-[#C59B27] pb-6 mb-8 text-center relative">
-            <div className="w-28 h-28 mx-auto mb-3">
+            <div className="w-24 h-24 sm:w-28 sm:h-28 mx-auto mb-3">
               <img
                 src={CELEBRE_CONFIG.logoUrl}
                 alt="Celebre Official Logo"
@@ -92,7 +123,7 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
               <h2 className="font-extrabold text-lg sm:text-xl">
                 أولاً: ميكس بوكس (Mix Box)
               </h2>
-              <span className="text-xs bg-[#C59B27] text-white px-2.5 py-0.5 rounded-md font-bold">
+              <span className="text-xs bg-[#C59B27] text-slate-900 px-2.5 py-0.5 rounded-md font-black">
                 12 وجبة معتمدة
               </span>
             </div>
@@ -112,7 +143,7 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
                         {meal.distributorPrice} جنيه
                       </span>
                     </div>
-                    <p className="text-xs text-slate-800 leading-relaxed font-medium">
+                    <p className="text-xs text-slate-800 leading-relaxed font-semibold">
                       {meal.ingredients}
                     </p>
                   </div>
@@ -130,7 +161,7 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
               <h2 className="font-extrabold text-lg sm:text-xl">
                 ثانياً: سندوتش بوكس (Sandwich Box)
               </h2>
-              <span className="text-xs bg-[#C59B27] text-white px-2.5 py-0.5 rounded-md font-bold">
+              <span className="text-xs bg-[#C59B27] text-slate-900 px-2.5 py-0.5 rounded-md font-black">
                 6 وجبات معتمدة
               </span>
             </div>
@@ -150,7 +181,7 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
                         {meal.distributorPrice} جنيه
                       </span>
                     </div>
-                    <p className="text-xs text-slate-800 leading-relaxed font-medium">
+                    <p className="text-xs text-slate-800 leading-relaxed font-semibold">
                       {meal.ingredients}
                     </p>
                   </div>
@@ -188,9 +219,19 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
             <p className="font-bold text-slate-800">
               تابعونا على منصات التواصل الاجتماعي:
             </p>
-            <p className="font-mono text-slate-700" dir="ltr">
-              Facebook: {CELEBRE_CONFIG.socials.facebook} | TikTok: {CELEBRE_CONFIG.socials.tiktok} | Instagram: {CELEBRE_CONFIG.socials.instagram}
-            </p>
+            <div className="flex flex-wrap items-center justify-center gap-4 py-1 text-xs font-mono font-bold text-[#7A0C2E]" dir="ltr">
+              <a href={CELEBRE_CONFIG.socials.facebook} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                Facebook
+              </a>
+              <span>•</span>
+              <a href={CELEBRE_CONFIG.socials.tiktok} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                TikTok
+              </a>
+              <span>•</span>
+              <a href={CELEBRE_CONFIG.socials.instagram} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                Instagram
+              </a>
+            </div>
             <p className="text-[11px] text-slate-400 pt-1">
               Celebre Catering Packages © 2026 - جميع الحقوق محفوظة
             </p>
