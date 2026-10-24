@@ -27,7 +27,8 @@ interface DatabaseSchema {
   factoryOrderCounter: number;
 }
 
-import { prisma } from '../lib/prisma';
+import { prisma, getPrismaClient } from '../lib/prisma';
+import { logServerError, sanitizeError, SanitizedErrorInfo } from './safeLogger';
 
 let isPrismaConnected = false;
 const databaseUrl = process.env.DATABASE_URL;
@@ -39,6 +40,7 @@ if (databaseUrl) {
       console.log('[DB] Connected to PostgreSQL via Prisma ORM.');
     })
     .catch((err) => {
+      logServerError(err, 'DB.Prisma.$connect');
       console.warn('[DB] Prisma connection deferred or fallback active:', err.message);
     });
 }
@@ -295,7 +297,14 @@ export const db = {
       };
     });
 
-    const bookingCode = generateBookingCode();
+    // Ensure unique booking code without collision
+    let bookingCode = generateBookingCode();
+    let collisionAttempts = 0;
+    while (memoryDB.bookings.some(b => b.bookingCode === bookingCode) && collisionAttempts < 10) {
+      bookingCode = generateBookingCode();
+      collisionAttempts++;
+    }
+
     const securityCode = generateSecurityCode();
     const now = new Date().toISOString();
 
@@ -331,52 +340,60 @@ export const db = {
 
     if (databaseUrl) {
       try {
-        await prisma.booking.create({
-          data: {
-            id: newBooking.id,
-            bookingCode: newBooking.bookingCode,
-            securityCode: newBooking.securityCode,
-            customerName: newBooking.customerName,
-            customerPhone: newBooking.customerPhone,
-            customerWhatsapp: newBooking.customerWhatsapp,
-            preferredContact: newBooking.preferredContact,
-            eventName: newBooking.eventName,
-            eventDate: newBooking.eventDate,
-            deliveryTime: newBooking.deliveryTime,
-            deliveryGovernorate: newBooking.deliveryGovernorate,
-            deliveryAddress: newBooking.deliveryAddress,
-            notes: newBooking.notes,
-            totalMealsCount: newBooking.totalMealsCount,
-            totalDistributorPrice: newBooking.totalDistributorPrice,
-            totalFactoryPrice: newBooking.totalFactoryPrice,
-            profitMargin: newBooking.profitMargin,
-            paidAmount: 0,
-            remainingAmount: newBooking.remainingAmount,
-            status: 'INITIAL',
-            statusNotes: newBooking.statusNotes,
-            version: 1,
-            items: {
-              create: validatedItems.map(it => ({
-                mealId: it.mealId,
-                mealCode: it.mealCode,
-                mealName: it.mealName,
-                category: it.category,
-                ingredients: it.ingredients,
-                quantity: it.quantity,
-                drinkOption: it.drinkOption,
-                baseDistributorPrice: it.baseDistributorPrice,
-                unitDistributorPrice: it.unitDistributorPrice,
-                totalDistributorPrice: it.totalDistributorPrice,
-                baseFactoryPrice: it.baseFactoryPrice,
-                unitFactoryPrice: it.unitFactoryPrice,
-                totalFactoryPrice: it.totalFactoryPrice,
-              })),
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.create({
+            data: {
+              id: newBooking.id,
+              bookingCode: newBooking.bookingCode,
+              securityCode: newBooking.securityCode,
+              customerName: newBooking.customerName,
+              customerPhone: newBooking.customerPhone,
+              customerWhatsapp: newBooking.customerWhatsapp,
+              preferredContact: newBooking.preferredContact,
+              eventName: newBooking.eventName,
+              eventDate: newBooking.eventDate,
+              deliveryTime: newBooking.deliveryTime,
+              deliveryGovernorate: newBooking.deliveryGovernorate,
+              deliveryAddress: newBooking.deliveryAddress,
+              notes: newBooking.notes,
+              totalMealsCount: newBooking.totalMealsCount,
+              totalDistributorPrice: newBooking.totalDistributorPrice,
+              totalFactoryPrice: newBooking.totalFactoryPrice,
+              profitMargin: newBooking.profitMargin,
+              paidAmount: 0,
+              remainingAmount: newBooking.remainingAmount,
+              status: 'INITIAL',
+              statusNotes: newBooking.statusNotes,
+              version: 1,
+              items: {
+                create: validatedItems.map(it => ({
+                  mealId: it.mealId,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: it.drinkOption,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice,
+                  unitFactoryPrice: it.unitFactoryPrice,
+                  totalFactoryPrice: it.totalFactoryPrice,
+                })),
+              },
             },
-          },
-        });
+          });
+        }
       } catch (err: any) {
-        // Fallback to local storage if PostgreSQL connection or table is pending
-        console.warn('[DB] Prisma booking create skipped/fallback:', err.message);
+        const sanitized = logServerError(err, 'db.createBooking.prisma');
+        if (process.env.STRICT_DB === 'true') {
+          // In strict DB testing mode, throw sanitized error for verification
+          const strictError: any = new Error(sanitized.errorMessage);
+          strictError.code = sanitized.errorCode;
+          throw strictError;
+        }
       }
     }
 

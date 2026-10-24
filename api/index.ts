@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { apiRouter } from '../src/server/routes';
+import { logServerError } from '../src/server/safeLogger';
 
 const app = express();
 
@@ -37,16 +38,31 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// Global Error Handler guaranteeing standardized JSON responses
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('[API Server Error]:', err);
+// Global Error Handler guaranteeing standardized JSON responses with safe logging
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  const sanitized = logServerError(err, `Express.GlobalError.${req.method}.${req.url}`);
   const status = typeof err.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+  
   res.status(status).json({
     success: false,
-    error: err.message || 'حدث خطأ في الخادم أثناء معالجة الطلب',
+    error: sanitized.errorMessage || 'حدث خطأ في الخادم أثناء معالجة الطلب',
+    code: sanitized.errorCode,
   });
 });
 
-export default function handler(req: any, res: any) {
+// Process-level unhandled exception guards for Vercel Serverless environment
+process.on('unhandledRejection', (reason: any) => {
+  logServerError(reason, 'Process.UnhandledRejection');
+});
+
+process.on('uncaughtException', (err: any) => {
+  logServerError(err, 'Process.UncaughtException');
+});
+
+// Export Express app directly for Vercel Serverless Node runtime
+export default app;
+
+// Compatibility function export for environments calling handler(req, res)
+export function handler(req: any, res: any) {
   return app(req, res);
 }

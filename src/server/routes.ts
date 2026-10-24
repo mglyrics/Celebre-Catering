@@ -12,6 +12,7 @@ import {
   META_CONFIG,
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
+import { logServerError } from './safeLogger';
 
 export const apiRouter = Router();
 
@@ -214,10 +215,11 @@ apiRouter.post('/bookings', async (req, res) => {
       persistenceConfirmed: true,
     });
   } catch (err: any) {
-    console.error('[Booking Create Error]:', err);
+    const sanitized = logServerError(err, 'POST /api/bookings');
     res.status(500).json({ 
       success: false, 
-      error: err.message || 'حدث خطأ في الخادم أثناء حفظ بيانات الحجز. يرجى المحاولة مرة أخرى.' 
+      error: sanitized.errorMessage || 'حدث خطأ في الخادم أثناء حفظ بيانات الحجز. يرجى المحاولة مرة أخرى.',
+      code: sanitized.errorCode,
     });
   }
 });
