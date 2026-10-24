@@ -33,16 +33,18 @@ import { logServerError, sanitizeError, SanitizedErrorInfo } from './safeLogger'
 let isPrismaConnected = false;
 const databaseUrl = process.env.DATABASE_URL;
 
-if (databaseUrl) {
-  prisma.$connect()
-    .then(() => {
-      isPrismaConnected = true;
-      console.log('[DB] Connected to PostgreSQL via Prisma ORM.');
-    })
-    .catch((err) => {
-      logServerError(err, 'DB.Prisma.$connect');
-      console.warn('[DB] Prisma connection deferred or fallback active:', err.message);
-    });
+// Lazy connection check helper (never blocks module evaluation during cold-start)
+export async function ensurePrismaConnected(): Promise<boolean> {
+  if (isPrismaConnected || !databaseUrl) return isPrismaConnected;
+  try {
+    await prisma.$connect();
+    isPrismaConnected = true;
+    console.log('[DB] Connected to PostgreSQL via Prisma ORM.');
+  } catch (err: any) {
+    logServerError(err, 'DB.Prisma.EnsureConnect');
+    console.warn('[DB] Prisma connection deferred or fallback active:', err?.message || err);
+  }
+  return isPrismaConnected;
 }
 
 // Safely ensure storage directory exists (never crash if filesystem is read-only)

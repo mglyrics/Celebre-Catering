@@ -255,6 +255,49 @@
   ],
   "bookings": [
     {
+      "id": "bk-1792865153401-182",
+      "bookingCode": "CLB-2026-3919",
+      "securityCode": "3901",
+      "customerName": "أحمد محمود التست",
+      "customerPhone": "01012345678",
+      "customerWhatsapp": "01012345678",
+      "preferredContact": "whatsapp",
+      "eventName": "حفل تخرج",
+      "eventDate": "2026-11-20",
+      "deliveryTime": "18:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - القاهرة الجديدة",
+      "notes": "",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 25,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1250,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 875
+        }
+      ],
+      "totalMealsCount": 25,
+      "totalDistributorPrice": 1250,
+      "totalFactoryPrice": 875,
+      "profitMargin": 375,
+      "paidAmount": 0,
+      "remainingAmount": 1250,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "version": 1,
+      "createdAt": "2026-10-24T18:05:53.401Z",
+      "updatedAt": "2026-10-24T18:05:53.401Z"
+    },
+    {
       "id": "bk-1792850738515-931",
       "bookingCode": "CLB-2026-5226",
       "securityCode": "8799",
@@ -2164,6 +2207,14 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1792865153401-569",
+      "timestamp": "2026-10-24T18:05:53.401Z",
+      "bookingId": "bk-1792865153401-182",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-3919 بإجمالي 25 وجبة وقيمة 1250 جنيه."
+    },
     {
       "id": "log-1792850738515-253",
       "timestamp": "2026-10-24T14:05:38.515Z",
