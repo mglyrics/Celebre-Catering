@@ -76,13 +76,35 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
           data = await res.json();
         } catch {}
       }
-      if (!res.ok) {
-        throw new Error(data?.error || `تعذر الاستعلام عن الحجز (كود ${res.status})`);
+      if (res.ok && data?.booking) {
+        setBooking(data.booking);
+        try {
+          const saved = JSON.parse(localStorage.getItem('celebre_client_bookings') || '[]');
+          const updated = [data.booking, ...saved.filter((b: any) => b.bookingCode !== data.booking.bookingCode)];
+          localStorage.setItem('celebre_client_bookings', JSON.stringify(updated.slice(0, 30)));
+        } catch {}
+        return;
       }
-      if (!data?.booking) {
-        throw new Error('لم يتم العثور على بيانات لهذا الحجز');
-      }
-      setBooking(data.booking);
+
+      // Fallback: check client device's localStorage in case serverless ephemeral container reset
+      try {
+        const saved: any[] = JSON.parse(localStorage.getItem('celebre_client_bookings') || '[]');
+        const cleanQ = c.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const localMatch = saved.find((b: any) => {
+          const cleanB = (b.bookingCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+          return cleanB === cleanQ || (cleanQ.length >= 4 && cleanB.endsWith(cleanQ));
+        });
+
+        if (localMatch) {
+          const cleanV = (v || '').trim();
+          if (!cleanV || localMatch.securityCode === cleanV || (localMatch.customerPhone && localMatch.customerPhone.includes(cleanV))) {
+            setBooking(localMatch);
+            return;
+          }
+        }
+      } catch {}
+
+      throw new Error(data?.error || 'لم يتم العثور على حجز يطابق هذا الرقم، يرجى التأكد من كتابة رقم الحجز أو رمز التحقق بشكل صحيح.');
     } catch (err: any) {
       setErrorMsg(err.message || 'خطأ أثناء الاستعلام');
     } finally {

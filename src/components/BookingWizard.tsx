@@ -265,6 +265,15 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
         throw new Error('لم يتم استلام تأكيد حفظ الحجز بشكل سليم من الخادم. لم يتم إنشاء الحجز بعد.');
       }
 
+      // Persist in client-side storage for instant offline / serverless instance resilience
+      try {
+        const saved = JSON.parse(localStorage.getItem('celebre_client_bookings') || '[]');
+        const updated = [data.booking, ...saved.filter((b: any) => b.bookingCode !== data.booking.bookingCode)];
+        localStorage.setItem('celebre_client_bookings', JSON.stringify(updated.slice(0, 30)));
+      } catch (storageErr) {
+        console.warn('Could not cache booking to localStorage:', storageErr);
+      }
+
       onOrderSuccess(data.booking, data.whatsappUrl);
     } catch (err: any) {
       console.error('[Booking Submit Final Error]:', err);
