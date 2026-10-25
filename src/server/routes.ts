@@ -243,18 +243,18 @@ apiRouter.post('/bookings', async (req, res) => {
   }
 });
 
-// Public tracking endpoint (by booking code and security code or phone)
+// Public tracking endpoint (by booking code and optional security PIN or phone)
 apiRouter.get('/bookings/track', async (req, res) => {
   try {
     const { code, verify } = req.query;
-    if (!code || !verify) {
-      res.status(400).json({ error: 'يرجى تقديم رقم الحجز ورمز التحقق (أو آخر 4 أرقام من الموبايل)' });
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      res.status(400).json({ error: 'يرجى تقديم رقم الحجز' });
       return;
     }
 
-    const booking = await db.trackBooking(String(code), String(verify));
+    const booking = await db.trackBooking(String(code), typeof verify === 'string' ? verify : undefined);
     if (!booking) {
-      res.status(404).json({ error: 'لم يتم العثور على حجز يطابق هذه البيانات. يرجى التأكد من رقم الحجز ورمز التحقق.' });
+      res.status(404).json({ error: 'لم يتم العثور على حجز يطابق هذا الرقم، يرجى التأكد من كتابة رقم الحجز أو رمز التحقق بشكل صحيح.' });
       return;
     }
 

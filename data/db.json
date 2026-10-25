@@ -255,6 +255,64 @@
   ],
   "bookings": [
     {
+      "id": "bk-1792933725992-580",
+      "bookingCode": "CLB-2026-5591",
+      "securityCode": "5298",
+      "customerName": "فاطمة الزهراء الشريف",
+      "customerPhone": "01012345678",
+      "customerWhatsapp": "01012345678",
+      "preferredContact": "whatsapp",
+      "eventName": "حفل افتتاح المقر الإداري",
+      "eventDate": "2026-12-15",
+      "deliveryTime": "13:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الدقي - شارع مصدق",
+      "notes": "وجبات ساخنة وتوصيل في سيارة مجهزة",
+      "items": [
+        {
+          "mealId": "meal-2",
+          "mealCode": "Sale-02",
+          "mealName": "ميكس بوكس 02 - جاتوه وبانية بلدي وسط",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط فراخ بانية بلدي + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 25,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 55,
+          "unitDistributorPrice": 55,
+          "totalDistributorPrice": 1375,
+          "baseFactoryPrice": 37,
+          "unitFactoryPrice": 37,
+          "totalFactoryPrice": 925
+        },
+        {
+          "mealId": "meal-5",
+          "mealCode": "Sale-05",
+          "mealName": "ميكس بوكس 05 - جاتوه وكفتة وبانية فرنساوي وسط",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 15,
+          "drinkOption": "no_juice",
+          "baseDistributorPrice": 80,
+          "unitDistributorPrice": 75,
+          "totalDistributorPrice": 1125,
+          "baseFactoryPrice": 53,
+          "unitFactoryPrice": 48,
+          "totalFactoryPrice": 720
+        }
+      ],
+      "totalMealsCount": 40,
+      "totalDistributorPrice": 2500,
+      "totalFactoryPrice": 1645,
+      "profitMargin": 855,
+      "paidAmount": 0,
+      "remainingAmount": 2500,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "version": 1,
+      "createdAt": "2026-10-25T13:08:45.992Z",
+      "updatedAt": "2026-10-25T13:08:45.992Z"
+    },
+    {
       "id": "bk-1792933099484-842",
       "bookingCode": "CLB-2026-8476",
       "securityCode": "4792",
@@ -2491,6 +2549,14 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1792933725992-171",
+      "timestamp": "2026-10-25T13:08:45.992Z",
+      "bookingId": "bk-1792933725992-580",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-5591 بإجمالي 40 وجبة وقيمة 2500 جنيه."
+    },
     {
       "id": "log-1792933099485-923",
       "timestamp": "2026-10-25T12:58:19.485Z",

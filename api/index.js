@@ -451,6 +451,40 @@ function generateBookingCode() {
 function generateSecurityCode() {
   return Math.floor(1e3 + Math.random() * 9e3).toString();
 }
+function normalizeBookingCode(str) {
+  return (str || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+function normalizePhone(phone) {
+  return (phone || "").replace(/\D/g, "").replace(/^20/, "");
+}
+function isBookingCodeMatch(storedCode, queryCode) {
+  if (!storedCode || !queryCode) return false;
+  const sClean = storedCode.trim().toUpperCase();
+  const qClean = queryCode.trim().toUpperCase();
+  if (sClean === qClean) return true;
+  const sNorm = normalizeBookingCode(storedCode);
+  const qNorm = normalizeBookingCode(queryCode);
+  if (sNorm === qNorm) return true;
+  if (qNorm.length >= 4 && sNorm.endsWith(qNorm)) return true;
+  return false;
+}
+function isVerificationMatch(storedPin, storedPhone, queryVerify) {
+  if (!queryVerify || !queryVerify.trim()) {
+    return true;
+  }
+  const cleanVerify = queryVerify.trim();
+  if (storedPin && storedPin.trim() === cleanVerify) return true;
+  const qDigits = cleanVerify.replace(/\D/g, "");
+  const sPhoneDigits = normalizePhone(storedPhone);
+  const qPhoneDigits = normalizePhone(cleanVerify);
+  if (sPhoneDigits && qPhoneDigits && (sPhoneDigits === qPhoneDigits || sPhoneDigits.endsWith(qPhoneDigits) || qPhoneDigits.endsWith(sPhoneDigits))) {
+    return true;
+  }
+  if (qDigits.length >= 4 && sPhoneDigits.endsWith(qDigits)) {
+    return true;
+  }
+  return false;
+}
 var db = {
   isPostgres() {
     return isPrismaConnected || !!databaseUrl;
@@ -694,13 +728,90 @@ var db = {
     };
   },
   async trackBooking(bookingCode, verificationCode) {
+    if (!bookingCode || typeof bookingCode !== "string" || !bookingCode.trim()) {
+      return null;
+    }
+    const cleanCode = bookingCode.trim();
+    const cleanVerify = (verificationCode || "").trim();
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbBookings = await client.booking.findMany({
+            where: {
+              OR: [
+                { bookingCode: { equals: cleanCode, mode: "insensitive" } },
+                { bookingCode: { contains: cleanCode, mode: "insensitive" } },
+                { id: cleanCode }
+              ]
+            },
+            include: {
+              items: true,
+              payments: true
+            },
+            take: 10
+          });
+          const matched = dbBookings.find((b2) => isBookingCodeMatch(b2.bookingCode, cleanCode));
+          if (matched && isVerificationMatch(matched.securityCode, matched.customerPhone, cleanVerify)) {
+            const hasVerify2 = Boolean(cleanVerify);
+            return {
+              id: matched.id,
+              bookingCode: matched.bookingCode,
+              securityCode: hasVerify2 ? matched.securityCode : "****",
+              customerName: matched.customerName,
+              customerPhone: hasVerify2 ? matched.customerPhone : matched.customerPhone.replace(/(\d{3})\d+(\d{3})/, "$1*****$2"),
+              customerWhatsapp: matched.customerWhatsapp || matched.customerPhone,
+              preferredContact: matched.preferredContact || "whatsapp",
+              eventName: matched.eventName,
+              eventDate: matched.eventDate,
+              deliveryTime: matched.deliveryTime,
+              deliveryGovernorate: matched.deliveryGovernorate,
+              deliveryAddress: matched.deliveryAddress,
+              notes: matched.notes || "",
+              totalMealsCount: matched.totalMealsCount,
+              totalDistributorPrice: matched.totalDistributorPrice,
+              paidAmount: matched.paidAmount,
+              remainingAmount: matched.remainingAmount,
+              status: matched.status || "INITIAL",
+              statusNotes: matched.statusNotes || "",
+              version: matched.version,
+              createdAt: matched.createdAt.toISOString(),
+              updatedAt: matched.updatedAt.toISOString(),
+              items: matched.items.map((it) => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption || "standard",
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice
+              })),
+              payments: matched.payments.map((p) => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method,
+                date: p.date,
+                createdAt: p.createdAt.toISOString()
+              })),
+              factoryOrders: [],
+              auditLogs: []
+            };
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.trackBooking.prisma");
+      }
+    }
     memoryDB = loadLocalDB();
-    const cleanCode = bookingCode.trim().toUpperCase();
-    const cleanVerify = verificationCode.trim();
     const b = memoryDB.bookings.find(
-      (item) => item.bookingCode.toUpperCase() === cleanCode && (item.securityCode === cleanVerify || item.customerPhone.endsWith(cleanVerify) || item.customerPhone === cleanVerify)
+      (item) => isBookingCodeMatch(item.bookingCode, cleanCode) && isVerificationMatch(item.securityCode, item.customerPhone, cleanVerify)
     );
     if (!b) return null;
+    const hasVerify = Boolean(cleanVerify);
     const { totalFactoryPrice, profitMargin, items, ...publicBooking } = b;
     const publicItems = items.map((item) => {
       const { baseFactoryPrice, unitFactoryPrice, totalFactoryPrice: itemFactPrice, ...publicItem } = item;
@@ -708,6 +819,8 @@ var db = {
     });
     return {
       ...publicBooking,
+      securityCode: hasVerify ? b.securityCode : "****",
+      customerPhone: hasVerify ? b.customerPhone : b.customerPhone.replace(/(\d{3})\d+(\d{3})/, "$1*****$2"),
       items: publicItems,
       payments: memoryDB.payments.filter((p) => p.bookingId === b.id).map((p) => ({
         id: p.id,
@@ -718,7 +831,6 @@ var db = {
         createdAt: p.createdAt
       })),
       factoryOrders: [],
-      // hide factory internals from customer
       auditLogs: []
     };
   },
@@ -1689,13 +1801,13 @@ apiRouter.post("/bookings", async (req, res) => {
 apiRouter.get("/bookings/track", async (req, res) => {
   try {
     const { code, verify } = req.query;
-    if (!code || !verify) {
-      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u0642\u062F\u064A\u0645 \u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632 \u0648\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 (\u0623\u0648 \u0622\u062E\u0631 4 \u0623\u0631\u0642\u0627\u0645 \u0645\u0646 \u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644)" });
+    if (!code || typeof code !== "string" || !code.trim()) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u0642\u062F\u064A\u0645 \u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632" });
       return;
     }
-    const booking = await db.trackBooking(String(code), String(verify));
+    const booking = await db.trackBooking(String(code), typeof verify === "string" ? verify : void 0);
     if (!booking) {
-      res.status(404).json({ error: "\u0644\u0645 \u064A\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u062D\u062C\u0632 \u064A\u0637\u0627\u0628\u0642 \u0647\u0630\u0647 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A. \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632 \u0648\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642." });
+      res.status(404).json({ error: "\u0644\u0645 \u064A\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u062D\u062C\u0632 \u064A\u0637\u0627\u0628\u0642 \u0647\u0630\u0627 \u0627\u0644\u0631\u0642\u0645\u060C \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0643\u062A\u0627\u0628\u0629 \u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632 \u0623\u0648 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0628\u0634\u0643\u0644 \u0635\u062D\u064A\u062D." });
       return;
     }
     res.json({ success: true, booking });

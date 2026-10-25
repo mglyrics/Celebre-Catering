@@ -47,16 +47,16 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   React.useEffect(() => {
-    if (initialCode && initialVerify) {
+    if (initialCode) {
       setCode(initialCode);
-      setVerify(initialVerify);
+      if (initialVerify) setVerify(initialVerify);
       handleSearch(initialCode, initialVerify);
     }
   }, [initialCode, initialVerify]);
 
   const handleSearch = async (c = code, v = verify) => {
-    if (!c.trim() || !v.trim()) {
-      setErrorMsg('يرجى إدخال رقم الحجز ورمز التحقق أو رقم الموبايل');
+    if (!c.trim()) {
+      setErrorMsg('يرجى إدخال رقم الحجز للبحث');
       return;
     }
 
@@ -65,7 +65,8 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
     setBooking(null);
 
     try {
-      const res = await fetch(`/api/bookings/track?code=${encodeURIComponent(c.trim())}&verify=${encodeURIComponent(v.trim())}`, {
+      const verifyParam = v && v.trim() ? `&verify=${encodeURIComponent(v.trim())}` : '';
+      const res = await fetch(`/api/bookings/track?code=${encodeURIComponent(c.trim())}${verifyParam}`, {
         headers: { 'Accept': 'application/json' }
       });
       let data: any = null;
@@ -169,11 +170,11 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
 
             <div className="sm:col-span-4">
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                رمز التحقق أو رقم الموبايل
+                رمز التحقق أو الموبايل (اختياري)
               </label>
               <input
                 type="text"
-                placeholder="رمز الـ PIN أو الموبايل"
+                placeholder="رمز الـ PIN أو الموبايل (اختياري)"
                 value={verify}
                 onChange={(e) => setVerify(e.target.value)}
                 className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-[#E8DCC0] rounded-xl font-mono focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"

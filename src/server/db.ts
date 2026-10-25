@@ -157,6 +157,51 @@ export function generateSecurityCode(): string {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
+export function normalizeBookingCode(str: string): string {
+  return (str || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+export function normalizePhone(phone: string): string {
+  return (phone || '').replace(/\D/g, '').replace(/^20/, '');
+}
+
+export function isBookingCodeMatch(storedCode: string, queryCode: string): boolean {
+  if (!storedCode || !queryCode) return false;
+  const sClean = storedCode.trim().toUpperCase();
+  const qClean = queryCode.trim().toUpperCase();
+  if (sClean === qClean) return true;
+
+  const sNorm = normalizeBookingCode(storedCode);
+  const qNorm = normalizeBookingCode(queryCode);
+  if (sNorm === qNorm) return true;
+
+  // Match if user entered the last digits or suffix (e.g. 8934 matching CLB-2026-8934)
+  if (qNorm.length >= 4 && sNorm.endsWith(qNorm)) return true;
+
+  return false;
+}
+
+export function isVerificationMatch(storedPin: string, storedPhone: string, queryVerify?: string): boolean {
+  if (!queryVerify || !queryVerify.trim()) {
+    // Optional verification: if not provided, allow public tracking access
+    return true;
+  }
+  const cleanVerify = queryVerify.trim();
+  if (storedPin && storedPin.trim() === cleanVerify) return true;
+
+  const qDigits = cleanVerify.replace(/\D/g, '');
+  const sPhoneDigits = normalizePhone(storedPhone);
+  const qPhoneDigits = normalizePhone(cleanVerify);
+
+  if (sPhoneDigits && qPhoneDigits && (sPhoneDigits === qPhoneDigits || sPhoneDigits.endsWith(qPhoneDigits) || qPhoneDigits.endsWith(sPhoneDigits))) {
+    return true;
+  }
+  if (qDigits.length >= 4 && sPhoneDigits.endsWith(qDigits)) {
+    return true;
+  }
+  return false;
+}
+
 // Database API
 export const db = {
   isPostgres(): boolean {
@@ -460,19 +505,100 @@ export const db = {
     };
   },
 
-  async trackBooking(bookingCode: string, verificationCode: string): Promise<Booking | null> {
-    memoryDB = loadLocalDB();
-    const cleanCode = bookingCode.trim().toUpperCase();
-    const cleanVerify = verificationCode.trim();
+  async trackBooking(bookingCode: string, verificationCode?: string): Promise<Booking | null> {
+    if (!bookingCode || typeof bookingCode !== 'string' || !bookingCode.trim()) {
+      return null;
+    }
 
+    const cleanCode = bookingCode.trim();
+    const cleanVerify = (verificationCode || '').trim();
+
+    // 1. Check PostgreSQL via Prisma ORM if databaseUrl is present
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbBookings = await client.booking.findMany({
+            where: {
+              OR: [
+                { bookingCode: { equals: cleanCode, mode: 'insensitive' } },
+                { bookingCode: { contains: cleanCode, mode: 'insensitive' } },
+                { id: cleanCode },
+              ],
+            },
+            include: {
+              items: true,
+              payments: true,
+            },
+            take: 10,
+          });
+
+          const matched = dbBookings.find(b => isBookingCodeMatch(b.bookingCode, cleanCode));
+          if (matched && isVerificationMatch(matched.securityCode, matched.customerPhone, cleanVerify)) {
+            const hasVerify = Boolean(cleanVerify);
+            return {
+              id: matched.id,
+              bookingCode: matched.bookingCode,
+              securityCode: hasVerify ? matched.securityCode : '****',
+              customerName: matched.customerName,
+              customerPhone: hasVerify ? matched.customerPhone : matched.customerPhone.replace(/(\d{3})\d+(\d{3})/, '$1*****$2'),
+              customerWhatsapp: matched.customerWhatsapp || matched.customerPhone,
+              preferredContact: (matched.preferredContact || 'whatsapp') as any,
+              eventName: matched.eventName,
+              eventDate: matched.eventDate,
+              deliveryTime: matched.deliveryTime,
+              deliveryGovernorate: matched.deliveryGovernorate,
+              deliveryAddress: matched.deliveryAddress,
+              notes: matched.notes || '',
+              totalMealsCount: matched.totalMealsCount,
+              totalDistributorPrice: matched.totalDistributorPrice,
+              paidAmount: matched.paidAmount,
+              remainingAmount: matched.remainingAmount,
+              status: (matched.status || 'INITIAL') as any,
+              statusNotes: matched.statusNotes || '',
+              version: matched.version,
+              createdAt: matched.createdAt.toISOString(),
+              updatedAt: matched.updatedAt.toISOString(),
+              items: matched.items.map(it => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category as any,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: (it.drinkOption || 'standard') as any,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+              })),
+              payments: matched.payments.map(p => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method as any,
+                date: p.date,
+                createdAt: p.createdAt.toISOString(),
+              })),
+              factoryOrders: [],
+              auditLogs: [],
+            };
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.trackBooking.prisma');
+      }
+    }
+
+    // 2. Check local database (memoryDB loaded from data/db.json)
+    memoryDB = loadLocalDB();
     const b = memoryDB.bookings.find(item => 
-      item.bookingCode.toUpperCase() === cleanCode && 
-      (item.securityCode === cleanVerify || item.customerPhone.endsWith(cleanVerify) || item.customerPhone === cleanVerify)
+      isBookingCodeMatch(item.bookingCode, cleanCode) &&
+      isVerificationMatch(item.securityCode, item.customerPhone, cleanVerify)
     );
 
     if (!b) return null;
 
-    // Sanitize for client: remove secret factory price & margins!
+    const hasVerify = Boolean(cleanVerify);
     const { totalFactoryPrice, profitMargin, items, ...publicBooking } = b;
     const publicItems = items.map(item => {
       const { baseFactoryPrice, unitFactoryPrice, totalFactoryPrice: itemFactPrice, ...publicItem } = item;
@@ -481,6 +607,8 @@ export const db = {
 
     return {
       ...publicBooking,
+      securityCode: hasVerify ? b.securityCode : '****',
+      customerPhone: hasVerify ? b.customerPhone : b.customerPhone.replace(/(\d{3})\d+(\d{3})/, '$1*****$2'),
       items: publicItems as any,
       payments: memoryDB.payments.filter(p => p.bookingId === b.id).map(p => ({
         id: p.id,
@@ -490,7 +618,7 @@ export const db = {
         date: p.date,
         createdAt: p.createdAt,
       })),
-      factoryOrders: [], // hide factory internals from customer
+      factoryOrders: [],
       auditLogs: [],
     } as Booking;
   },
