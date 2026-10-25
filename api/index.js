@@ -1,4 +1,4 @@
-// api/index.ts
+// src/server/api.ts
 import express from "express";
 import cors from "cors";
 
@@ -403,8 +403,18 @@ function getInitialData() {
 }
 function loadLocalDB() {
   try {
+    const seedFile = path.resolve(process.cwd(), "data", "db.json");
     if (!fs.existsSync(DB_FILE)) {
-      const initial = getInitialData();
+      let initial;
+      if (fs.existsSync(seedFile)) {
+        try {
+          initial = JSON.parse(fs.readFileSync(seedFile, "utf8"));
+        } catch {
+          initial = getInitialData();
+        }
+      } else {
+        initial = getInitialData();
+      }
       try {
         fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), "utf8");
       } catch (writeErr) {
@@ -1906,7 +1916,7 @@ apiRouter.get("/admin/audit-logs", requireAuth, requireRole(["super_admin", "adm
   }
 });
 
-// api/index.ts
+// src/server/api.ts
 var app = express();
 app.use(cors());
 app.use(express.json());
@@ -1945,11 +1955,11 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err) => {
   logServerError(err, "Process.UncaughtException");
 });
-var index_default = app;
+var api_default = app;
 function handler(req, res) {
   return app(req, res);
 }
 export {
-  index_default as default,
+  api_default as default,
   handler
 };

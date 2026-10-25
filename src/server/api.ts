@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import { apiRouter } from '../src/server/routes';
-import { logServerError } from '../src/server/safeLogger';
+import { apiRouter } from './routes';
+import { logServerError } from './safeLogger';
 
 const app = express();
 

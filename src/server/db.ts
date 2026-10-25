@@ -99,8 +99,18 @@ function getInitialData(): DatabaseSchema {
 
 function loadLocalDB(): DatabaseSchema {
   try {
+    const seedFile = path.resolve(process.cwd(), 'data', 'db.json');
     if (!fs.existsSync(DB_FILE)) {
-      const initial = getInitialData();
+      let initial: DatabaseSchema;
+      if (fs.existsSync(seedFile)) {
+        try {
+          initial = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
+        } catch {
+          initial = getInitialData();
+        }
+      } else {
+        initial = getInitialData();
+      }
       try {
         fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf8');
       } catch (writeErr) {
