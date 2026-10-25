@@ -1,9 +1,12 @@
 {
   "version": 2,
-  "buildCommand": "prisma generate && vite build",
+  "buildCommand": "prisma generate && npm run build:api && vite build",
   "outputDirectory": "dist",
   "framework": "vite",
   "functions": {
+    "api/index.js": {
+      "includeFiles": "node_modules/.prisma/client/**"
+    },
     "api/**/*.ts": {
       "includeFiles": "node_modules/.prisma/client/**"
     },

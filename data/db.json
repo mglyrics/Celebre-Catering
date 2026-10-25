@@ -255,6 +255,90 @@
   ],
   "bookings": [
     {
+      "id": "bk-1792920847265-474",
+      "bookingCode": "CLB-2026-8700",
+      "securityCode": "3173",
+      "customerName": "فحص نهائي بعد حل مشكلة الموديول",
+      "customerPhone": "01099887766",
+      "customerWhatsapp": "01099887766",
+      "preferredContact": "whatsapp",
+      "eventName": "حفل تكريم سنوي",
+      "eventDate": "2026-12-01",
+      "deliveryTime": "19:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الشيخ زايد - بيفرلي هيلز",
+      "notes": "",
+      "items": [
+        {
+          "mealId": "meal-2",
+          "mealCode": "Sale-02",
+          "mealName": "ميكس بوكس 02 - جاتوه وبانية بلدي وسط",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط فراخ بانية بلدي + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 30,
+          "baseDistributorPrice": 55,
+          "unitDistributorPrice": 55,
+          "totalDistributorPrice": 1650,
+          "baseFactoryPrice": 37,
+          "unitFactoryPrice": 37,
+          "totalFactoryPrice": 1110
+        }
+      ],
+      "totalMealsCount": 30,
+      "totalDistributorPrice": 1650,
+      "totalFactoryPrice": 1110,
+      "profitMargin": 540,
+      "paidAmount": 0,
+      "remainingAmount": 1650,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "version": 1,
+      "createdAt": "2026-10-25T09:34:07.265Z",
+      "updatedAt": "2026-10-25T09:34:07.265Z"
+    },
+    {
+      "id": "bk-1792920801522-369",
+      "bookingCode": "CLB-2026-2593",
+      "securityCode": "7301",
+      "customerName": "فحص استيراد الموديول",
+      "customerPhone": "01234567890",
+      "customerWhatsapp": "01234567890",
+      "preferredContact": "whatsapp",
+      "eventName": "اختبار الاستيراد",
+      "eventDate": "2026-11-25",
+      "deliveryTime": "15:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "مدينة نصر",
+      "notes": "",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 20,
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1000,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 700
+        }
+      ],
+      "totalMealsCount": 20,
+      "totalDistributorPrice": 1000,
+      "totalFactoryPrice": 700,
+      "profitMargin": 300,
+      "paidAmount": 0,
+      "remainingAmount": 1000,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "version": 1,
+      "createdAt": "2026-10-25T09:33:21.522Z",
+      "updatedAt": "2026-10-25T09:33:21.522Z"
+    },
+    {
       "id": "bk-1792865153401-182",
       "bookingCode": "CLB-2026-3919",
       "securityCode": "3901",
@@ -2207,6 +2291,22 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1792920847265-598",
+      "timestamp": "2026-10-25T09:34:07.265Z",
+      "bookingId": "bk-1792920847265-474",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8700 بإجمالي 30 وجبة وقيمة 1650 جنيه."
+    },
+    {
+      "id": "log-1792920801522-116",
+      "timestamp": "2026-10-25T09:33:21.522Z",
+      "bookingId": "bk-1792920801522-369",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-2593 بإجمالي 20 وجبة وقيمة 1000 جنيه."
+    },
     {
       "id": "log-1792865153401-569",
       "timestamp": "2026-10-24T18:05:53.401Z",
