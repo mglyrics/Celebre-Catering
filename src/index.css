@@ -33,18 +33,77 @@
 }
 
 @media print {
-  body {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
+  }
+
+  html, body {
     background: white !important;
     color: black !important;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
+
+  /* When printing a booking or modal, hide the entire underlying website */
+  body.printing-booking nav,
+  body.printing-booking main,
+  body.printing-booking footer,
+  body.printing-booking header,
+  body:has(#tracking-modal-root) nav,
+  body:has(#tracking-modal-root) main,
+  body:has(#tracking-modal-root) footer,
+  body:has(#tracking-modal-root) header,
   .no-print {
     display: none !important;
   }
+
+  /* Neutralize fixed positioning and backdrop overlays during print */
+  body.printing-booking .fixed,
+  body:has(#tracking-modal-root) .fixed,
+  .print-neutral-fixed {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
   .print-only {
     display: block !important;
   }
+
+  /* Ensure the booking ticket fits on strictly 1 single page */
+  .printable-booking-ticket {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 4px !important;
+    border: none !important;
+    box-shadow: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .printable-booking-ticket table {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   .page-break {
     page-break-after: always;
     break-after: page;

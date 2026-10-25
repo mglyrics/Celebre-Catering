@@ -1289,8 +1289,8 @@ APP_URL="https://celebre-eg.com"`}
 
         {/* Printable Factory Order Ticket Modal */}
         {printingFactoryOrder && (
-          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
-            <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4 text-slate-900">
+          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3 print:static print:p-0 print:bg-white">
+            <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4 text-slate-900 print:shadow-none print:border-none print:p-0 printable-factory-ticket">
               <div className="text-center border-b pb-3">
                 <span className="font-mono font-black text-xl text-[#7A0C2E]">
                   أمر تشغيل مطبخ ومصنع Celebre Catering
@@ -1323,7 +1323,7 @@ APP_URL="https://celebre-eg.com"`}
                 <strong>التعبئة: </strong> {printingFactoryOrder.packagingNotes}
               </div>
 
-              <div className="flex justify-between items-center pt-2 border-t">
+              <div className="flex justify-between items-center pt-2 border-t no-print">
                 <span className="text-[10px] text-slate-400">Celebre Factory Order • السعر وهامش الربح محجوب تماماً</span>
                 <div className="flex gap-2">
                   <button

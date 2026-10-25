@@ -89,8 +89,31 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
     }
   };
 
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  React.useEffect(() => {
+    const handleAfterPrint = () => {
+      document.body.classList.remove('printing-booking');
+      setIsPrinting(false);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('afterprint', handleAfterPrint);
+      document.body.classList.remove('printing-booking');
+    };
+  }, []);
+
   const handlePrint = () => {
-    window.print();
+    if (isPrinting) return;
+    setIsPrinting(true);
+    document.body.classList.add('printing-booking');
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => {
+        setIsPrinting(false);
+        document.body.classList.remove('printing-booking');
+      }, 600);
+    }, 80);
   };
 
   if (!isOpen) return null;
@@ -98,11 +121,11 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
   const currentStepIdx = booking ? STATUS_STEPS.findIndex(s => s.status === booking.status) : -1;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl border border-[#EBDDC3] overflow-hidden flex flex-col max-h-[90vh]">
+    <div id="tracking-modal-root" className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:static print:p-0 print:bg-white print:overflow-visible">
+      <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl border border-[#EBDDC3] overflow-hidden flex flex-col max-h-[90vh] print:max-w-none print:shadow-none print:border-none print:max-h-none print:rounded-none">
         
-        {/* Header */}
-        <div className="bg-gradient-to-r from-[#7A0C2E] to-[#94133A] text-white px-6 py-4 flex items-center justify-between border-b border-[#C59B27]/30">
+        {/* Header - Hidden on print */}
+        <div className="no-print bg-gradient-to-r from-[#7A0C2E] to-[#94133A] text-white px-6 py-4 flex items-center justify-between border-b border-[#C59B27]/30">
           <div className="flex items-center gap-2.5">
             <Search className="w-5 h-5 text-[#DFC066]" />
             <div>
@@ -122,8 +145,8 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
           </button>
         </div>
 
-        {/* Search Bar Container */}
-        <div className="p-6 bg-[#FAF8F5] border-b border-[#E8DCC0]">
+        {/* Search Bar Container - Hidden on print */}
+        <div className="no-print p-6 bg-[#FAF8F5] border-b border-[#E8DCC0]">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -184,27 +207,46 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
         </div>
 
         {/* Booking Details & Status Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 print:overflow-visible print:p-0 print:space-y-2">
           {booking ? (
-            <div className="space-y-6">
+            <div className="printable-booking-ticket space-y-4 print:space-y-2">
               
-              {/* Order Status Banner */}
-              <div className="bg-white rounded-2xl border-2 border-[#E5D7B7] p-5 shadow-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 mb-4">
+              {/* Official Print Header: only visible during print */}
+              <div className="hidden print:flex items-center justify-between border-b-2 border-[#7A0C2E] pb-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-[#7A0C2E] text-white flex items-center justify-center font-black text-sm">
+                    C
+                  </div>
                   <div>
-                    <span className="text-xs text-slate-400 font-medium block">رقم الحجز:</span>
-                    <span className="font-mono font-black text-xl text-[#7A0C2E]">{booking.bookingCode}</span>
+                    <h2 className="font-black text-sm text-[#7A0C2E] leading-tight">CÉLÈBRE CATERING</h2>
+                    <p className="text-[9px] text-slate-600">سيليبري لإدارة كاترينج المناسبات • إشعار حجز معتمد</p>
+                  </div>
+                </div>
+                <div className="text-left font-mono">
+                  <div className="text-xs font-black text-[#7A0C2E]">{booking.bookingCode}</div>
+                  <div className="text-[9px] text-slate-500">
+                    {new Date(booking.createdAt).toLocaleDateString('ar-EG')}
+                  </div>
+                </div>
+              </div>
+
+              {/* Order Status Banner */}
+              <div className="bg-white rounded-2xl border-2 border-[#E5D7B7] p-5 shadow-xs print:p-2.5 print:rounded-lg print:border print:shadow-none">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 mb-4 print:pb-1.5 print:mb-2">
+                  <div>
+                    <span className="text-xs text-slate-400 font-medium block print:text-[10px]">رقم الحجز:</span>
+                    <span className="font-mono font-black text-xl text-[#7A0C2E] print:text-base">{booking.bookingCode}</span>
                   </div>
                   <div className="text-left">
-                    <span className="text-xs text-slate-400 font-medium block">الحالة الحالية:</span>
-                    <span className="inline-block px-3 py-1 rounded-full text-xs font-black bg-[#C59B27]/15 text-[#7A0C2E] border border-[#C59B27]/30">
+                    <span className="text-xs text-slate-400 font-medium block print:text-[10px]">الحالة الحالية:</span>
+                    <span className="inline-block px-3 py-1 rounded-full text-xs font-black bg-[#C59B27]/15 text-[#7A0C2E] border border-[#C59B27]/30 print:py-0.5 print:px-2 print:text-[10px]">
                       {STATUS_STEPS.find(s => s.status === booking.status)?.label || booking.status}
                     </span>
                   </div>
                 </div>
 
-                {/* Stepper Timeline */}
-                <div className="relative pt-2 pb-1">
+                {/* Stepper Timeline - Hidden during print */}
+                <div className="no-print relative pt-2 pb-1">
                   <div className="hidden sm:grid grid-cols-6 gap-2 text-center">
                     {STATUS_STEPS.map((s, idx) => {
                       const isDone = currentStepIdx >= idx;
@@ -239,10 +281,10 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
               </div>
 
               {/* Event & Customer Info */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="p-4 bg-[#FAF8F5] rounded-xl border border-[#E8DCC0] space-y-2">
-                  <div className="font-bold text-slate-800 border-b border-[#E8DCC0] pb-1.5 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-[#C59B27]" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:grid-cols-2 print:gap-2 text-xs print:text-[11px]">
+                <div className="p-4 bg-[#FAF8F5] rounded-xl border border-[#E8DCC0] space-y-2 print:p-2 print:space-y-1 print:rounded-lg">
+                  <div className="font-bold text-slate-800 border-b border-[#E8DCC0] pb-1.5 flex items-center gap-1.5 print:pb-1">
+                    <User className="w-3.5 h-3.5 text-[#C59B27] print:w-3 print:h-3" />
                     <span>بيانات العميل والمناسبة</span>
                   </div>
                   <div>العميل: <strong className="text-slate-900">{booking.customerName}</strong></div>
@@ -250,9 +292,9 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
                   <div>تاريخ التسليم: <strong className="text-slate-900">{booking.eventDate} ({booking.deliveryTime})</strong></div>
                 </div>
 
-                <div className="p-4 bg-[#FAF8F5] rounded-xl border border-[#E8DCC0] space-y-2">
-                  <div className="font-bold text-slate-800 border-b border-[#E8DCC0] pb-1.5 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-[#C59B27]" />
+                <div className="p-4 bg-[#FAF8F5] rounded-xl border border-[#E8DCC0] space-y-2 print:p-2 print:space-y-1 print:rounded-lg">
+                  <div className="font-bold text-slate-800 border-b border-[#E8DCC0] pb-1.5 flex items-center gap-1.5 print:pb-1">
+                    <MapPin className="w-3.5 h-3.5 text-[#C59B27] print:w-3 print:h-3" />
                     <span>مكان التسليم والتواصل</span>
                   </div>
                   <div>المحافظة: <strong className="text-slate-900">{booking.deliveryGovernorate}</strong></div>
@@ -262,37 +304,37 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
               </div>
 
               {/* Items Table */}
-              <div className="border border-slate-200 rounded-2xl overflow-hidden text-xs">
+              <div className="border border-slate-200 rounded-2xl overflow-hidden text-xs print:rounded-lg print:text-[11px]">
                 <table className="w-full text-right">
                   <thead className="bg-[#FAF8F5] text-slate-700 font-bold border-b border-slate-200">
                     <tr>
-                      <th className="p-3">كود الوجبة</th>
-                      <th className="p-3">المكونات والتعبئة</th>
-                      <th className="p-3">المشروب</th>
-                      <th className="p-3">الكمية</th>
-                      <th className="p-3">الإجمالي</th>
+                      <th className="p-3 print:py-1.5 print:px-2">كود الوجبة</th>
+                      <th className="p-3 print:py-1.5 print:px-2">المكونات والتعبئة</th>
+                      <th className="p-3 print:py-1.5 print:px-2">المشروب</th>
+                      <th className="p-3 print:py-1.5 print:px-2">الكمية</th>
+                      <th className="p-3 print:py-1.5 print:px-2">الإجمالي</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {booking.items.map((it, idx) => (
                       <tr key={idx} className="hover:bg-slate-50">
-                        <td className="p-3 font-mono font-bold text-[#7A0C2E]">
+                        <td className="p-3 print:py-1.5 print:px-2 font-mono font-bold text-[#7A0C2E]">
                           {it.mealCode}
                         </td>
-                        <td className="p-3 text-slate-600 max-w-xs">
+                        <td className="p-3 print:py-1.5 print:px-2 text-slate-600 max-w-xs">
                           {it.ingredients}
                         </td>
-                        <td className="p-3">
+                        <td className="p-3 print:py-1.5 print:px-2">
                           {it.drinkOption === 'no_juice' 
                             ? 'بدون عصير (-5ج)' 
                             : it.drinkOption === 'pepsi' 
                             ? 'بيبسي (+10ج)' 
                             : 'عصير بخيرة'}
                         </td>
-                        <td className="p-3 font-bold text-slate-900">
+                        <td className="p-3 print:py-1.5 print:px-2 font-bold text-slate-900">
                           {it.quantity} بوكس
                         </td>
-                        <td className="p-3 font-bold text-[#7A0C2E]">
+                        <td className="p-3 print:py-1.5 print:px-2 font-bold text-[#7A0C2E]">
                           {it.totalDistributorPrice} ج
                         </td>
                       </tr>
@@ -300,22 +342,22 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
                   </tbody>
                   <tfoot className="bg-[#FAF8F5] border-t-2 border-[#E8DCC0] font-bold">
                     <tr>
-                      <td colSpan={3} className="p-3 text-slate-800">
+                      <td colSpan={3} className="p-3 print:py-1.5 print:px-2 text-slate-800">
                         إجمالي عدد الوجبات: {booking.totalMealsCount} وجبة
                       </td>
-                      <td colSpan={2} className="p-3 text-left text-sm text-[#7A0C2E] font-black">
+                      <td colSpan={2} className="p-3 print:py-1.5 print:px-2 text-left text-sm print:text-xs text-[#7A0C2E] font-black">
                         المجموع: {booking.totalDistributorPrice} جنيه
                       </td>
                     </tr>
                     {booking.paidAmount > 0 && (
                       <>
                         <tr className="text-emerald-700">
-                          <td colSpan={3} className="px-3 py-1">المبلغ المدفوع (عربون):</td>
-                          <td colSpan={2} className="px-3 py-1 text-left font-bold">{booking.paidAmount} جنيه</td>
+                          <td colSpan={3} className="px-3 py-1 print:py-0.5 print:px-2">المبلغ المدفوع (عربون):</td>
+                          <td colSpan={2} className="px-3 py-1 print:py-0.5 print:px-2 text-left font-bold">{booking.paidAmount} جنيه</td>
                         </tr>
                         <tr className="text-amber-800">
-                          <td colSpan={3} className="px-3 py-1 pb-3">المتبقي للتسليم:</td>
-                          <td colSpan={2} className="px-3 py-1 pb-3 text-left font-bold">{booking.remainingAmount} جنيه</td>
+                          <td colSpan={3} className="px-3 py-1 pb-3 print:py-0.5 print:px-2">المتبقي للتسليم:</td>
+                          <td colSpan={2} className="px-3 py-1 pb-3 print:py-0.5 print:px-2 text-left font-bold">{booking.remainingAmount} جنيه</td>
                         </tr>
                       </>
                     )}
@@ -323,14 +365,21 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({
                 </table>
               </div>
 
-              {/* Print Button */}
-              <div className="flex justify-end gap-3 pt-2">
+              {/* Official Print Footer: only visible during print */}
+              <div className="hidden print:flex items-center justify-between border-t border-slate-300 pt-2 mt-2 text-[9px] text-slate-600">
+                <div className="font-bold text-[#7A0C2E]">«كل مناسبة.. أحلى مع سيليبري» • الخط الساخن: 01284484868</div>
+                <div>المتابعة المباشرة: celebre-eg.com/track?code={booking.bookingCode}&verify={booking.securityCode}</div>
+              </div>
+
+              {/* Print Button - Hidden during print */}
+              <div className="no-print flex justify-end gap-3 pt-2">
                 <button
                   onClick={handlePrint}
+                  disabled={isPrinting}
                   className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 transition-colors shadow-2xs"
                 >
                   <Printer className="w-4 h-4 text-slate-600" />
-                  <span>طباعة بيانات الحجز</span>
+                  <span>{isPrinting ? 'جاري تجهيز الطباعة...' : 'طباعة بيانات الحجز'}</span>
                 </button>
               </div>
 

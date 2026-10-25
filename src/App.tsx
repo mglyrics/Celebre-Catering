@@ -117,43 +117,43 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-800 antialiased selection:bg-[#7A0C2E] selection:text-white">
       
-      {/* Navigation */}
-      <Navbar
-        onOpenBooking={() => setIsBookingOpen(true)}
-        onOpenTracking={() => {
-          setTrackingParams({ code: '', verify: '' });
-          setIsTrackingOpen(true);
-        }}
-        onOpenPdfMenu={() => setIsPdfMenuOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
-        cartCount={initialBookingItems.reduce((acc, curr) => acc + curr.quantity, 0)}
-      />
-
-      {/* Main Sections */}
-      <main className="flex-1">
-        <Hero
+      {/* Navigation, Main Sections, & Footer - Hidden completely during modal printing */}
+      <div className="no-print flex-1 flex flex-col">
+        <Navbar
           onOpenBooking={() => setIsBookingOpen(true)}
+          onOpenTracking={() => {
+            setTrackingParams({ code: '', verify: '' });
+            setIsTrackingOpen(true);
+          }}
           onOpenPdfMenu={() => setIsPdfMenuOpen(true)}
+          onOpenAdmin={() => setIsAdminOpen(true)}
+          cartCount={initialBookingItems.reduce((acc, curr) => acc + curr.quantity, 0)}
         />
 
-        <MenuSection
-          meals={meals}
-          onAddMealToOrder={handleAddMealToOrder}
-          onOpenBooking={() => setIsBookingOpen(true)}
+        <main className="flex-1">
+          <Hero
+            onOpenBooking={() => setIsBookingOpen(true)}
+            onOpenPdfMenu={() => setIsPdfMenuOpen(true)}
+          />
+
+          <MenuSection
+            meals={meals}
+            onAddMealToOrder={handleAddMealToOrder}
+            onOpenBooking={() => setIsBookingOpen(true)}
+          />
+
+          <AboutSection />
+        </main>
+
+        <Footer
+          onOpenPdfMenu={() => setIsPdfMenuOpen(true)}
+          onOpenTracking={() => {
+            setTrackingParams({ code: '', verify: '' });
+            setIsTrackingOpen(true);
+          }}
+          onOpenAdmin={() => setIsAdminOpen(true)}
         />
-
-        <AboutSection />
-      </main>
-
-      {/* Footer */}
-      <Footer
-        onOpenPdfMenu={() => setIsPdfMenuOpen(true)}
-        onOpenTracking={() => {
-          setTrackingParams({ code: '', verify: '' });
-          setIsTrackingOpen(true);
-        }}
-        onOpenAdmin={() => setIsAdminOpen(true)}
-      />
+      </div>
 
       {/* Modals */}
       <BookingWizard
