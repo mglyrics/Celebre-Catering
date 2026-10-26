@@ -13,7 +13,8 @@ import {
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
 import { logServerError } from './safeLogger';
-import { getPrismaClient } from '../lib/prisma';
+import { getPrismaClient, getSafeConnectionMetadata } from '../lib/prisma';
+import { runSafeMigration } from '../../scripts/migrate-to-postgres';
 
 export const apiRouter = Router();
 
@@ -96,16 +97,11 @@ apiRouter.get('/health', async (_req, res) => {
     } catch (err: any) {
       logServerError(err, 'HealthCheck.DB');
       dbDiagnostic = 'postgresql_error';
-      const rawMsg = String(err?.message || '');
-      if (rawMsg.includes('P1001') || rawMsg.includes("Can't reach database server")) {
-        dbDiagnosticReason = 'unreachable_host_or_port_check_pooler_port_6543';
-      } else if (rawMsg.includes('P1000') || rawMsg.includes('Authentication failed')) {
-        dbDiagnosticReason = 'authentication_failed_check_password';
-      } else if (rawMsg.includes('P1017') || rawMsg.includes('closed the connection')) {
-        dbDiagnosticReason = 'connection_closed_pooler_recommended';
-      } else {
-        dbDiagnosticReason = err?.code || 'handshake_timeout';
-      }
+      const cleanMsg = String(err?.message || '')
+        .split('\n')[0]
+        .replace(/postgresql:\/\/[^@]+@/, 'postgresql://***:***@')
+        .replace(/postgres:[^@]+@/, 'postgres:***@');
+      dbDiagnosticReason = cleanMsg ? cleanMsg.slice(0, 160) : (err?.code || 'handshake_timeout');
     }
   }
 
@@ -116,6 +112,7 @@ apiRouter.get('/health', async (_req, res) => {
     tablesReady,
     latencyMs,
     diagnostic: dbDiagnosticReason,
+    connection: getSafeConnectionMetadata(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -573,5 +570,15 @@ apiRouter.get('/admin/audit-logs', requireAuth, requireRole(['super_admin', 'adm
     res.json(logs);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Trigger safe, idempotent migration to PostgreSQL (super_admin only)
+apiRouter.post('/admin/system/migrate', requireAuth, requireRole(['super_admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const stats = await runSafeMigration();
+    res.json({ success: true, stats });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'فشل تنفيذ الترحيل' });
   }
 });

@@ -299,6 +299,45 @@ function logServerError(err, context) {
 var globalForPrisma = globalThis;
 var prismaInstance = null;
 var prismaInitFailed = false;
+function formatDatabaseUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.port === "6543" || url.hostname.includes("pooler.supabase.com")) {
+      if (!url.searchParams.has("pgbouncer")) {
+        url.searchParams.set("pgbouncer", "true");
+      }
+      if (!url.searchParams.has("connection_limit")) {
+        url.searchParams.set("connection_limit", "1");
+      }
+      if (!url.searchParams.has("connect_timeout")) {
+        url.searchParams.set("connect_timeout", "10");
+      }
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+function getSafeConnectionMetadata() {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) {
+    return { configured: false };
+  }
+  try {
+    const url = new URL(raw);
+    return {
+      configured: true,
+      host: url.hostname,
+      port: url.port || "5432",
+      database: url.pathname.replace(/^\//, "") || "postgres",
+      userPrefix: url.username ? url.username.slice(0, 15) : "unknown",
+      isPoolerPort: url.port === "6543",
+      hasPgbouncer: url.searchParams.has("pgbouncer") || url.hostname.includes("pooler")
+    };
+  } catch {
+    return { configured: true, error: "invalid_url_syntax" };
+  }
+}
 function getPrismaClient() {
   if (globalForPrisma.prisma) {
     return globalForPrisma.prisma;
@@ -306,14 +345,21 @@ function getPrismaClient() {
   if (prismaInstance) {
     return prismaInstance;
   }
-  if (!process.env.DATABASE_URL) {
+  const rawUrl = process.env.DATABASE_URL;
+  if (!rawUrl) {
     return null;
   }
   if (prismaInitFailed) {
     return null;
   }
   try {
+    const formattedUrl = formatDatabaseUrl(rawUrl);
     prismaInstance = new PrismaClient({
+      datasources: {
+        db: {
+          url: formattedUrl
+        }
+      },
       log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"]
     });
     if (process.env.NODE_ENV !== "production") {
@@ -1622,6 +1668,228 @@ function generateMenuPdfHtml(meals, autoPrint = false) {
 </html>`;
 }
 
+// scripts/migrate-to-postgres.ts
+import fs2 from "fs";
+import path2 from "path";
+import { PrismaClient as PrismaClient2 } from "@prisma/client";
+async function runSafeMigration() {
+  const databaseUrl2 = process.env.DATABASE_URL;
+  if (!databaseUrl2) {
+    console.error("\u274C \u062E\u0637\u0623: \u0645\u062A\u063A\u064A\u0631 DATABASE_URL \u063A\u064A\u0631 \u0645\u062D\u062F\u062F. \u064A\u0631\u062C\u0649 \u062A\u0648\u0641\u064A\u0631 \u0631\u0627\u0628\u0637 \u0627\u062A\u0635\u0627\u0644 PostgreSQL \u0642\u0628\u0644 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0631\u062D\u064A\u0644.");
+    process.exit(1);
+  }
+  const prisma2 = new PrismaClient2();
+  const backupPath = path2.resolve(process.cwd(), "data", "backup-35-bookings.json");
+  if (!fs2.existsSync(backupPath)) {
+    console.error("\u274C \u062E\u0637\u0623: \u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F:", backupPath);
+    process.exit(1);
+  }
+  const backupData = JSON.parse(fs2.readFileSync(backupPath, "utf8"));
+  const sourceBookings = backupData.bookings || [];
+  const sourceMeals = backupData.meals || [];
+  const sourcePayments = backupData.payments || [];
+  const sourceFactoryOrders = backupData.factoryOrders || [];
+  const sourceAdminUsers = backupData.adminUsers || [];
+  console.log("====================================================");
+  console.log("\u{1F680} \u0628\u062F\u0621 \u062E\u0637\u0629 \u0627\u0644\u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0622\u0645\u0646 \u0627\u0644\u0645\u0648\u062B\u0642 \u0628\u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0627\u062A (Prisma Transactions)");
+  console.log("====================================================");
+  console.log(`\u{1F4E6} \u0639\u062F\u062F \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0635\u062F\u0631\u064A\u0629 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629: ${sourceBookings.length} \u062D\u062C\u0632`);
+  console.log(`\u{1F372} \u0639\u062F\u062F \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0627\u0644\u0645\u0635\u062F\u0631\u064A\u0629: ${sourceMeals.length} \u0648\u062C\u0628\u0629`);
+  console.log(`\u{1F4B3} \u0639\u062F\u062F \u0633\u062C\u0644\u0627\u062A \u0627\u0644\u062F\u0641\u0639\u0627\u062A (\u0627\u0644\u0639\u0631\u0628\u0648\u0646): ${sourcePayments.length} \u0633\u062C\u0644`);
+  console.log(`\u{1F3ED} \u0639\u062F\u062F \u0623\u0648\u0627\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0644\u0644\u0645\u0635\u0646\u0639: ${sourceFactoryOrders.length} \u0623\u0645\u0631`);
+  try {
+    await prisma2.$connect();
+    console.log("\u2705 \u062A\u0645 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u0642\u0627\u0639\u062F\u0629 \u0628\u064A\u0627\u0646\u0627\u062A PostgreSQL \u0628\u0646\u062C\u0627\u062D.");
+    const preBookingCount = await prisma2.booking.count();
+    const preMealCount = await prisma2.meal.count();
+    console.log(`\u{1F4CA} \u0639\u062F\u062F \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0648\u062C\u0648\u062F\u0629 \u0645\u0633\u0628\u0642\u0627\u064B \u0641\u064A PostgreSQL: ${preBookingCount}`);
+    console.log(`\u{1F4CA} \u0639\u062F\u062F \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0627\u0644\u0645\u0648\u062C\u0648\u062F\u0629 \u0645\u0633\u0628\u0642\u0627\u064B \u0641\u064A PostgreSQL: ${preMealCount}`);
+    console.log("\n--- 1. \u062A\u0631\u062D\u064A\u0644 \u0648\u062A\u062D\u062F\u064A\u062B \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0648\u062C\u0628\u0627\u062A ---");
+    for (const m of sourceMeals) {
+      await prisma2.meal.upsert({
+        where: { code: m.code },
+        update: {
+          name: m.name,
+          category: m.category,
+          ingredients: m.ingredients,
+          distributorPrice: m.distributorPrice,
+          factoryPrice: m.factoryPrice,
+          hasJuice: m.hasJuice ?? true,
+          isActive: m.isActive ?? true,
+          image: m.image
+        },
+        create: {
+          id: m.id || `meal-${m.code}`,
+          code: m.code,
+          name: m.name,
+          category: m.category,
+          ingredients: m.ingredients,
+          distributorPrice: m.distributorPrice,
+          factoryPrice: m.factoryPrice,
+          hasJuice: m.hasJuice ?? true,
+          isActive: m.isActive ?? true,
+          image: m.image
+        }
+      });
+    }
+    console.log(`\u2705 \u062A\u0645 \u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0640 ${sourceMeals.length} \u0648\u062C\u0628\u0629 \u0628\u0646\u062C\u0627\u062D.`);
+    console.log("\n--- 2. \u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0640 35 (\u0645\u0639 \u062D\u0638\u0631 \u0627\u0644\u062A\u0643\u0631\u0627\u0631 \u0648\u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0627\u062A \u0627\u0644\u0622\u0645\u0646\u0629) ---");
+    let insertedBookings = 0;
+    let existingBookings = 0;
+    for (const b of sourceBookings) {
+      await prisma2.$transaction(async (tx) => {
+        const existing = await tx.booking.findUnique({
+          where: { bookingCode: b.bookingCode }
+        });
+        if (existing) {
+          existingBookings++;
+          return;
+        }
+        await tx.booking.create({
+          data: {
+            id: b.id,
+            bookingCode: b.bookingCode,
+            securityCode: b.securityCode,
+            customerName: b.customerName,
+            customerPhone: b.customerPhone,
+            customerWhatsapp: b.customerWhatsapp || b.customerPhone,
+            preferredContact: b.preferredContact || "whatsapp",
+            eventName: b.eventName,
+            eventDate: b.eventDate,
+            deliveryTime: b.deliveryTime,
+            deliveryGovernorate: b.deliveryGovernorate,
+            deliveryAddress: b.deliveryAddress,
+            notes: b.notes || "",
+            totalMealsCount: b.totalMealsCount,
+            totalDistributorPrice: b.totalDistributorPrice,
+            totalFactoryPrice: b.totalFactoryPrice || null,
+            profitMargin: b.profitMargin || null,
+            paidAmount: b.paidAmount || 0,
+            remainingAmount: b.remainingAmount,
+            status: b.status || "INITIAL",
+            statusNotes: b.statusNotes || "",
+            version: b.version || 1,
+            createdAt: b.createdAt ? new Date(b.createdAt) : /* @__PURE__ */ new Date(),
+            updatedAt: b.updatedAt ? new Date(b.updatedAt) : /* @__PURE__ */ new Date(),
+            items: {
+              create: (b.items || []).map((it) => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category || "mix_box",
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption || "standard",
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice,
+                unitFactoryPrice: it.unitFactoryPrice,
+                totalFactoryPrice: it.totalFactoryPrice
+              }))
+            }
+          }
+        });
+        const relatedPayments = sourcePayments.filter((p) => p.bookingId === b.id);
+        for (const p of relatedPayments) {
+          await tx.payment.create({
+            data: {
+              id: p.id,
+              bookingId: p.bookingId,
+              amount: p.amount,
+              method: p.method,
+              date: p.date,
+              notes: p.notes || "",
+              receiptNumber: p.receiptNumber || null,
+              createdAt: p.createdAt ? new Date(p.createdAt) : /* @__PURE__ */ new Date()
+            }
+          });
+        }
+        const relatedOrders = sourceFactoryOrders.filter((fo) => fo.bookingId === b.id);
+        for (const fo of relatedOrders) {
+          await tx.factoryOrder.create({
+            data: {
+              id: fo.id,
+              orderNumber: fo.orderNumber,
+              bookingId: fo.bookingId,
+              bookingCode: fo.bookingCode,
+              version: fo.version || 1,
+              status: fo.status || "PENDING",
+              eventDate: fo.eventDate,
+              deliveryTime: fo.deliveryTime,
+              deliveryLocation: fo.deliveryLocation,
+              itemsJson: typeof fo.items === "string" ? fo.items : JSON.stringify(fo.items || []),
+              packagingNotes: fo.packagingNotes || "",
+              preparedAt: fo.preparedAt ? new Date(fo.preparedAt) : null,
+              createdAt: fo.createdAt ? new Date(fo.createdAt) : /* @__PURE__ */ new Date()
+            }
+          });
+        }
+        insertedBookings++;
+      });
+    }
+    console.log("\n--- 3. \u062A\u0631\u062D\u064A\u0644 \u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0625\u062F\u0627\u0631\u0629 ---");
+    for (const u of sourceAdminUsers) {
+      await prisma2.adminUser.upsert({
+        where: { username: u.username },
+        update: {
+          email: u.email,
+          role: u.role,
+          name: u.name,
+          passwordHash: u.passwordHash
+        },
+        create: {
+          id: u.id,
+          username: u.username,
+          email: u.email,
+          role: u.role,
+          name: u.name,
+          passwordHash: u.passwordHash
+        }
+      });
+    }
+    const postBookingCount = await prisma2.booking.count();
+    const postMealCount = await prisma2.meal.count();
+    const postPaymentCount = await prisma2.payment.count();
+    const postOrderCount = await prisma2.factoryOrder.count();
+    console.log(`
+====================================================`);
+    console.log(`\u{1F4CA} \u062A\u0642\u0631\u064A\u0631 \u0646\u062A\u0627\u0626\u062C \u0627\u0644\u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0631\u0642\u0627\u0628\u064A \u0627\u0644\u0634\u0627\u0645\u0644:`);
+    console.log(`- \u062D\u062C\u0648\u0632\u0627\u062A \u062C\u062F\u064A\u062F\u0629 \u0623\u064F\u0636\u064A\u0641\u062A \u0628\u0646\u062C\u0627\u062D: ${insertedBookings}`);
+    console.log(`- \u062D\u062C\u0648\u0632\u0627\u062A \u0643\u0627\u0646\u062A \u0645\u0648\u062C\u0648\u062F\u0629 \u0645\u0633\u0628\u0642\u0627\u064B (\u062A\u0645 \u062A\u062E\u0637\u064A\u0647\u0627 \u0644\u0645\u0646\u0639 \u0627\u0644\u062A\u0643\u0631\u0627\u0631): ${existingBookings}`);
+    console.log(`- \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0641\u064A PostgreSQL \u0627\u0644\u0622\u0646: ${postBookingCount}`);
+    console.log(`- \u0625\u062C\u0645\u0627\u0644\u064A \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0641\u064A PostgreSQL \u0627\u0644\u0622\u0646: ${postMealCount}`);
+    console.log(`- \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u062F\u0641\u0639\u0627\u062A \u0641\u064A PostgreSQL \u0627\u0644\u0622\u0646: ${postPaymentCount}`);
+    console.log(`- \u0625\u062C\u0645\u0627\u0644\u064A \u0623\u0648\u0627\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0641\u064A PostgreSQL \u0627\u0644\u0622\u0646: ${postOrderCount}`);
+    console.log(`====================================================`);
+    const testSample = await prisma2.booking.findFirst({
+      where: { bookingCode: "CLB-2026-8934" },
+      include: { items: true, payments: true, factoryOrders: true }
+    });
+    if (testSample) {
+      console.log(`\u2705 \u0641\u062D\u0635 \u0639\u064A\u0646\u0629 \u0645\u062A\u0643\u0627\u0645\u0644\u0629: \u0627\u0644\u062D\u062C\u0632 CLB-2026-8934 \u0645\u0633\u062A\u0631\u062C\u0639 \u0645\u0639 ${testSample.items.length} \u0648\u062C\u0628\u0629 \u0648 ${testSample.payments.length} \u062F\u0641\u0639\u0629 \u0648 ${testSample.factoryOrders.length} \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644.`);
+    }
+    console.log("\u{1F389} \u0627\u0643\u062A\u0645\u0644\u062A \u0639\u0645\u0644\u064A\u0629 \u0627\u0644\u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0630\u0631\u064A \u0628\u0646\u062C\u0627\u062D \u062A\u0627\u0645 \u0648\u0628\u0623\u0645\u0627\u0646 \u0643\u0627\u0645\u0644 100%.");
+    return {
+      success: true,
+      insertedBookings,
+      existingBookings,
+      postBookingCount,
+      postMealCount,
+      postPaymentCount,
+      postOrderCount
+    };
+  } catch (err) {
+    console.error("\u274C \u062D\u062F\u062B \u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u0627\u0644\u062A\u0631\u062D\u064A\u0644:", err);
+    throw err;
+  } finally {
+    await prisma2.$disconnect();
+  }
+}
+if (process.argv[1] && process.argv[1].endsWith("migrate-to-postgres.ts")) {
+  runSafeMigration();
+}
+
 // src/server/routes.ts
 var apiRouter = Router();
 var JWT_SECRET = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
@@ -1683,16 +1951,8 @@ apiRouter.get("/health", async (_req, res) => {
     } catch (err) {
       logServerError(err, "HealthCheck.DB");
       dbDiagnostic = "postgresql_error";
-      const rawMsg = String(err?.message || "");
-      if (rawMsg.includes("P1001") || rawMsg.includes("Can't reach database server")) {
-        dbDiagnosticReason = "unreachable_host_or_port_check_pooler_port_6543";
-      } else if (rawMsg.includes("P1000") || rawMsg.includes("Authentication failed")) {
-        dbDiagnosticReason = "authentication_failed_check_password";
-      } else if (rawMsg.includes("P1017") || rawMsg.includes("closed the connection")) {
-        dbDiagnosticReason = "connection_closed_pooler_recommended";
-      } else {
-        dbDiagnosticReason = err?.code || "handshake_timeout";
-      }
+      const cleanMsg = String(err?.message || "").split("\n")[0].replace(/postgresql:\/\/[^@]+@/, "postgresql://***:***@").replace(/postgres:[^@]+@/, "postgres:***@");
+      dbDiagnosticReason = cleanMsg ? cleanMsg.slice(0, 160) : err?.code || "handshake_timeout";
     }
   }
   res.json({
@@ -1702,6 +1962,7 @@ apiRouter.get("/health", async (_req, res) => {
     tablesReady,
     latencyMs,
     diagnostic: dbDiagnosticReason,
+    connection: getSafeConnectionMetadata(),
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
 });
@@ -2065,6 +2326,14 @@ apiRouter.get("/admin/audit-logs", requireAuth, requireRole(["super_admin", "adm
     res.json(logs);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/system/migrate", requireAuth, requireRole(["super_admin"]), async (req, res) => {
+  try {
+    const stats = await runSafeMigration();
+    res.json({ success: true, stats });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "\u0641\u0634\u0644 \u062A\u0646\u0641\u064A\u0630 \u0627\u0644\u062A\u0631\u062D\u064A\u0644" });
   }
 });
 

@@ -234,6 +234,16 @@ export async function runSafeMigration() {
     }
 
     console.log('🎉 اكتملت عملية الترحيل الذري بنجاح تام وبأمان كامل 100%.');
+
+    return {
+      success: true,
+      insertedBookings,
+      existingBookings,
+      postBookingCount,
+      postMealCount,
+      postPaymentCount,
+      postOrderCount,
+    };
   } catch (err: any) {
     console.error('❌ حدث خطأ أثناء الترحيل:', err);
     throw err;
