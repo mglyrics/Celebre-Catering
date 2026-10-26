@@ -2276,13 +2276,17 @@
       "id": "admin-1",
       "username": "admin",
       "email": "management@celebre-eg.com",
-      "role": "super_admin"
+      "role": "super_admin",
+      "name": "إدارة سيليبري",
+      "passwordHash": "$2b$10$yPd6dIp.1mVuW/OA/6bNEOj2R3ksAHc1rmGiYSc4yfoFkYQXNUZtO"
     },
     {
       "id": "factory-1",
       "username": "factory",
       "email": "factory@celebre-eg.com",
-      "role": "factory"
+      "role": "factory",
+      "name": "مسؤول تشغيل المصنع",
+      "passwordHash": "$2b$10$mx0KIHYhV3ljbIHpIeqBae3wTes3rtkXMv00Rmwd7/y13c8Xui/Ue"
     }
   ],
   "payments": [

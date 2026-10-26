@@ -72,6 +72,7 @@ apiRouter.get('/health', async (_req, res) => {
   let tablesReady = false;
   let latencyMs: number | undefined = undefined;
   let dbDiagnostic = 'resilient_storage';
+  let dbDiagnosticReason: string | undefined = undefined;
 
   if (process.env.DATABASE_URL) {
     const start = Date.now();
@@ -95,6 +96,16 @@ apiRouter.get('/health', async (_req, res) => {
     } catch (err: any) {
       logServerError(err, 'HealthCheck.DB');
       dbDiagnostic = 'postgresql_error';
+      const rawMsg = String(err?.message || '');
+      if (rawMsg.includes('P1001') || rawMsg.includes("Can't reach database server")) {
+        dbDiagnosticReason = 'unreachable_host_or_port_check_pooler_port_6543';
+      } else if (rawMsg.includes('P1000') || rawMsg.includes('Authentication failed')) {
+        dbDiagnosticReason = 'authentication_failed_check_password';
+      } else if (rawMsg.includes('P1017') || rawMsg.includes('closed the connection')) {
+        dbDiagnosticReason = 'connection_closed_pooler_recommended';
+      } else {
+        dbDiagnosticReason = err?.code || 'handshake_timeout';
+      }
     }
   }
 
@@ -104,6 +115,7 @@ apiRouter.get('/health', async (_req, res) => {
     connected: isDbLive,
     tablesReady,
     latencyMs,
+    diagnostic: dbDiagnosticReason,
     timestamp: new Date().toISOString(),
   });
 });
