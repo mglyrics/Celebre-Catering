@@ -13,7 +13,8 @@
     "lint": "tsc --noEmit",
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "db:migrate-bookings": "tsx scripts/migrate-to-postgres.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

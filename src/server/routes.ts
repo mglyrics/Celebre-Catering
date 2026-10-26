@@ -13,6 +13,7 @@ import {
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
 import { logServerError } from './safeLogger';
+import { getPrismaClient } from '../lib/prisma';
 
 export const apiRouter = Router();
 
@@ -65,11 +66,44 @@ apiRouter.get('/', (_req, res) => {
   });
 });
 
-// Health check endpoint
-apiRouter.get('/health', (_req, res) => {
+// Health check endpoint (Live real-time active database ping)
+apiRouter.get('/health', async (_req, res) => {
+  let isDbLive = false;
+  let tablesReady = false;
+  let latencyMs: number | undefined = undefined;
+  let dbDiagnostic = 'resilient_storage';
+
+  if (process.env.DATABASE_URL) {
+    const start = Date.now();
+    try {
+      const client = getPrismaClient();
+      if (client) {
+        // 1. Live handshake query (Read-only non-destructive ping)
+        await client.$queryRaw`SELECT 1`;
+        isDbLive = true;
+        latencyMs = Date.now() - start;
+
+        // 2. Check if schema tables exist in PostgreSQL public schema
+        const tables: any[] = await client.$queryRaw`
+          SELECT table_name 
+          FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_name IN ('bookings', 'meals')
+        `;
+        tablesReady = tables.length >= 2;
+        dbDiagnostic = 'postgresql';
+      }
+    } catch (err: any) {
+      logServerError(err, 'HealthCheck.DB');
+      dbDiagnostic = 'postgresql_error';
+    }
+  }
+
   res.json({
     status: 'ok',
-    database: db.isPostgres() ? 'postgresql' : 'resilient_storage',
+    database: dbDiagnostic,
+    connected: isDbLive,
+    tablesReady,
+    latencyMs,
     timestamp: new Date().toISOString(),
   });
 });

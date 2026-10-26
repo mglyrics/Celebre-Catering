@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "prisma generate && npm run build:api && vite build",
+  "buildCommand": "(prisma db push --skip-generate || true) && prisma generate && npm run build:api && vite build",
   "outputDirectory": "dist",
   "framework": "vite",
   "functions": {

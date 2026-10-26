@@ -1658,10 +1658,38 @@ apiRouter.get("/", (_req, res) => {
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
 });
-apiRouter.get("/health", (_req, res) => {
+apiRouter.get("/health", async (_req, res) => {
+  let isDbLive = false;
+  let tablesReady = false;
+  let latencyMs = void 0;
+  let dbDiagnostic = "resilient_storage";
+  if (process.env.DATABASE_URL) {
+    const start = Date.now();
+    try {
+      const client = getPrismaClient();
+      if (client) {
+        await client.$queryRaw`SELECT 1`;
+        isDbLive = true;
+        latencyMs = Date.now() - start;
+        const tables = await client.$queryRaw`
+          SELECT table_name 
+          FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_name IN ('bookings', 'meals')
+        `;
+        tablesReady = tables.length >= 2;
+        dbDiagnostic = "postgresql";
+      }
+    } catch (err) {
+      logServerError(err, "HealthCheck.DB");
+      dbDiagnostic = "postgresql_error";
+    }
+  }
   res.json({
     status: "ok",
-    database: db.isPostgres() ? "postgresql" : "resilient_storage",
+    database: dbDiagnostic,
+    connected: isDbLive,
+    tablesReady,
+    latencyMs,
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
 });
