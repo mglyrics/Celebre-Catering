@@ -7,6 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
+import { formatDatabaseUrl } from '../src/lib/prisma';
 
 export async function runSafeMigration() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -15,7 +16,14 @@ export async function runSafeMigration() {
     process.exit(1);
   }
 
-  const prisma = new PrismaClient();
+  const formattedUrl = formatDatabaseUrl(databaseUrl);
+  const prisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: formattedUrl,
+      },
+    },
+  });
   const backupPath = path.resolve(process.cwd(), 'data', 'backup-35-bookings.json');
 
   if (!fs.existsSync(backupPath)) {

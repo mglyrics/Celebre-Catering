@@ -13,7 +13,7 @@ import {
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
 import { logServerError } from './safeLogger';
-import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl } from '../lib/prisma';
+import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl, SUPABASE_ROOT_CA } from '../lib/prisma';
 import { runSafeMigration } from '../../scripts/migrate-to-postgres';
 import pg from 'pg';
 
@@ -96,7 +96,8 @@ apiRouter.get('/health', async (_req, res) => {
       connectionString: formattedUrl,
       connectionTimeoutMillis: 7000,
       ssl: {
-        rejectUnauthorized: false,
+        rejectUnauthorized: true,
+        ca: SUPABASE_ROOT_CA,
       },
     });
 

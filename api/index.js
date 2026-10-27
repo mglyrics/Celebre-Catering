@@ -7,8 +7,8 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 
 // src/server/db.ts
-import fs from "fs";
-import path from "path";
+import fs2 from "fs";
+import path2 from "path";
 import bcrypt from "bcryptjs";
 
 // src/data/defaultMeals.ts
@@ -236,6 +236,8 @@ var CELEBRE_CONFIG = {
 };
 
 // src/lib/prisma.ts
+import fs from "fs";
+import path from "path";
 import { PrismaClient } from "@prisma/client";
 
 // src/server/safeLogger.ts
@@ -296,6 +298,46 @@ function logServerError(err, context) {
 }
 
 // src/lib/prisma.ts
+var SUPABASE_ROOT_CA = `-----BEGIN CERTIFICATE-----
+MIIDxDCCAqygAwIBAgIUbLxMod62P2ktCiAkxnKJwtE9VPYwDQYJKoZIhvcNAQEL
+BQAwazELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5l
+dyBDYXN0bGUxFTATBgNVBAoMDFN1cGFiYXNlIEluYzEeMBwGA1UEAwwVU3VwYWJh
+c2UgUm9vdCAyMDIxIENBMB4XDTIxMDQyODEwNTY1M1oXDTMxMDQyNjEwNTY1M1ow
+azELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5ldyBD
+YXN0bGUxFTATBgNVBAoMDFN1cGFiYXNlIEluYzEeMBwGA1UEAwwVU3VwYWJhc2Ug
+Um9vdCAyMDIxIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqQXW
+QyHOB+qR2GJobCq/CBmQ40G0oDmCC3mzVnn8sv4XNeWtE5XcEL0uVih7Jo4Dkx1Q
+DmGHBH1zDfgs2qXiLb6xpw/CKQPypZW1JssOTMIfQppNQ87K75Ya0p25Y3ePS2t2
+GtvHxNjUV6kjOZjEn2yWEcBdpOVCUYBVFBNMB4YBHkNRDa/+S4uywAoaTWnCJLUi
+cvTlHmMw6xSQQn1UfRQHk50DMCEJ7Cy1RxrZJrkXXRP3LqQL2ijJ6F4yMfh+Gyb4
+O4XajoVj/+R4GwywKYrrS8PrSNtwxr5StlQO8zIQUSMiq26wM8mgELFlS/32Uclt
+NaQ1xBRizkzpZct9DwIDAQABo2AwXjALBgNVHQ8EBAMCAQYwHQYDVR0OBBYEFKjX
+uXY32CztkhImng4yJNUtaUYsMB8GA1UdIwQYMBaAFKjXuXY32CztkhImng4yJNUt
+aUYsMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAB8spzNn+4VU
+tVxbdMaX+39Z50sc7uATmus16jmmHjhIHz+l/9GlJ5KqAMOx26mPZgfzG7oneL2b
+VW+WgYUkTT3XEPFWnTp2RJwQao8/tYPXWEJDc0WVQHrpmnWOFKU/d3MqBgBm5y+6
+jB81TU/RG2rVerPDWP+1MMcNNy0491CTL5XQZ7JfDJJ9CCmXSdtTl4uUQnSuv/Qx
+Cea13BX2ZgJc7Au30vihLhub52De4P/4gonKsNHYdbWjg7OWKwNv/zitGDVDB9Y2
+CMTyZKG3XEu5Ghl1LEnI3QmEKsqaCLv12BnVjbkSeZsMnevJPs1Ye6TjjJwdik5P
+o/bKiIz+Fq8=
+-----END CERTIFICATE-----`;
+function getCaCertPath() {
+  const possiblePaths = [
+    path.resolve(process.cwd(), "data", "supabase-ca.pem"),
+    path.resolve(process.cwd(), "certs", "supabase-ca.pem"),
+    path.resolve("/tmp", "supabase-ca.pem")
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  const tmpPath = path.resolve("/tmp", "supabase-ca.pem");
+  try {
+    fs.writeFileSync(tmpPath, SUPABASE_ROOT_CA, "utf8");
+    return tmpPath;
+  } catch {
+    return possiblePaths[0];
+  }
+}
 var globalForPrisma = globalThis;
 var prismaInstance = null;
 var prismaInitFailed = false;
@@ -310,10 +352,14 @@ function formatDatabaseUrl(rawUrl) {
         url.searchParams.set("connection_limit", "1");
       }
       if (!url.searchParams.has("connect_timeout")) {
-        url.searchParams.set("connect_timeout", "10");
+        url.searchParams.set("connect_timeout", "15");
       }
       if (!url.searchParams.has("sslmode")) {
         url.searchParams.set("sslmode", "require");
+      }
+      if (!url.searchParams.has("sslrootcert")) {
+        const caPath = getCaCertPath();
+        url.searchParams.set("sslrootcert", caPath);
       }
     }
     return url.toString();
@@ -406,13 +452,13 @@ var prisma = new Proxy({}, {
 var IS_SERVERLESS = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT
 );
-var DATA_DIR = IS_SERVERLESS ? path.resolve("/tmp", "celebre-data") : path.resolve(process.cwd(), "data");
-var DB_FILE = path.resolve(DATA_DIR, "db.json");
+var DATA_DIR = IS_SERVERLESS ? path2.resolve("/tmp", "celebre-data") : path2.resolve(process.cwd(), "data");
+var DB_FILE = path2.resolve(DATA_DIR, "db.json");
 var isPrismaConnected = false;
 var databaseUrl = process.env.DATABASE_URL;
 try {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs2.existsSync(DATA_DIR)) {
+    fs2.mkdirSync(DATA_DIR, { recursive: true });
   }
 } catch (err) {
   console.warn("[DB] Non-writable filesystem detected, fallback storage will use RAM:", err?.message);
@@ -456,12 +502,12 @@ function getInitialData() {
 }
 function loadLocalDB() {
   try {
-    const seedFile = path.resolve(process.cwd(), "data", "db.json");
-    if (!fs.existsSync(DB_FILE)) {
+    const seedFile = path2.resolve(process.cwd(), "data", "db.json");
+    if (!fs2.existsSync(DB_FILE)) {
       let initial;
-      if (fs.existsSync(seedFile)) {
+      if (fs2.existsSync(seedFile)) {
         try {
-          initial = JSON.parse(fs.readFileSync(seedFile, "utf8"));
+          initial = JSON.parse(fs2.readFileSync(seedFile, "utf8"));
         } catch {
           initial = getInitialData();
         }
@@ -469,12 +515,12 @@ function loadLocalDB() {
         initial = getInitialData();
       }
       try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), "utf8");
+        fs2.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), "utf8");
       } catch (writeErr) {
       }
       return initial;
     }
-    const raw = fs.readFileSync(DB_FILE, "utf8");
+    const raw = fs2.readFileSync(DB_FILE, "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed.meals || parsed.meals.length < 18) {
       const initial = getInitialData();
@@ -492,7 +538,7 @@ function loadLocalDB() {
 }
 function saveLocalDB(data) {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
+    fs2.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
   } catch (err) {
   }
 }
@@ -1676,8 +1722,8 @@ function generateMenuPdfHtml(meals, autoPrint = false) {
 }
 
 // scripts/migrate-to-postgres.ts
-import fs2 from "fs";
-import path2 from "path";
+import fs3 from "fs";
+import path3 from "path";
 import { PrismaClient as PrismaClient2 } from "@prisma/client";
 async function runSafeMigration() {
   const databaseUrl2 = process.env.DATABASE_URL;
@@ -1685,13 +1731,20 @@ async function runSafeMigration() {
     console.error("\u274C \u062E\u0637\u0623: \u0645\u062A\u063A\u064A\u0631 DATABASE_URL \u063A\u064A\u0631 \u0645\u062D\u062F\u062F. \u064A\u0631\u062C\u0649 \u062A\u0648\u0641\u064A\u0631 \u0631\u0627\u0628\u0637 \u0627\u062A\u0635\u0627\u0644 PostgreSQL \u0642\u0628\u0644 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0631\u062D\u064A\u0644.");
     process.exit(1);
   }
-  const prisma2 = new PrismaClient2();
-  const backupPath = path2.resolve(process.cwd(), "data", "backup-35-bookings.json");
-  if (!fs2.existsSync(backupPath)) {
+  const formattedUrl = formatDatabaseUrl(databaseUrl2);
+  const prisma2 = new PrismaClient2({
+    datasources: {
+      db: {
+        url: formattedUrl
+      }
+    }
+  });
+  const backupPath = path3.resolve(process.cwd(), "data", "backup-35-bookings.json");
+  if (!fs3.existsSync(backupPath)) {
     console.error("\u274C \u062E\u0637\u0623: \u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F:", backupPath);
     process.exit(1);
   }
-  const backupData = JSON.parse(fs2.readFileSync(backupPath, "utf8"));
+  const backupData = JSON.parse(fs3.readFileSync(backupPath, "utf8"));
   const sourceBookings = backupData.bookings || [];
   const sourceMeals = backupData.meals || [];
   const sourcePayments = backupData.payments || [];
@@ -1950,7 +2003,8 @@ apiRouter.get("/health", async (_req, res) => {
       connectionString: formattedUrl,
       connectionTimeoutMillis: 7e3,
       ssl: {
-        rejectUnauthorized: false
+        rejectUnauthorized: true,
+        ca: SUPABASE_ROOT_CA
       }
     });
     try {
