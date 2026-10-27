@@ -143,11 +143,11 @@ apiRouter.get('/health', async (_req, res) => {
       logServerError(err, 'HealthCheck.DB');
       dbDiagnostic = 'postgresql_error';
 
-      // Parse multi-line error cleanly without being fooled by initial newlines
+      // Parse multi-line error cleanly without being fooled by initial newlines or wrapper headers
       const rawLines = String(err?.message || '')
         .split('\n')
         .map(l => l.trim())
-        .filter(l => l.length > 0 && !l.startsWith('Invalid `client.'));
+        .filter(l => l.length > 0 && !l.startsWith('Invalid `'));
       
       const firstRealLine = rawLines[0] || String(err?.name || 'PrismaConnectionError');
       const cleanMsg = firstRealLine

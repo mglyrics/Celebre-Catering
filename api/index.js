@@ -2043,7 +2043,7 @@ apiRouter.get("/health", async (_req, res) => {
     } catch (err) {
       logServerError(err, "HealthCheck.DB");
       dbDiagnostic = "postgresql_error";
-      const rawLines = String(err?.message || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("Invalid `client."));
+      const rawLines = String(err?.message || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("Invalid `"));
       const firstRealLine = rawLines[0] || String(err?.name || "PrismaConnectionError");
       const cleanMsg = firstRealLine.replace(/postgresql:\/\/[^@]+@/, "postgresql://***:***@").replace(/postgres:[^@]+@/, "postgres:***@");
       dbDiagnosticReason = cleanMsg.slice(0, 180);
