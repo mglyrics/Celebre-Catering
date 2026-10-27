@@ -1977,6 +1977,7 @@ if (process.argv[1] && process.argv[1].endsWith("migrate-to-postgres.ts")) {
 }
 
 // src/server/schemaInit.ts
+import pg from "pg";
 var REQUIRED_TABLES = [
   "meals",
   "bookings",
@@ -2131,6 +2132,7 @@ async function checkTablesStatus(client) {
 async function ensureSchemaReady(client) {
   const status = await checkTablesStatus(client);
   const created = [];
+  const errors = [];
   if (!status.allReady) {
     for (const tableName of status.missingTables) {
       const ddl = TABLE_DDL_QUERIES[tableName];
@@ -2139,7 +2141,48 @@ async function ensureSchemaReady(client) {
           await client.$executeRawUnsafe(ddl);
           created.push(tableName);
         } catch (err) {
-          logServerError(err, `SchemaInit.CreateTable.${tableName}`);
+          logServerError(err, `SchemaInit.Prisma.${tableName}`);
+          errors.push(`Prisma ${tableName}: ${err?.message?.slice(0, 100)}`);
+        }
+      }
+    }
+    const midCheck = await checkTablesStatus(client);
+    if (!midCheck.allReady && process.env.DATABASE_URL) {
+      const rawUrl = process.env.DATABASE_URL;
+      const formattedUrl = formatDatabaseUrl(rawUrl);
+      const pgUrl = new URL(formattedUrl);
+      pgUrl.searchParams.delete("sslmode");
+      const pgClient = new pg.Client({
+        connectionString: pgUrl.toString(),
+        connectionTimeoutMillis: 7e3,
+        ssl: {
+          rejectUnauthorized: true,
+          ca: SUPABASE_ROOT_CA,
+          servername: pgUrl.hostname
+        }
+      });
+      try {
+        await pgClient.connect();
+        for (const tableName of midCheck.missingTables) {
+          const ddl = TABLE_DDL_QUERIES[tableName];
+          if (ddl) {
+            try {
+              await pgClient.query(ddl);
+              if (!created.includes(tableName)) {
+                created.push(tableName);
+              }
+            } catch (pgErr) {
+              logServerError(pgErr, `SchemaInit.pgClient.${tableName}`);
+              errors.push(`pg ${tableName}: ${pgErr?.message?.slice(0, 100)}`);
+            }
+          }
+        }
+      } catch (connErr) {
+        errors.push(`pg connection: ${connErr?.message?.slice(0, 100)}`);
+      } finally {
+        try {
+          await pgClient.end();
+        } catch {
         }
       }
     }
@@ -2171,12 +2214,13 @@ async function ensureSchemaReady(client) {
   return {
     success: postCheck.allReady,
     created,
-    tablesFound: postCheck.existingTables
+    tablesFound: postCheck.existingTables,
+    errors
   };
 }
 
 // src/server/routes.ts
-import pg from "pg";
+import pg2 from "pg";
 var apiRouter = Router();
 var JWT_SECRET = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
 function requireAuth(req, res, next) {
@@ -2219,6 +2263,7 @@ apiRouter.get("/health", async (_req, res) => {
   let dbDiagnostic = "resilient_storage";
   let dbDiagnosticReason = void 0;
   let existingTablesList = [];
+  let schemaInitDetails = void 0;
   let pgEngineCheck = { tested: false, connected: false, phase: "idle" };
   if (process.env.DATABASE_URL) {
     const rawUrl = process.env.DATABASE_URL;
@@ -2227,7 +2272,7 @@ apiRouter.get("/health", async (_req, res) => {
     const pgStart = Date.now();
     const pgUrl = new URL(formattedUrl);
     pgUrl.searchParams.delete("sslmode");
-    const pgClient = new pg.Client({
+    const pgClient = new pg2.Client({
       connectionString: pgUrl.toString(),
       connectionTimeoutMillis: 7e3,
       ssl: {
@@ -2264,6 +2309,10 @@ apiRouter.get("/health", async (_req, res) => {
         const schemaInitResult = await ensureSchemaReady(client);
         tablesReady = schemaInitResult.success;
         existingTablesList = schemaInitResult.tablesFound;
+        schemaInitDetails = {
+          created: schemaInitResult.created,
+          errors: schemaInitResult.errors
+        };
         dbDiagnostic = "postgresql";
       }
     } catch (err) {
@@ -2285,7 +2334,9 @@ apiRouter.get("/health", async (_req, res) => {
       ready: tablesReady,
       count: existingTablesList.length,
       required: REQUIRED_TABLES.length,
-      existing: existingTablesList
+      existing: existingTablesList,
+      created: schemaInitDetails?.created || [],
+      errors: schemaInitDetails?.errors || []
     },
     diagnostic: dbDiagnosticReason || (isDbLive ? "ready" : process.env.DATABASE_URL ? "connection_failed" : "no_database_url"),
     pgTest: pgEngineCheck.tested ? pgEngineCheck : void 0,

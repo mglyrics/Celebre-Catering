@@ -1,10 +1,13 @@
 /**
  * Safe, Non-Destructive Schema Initializer for Supabase PostgreSQL
  * Creates missing tables if they do not exist without touching existing data.
+ * Dual-engine execution: Uses Prisma and direct pg connection as resilient fallback.
  */
 import { PrismaClient } from '@prisma/client';
+import pg from 'pg';
 import { logServerError } from './safeLogger';
 import { INITIAL_MEALS } from '../data/defaultMeals';
+import { formatDatabaseUrl, SUPABASE_ROOT_CA } from '../lib/prisma';
 
 export const REQUIRED_TABLES = [
   'meals',
@@ -169,11 +172,14 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
   success: boolean;
   created: string[];
   tablesFound: string[];
+  errors: string[];
 }> {
   const status = await checkTablesStatus(client);
   const created: string[] = [];
+  const errors: string[] = [];
 
   if (!status.allReady) {
+    // 1. Try Prisma executeRawUnsafe
     for (const tableName of status.missingTables) {
       const ddl = TABLE_DDL_QUERIES[tableName];
       if (ddl) {
@@ -181,13 +187,57 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
           await client.$executeRawUnsafe(ddl);
           created.push(tableName);
         } catch (err: any) {
-          logServerError(err, `SchemaInit.CreateTable.${tableName}`);
+          logServerError(err, `SchemaInit.Prisma.${tableName}`);
+          errors.push(`Prisma ${tableName}: ${err?.message?.slice(0, 100)}`);
         }
+      }
+    }
+
+    // 2. Fallback via direct pg client if any table is still missing
+    const midCheck = await checkTablesStatus(client);
+    if (!midCheck.allReady && process.env.DATABASE_URL) {
+      const rawUrl = process.env.DATABASE_URL;
+      const formattedUrl = formatDatabaseUrl(rawUrl);
+      const pgUrl = new URL(formattedUrl);
+      pgUrl.searchParams.delete('sslmode');
+
+      const pgClient = new pg.Client({
+        connectionString: pgUrl.toString(),
+        connectionTimeoutMillis: 7000,
+        ssl: {
+          rejectUnauthorized: true,
+          ca: SUPABASE_ROOT_CA,
+          servername: pgUrl.hostname,
+        },
+      });
+
+      try {
+        await pgClient.connect();
+        for (const tableName of midCheck.missingTables) {
+          const ddl = TABLE_DDL_QUERIES[tableName];
+          if (ddl) {
+            try {
+              await pgClient.query(ddl);
+              if (!created.includes(tableName)) {
+                created.push(tableName);
+              }
+            } catch (pgErr: any) {
+              logServerError(pgErr, `SchemaInit.pgClient.${tableName}`);
+              errors.push(`pg ${tableName}: ${pgErr?.message?.slice(0, 100)}`);
+            }
+          }
+        }
+      } catch (connErr: any) {
+        errors.push(`pg connection: ${connErr?.message?.slice(0, 100)}`);
+      } finally {
+        try {
+          await pgClient.end();
+        } catch {}
       }
     }
   }
 
-  // Seed meals if meals table is empty
+  // Seed meals if meals table exists and is empty
   try {
     const mealCount = await client.meal.count();
     if (mealCount === 0) {
@@ -215,5 +265,6 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
     success: postCheck.allReady,
     created,
     tablesFound: postCheck.existingTables,
+    errors,
   };
 }

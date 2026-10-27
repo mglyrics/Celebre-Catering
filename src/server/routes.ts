@@ -77,6 +77,7 @@ apiRouter.get('/health', async (_req, res) => {
   let dbDiagnostic = 'resilient_storage';
   let dbDiagnosticReason: string | undefined = undefined;
   let existingTablesList: string[] = [];
+  let schemaInitDetails: any = undefined;
 
   let pgEngineCheck: {
     tested: boolean;
@@ -140,6 +141,10 @@ apiRouter.get('/health', async (_req, res) => {
         const schemaInitResult = await ensureSchemaReady(client);
         tablesReady = schemaInitResult.success;
         existingTablesList = schemaInitResult.tablesFound;
+        schemaInitDetails = {
+          created: schemaInitResult.created,
+          errors: schemaInitResult.errors,
+        };
         dbDiagnostic = 'postgresql';
       }
     } catch (err: any) {
@@ -172,6 +177,8 @@ apiRouter.get('/health', async (_req, res) => {
       count: existingTablesList.length,
       required: REQUIRED_TABLES.length,
       existing: existingTablesList,
+      created: schemaInitDetails?.created || [],
+      errors: schemaInitDetails?.errors || [],
     },
     diagnostic: dbDiagnosticReason || (isDbLive ? 'ready' : (process.env.DATABASE_URL ? 'connection_failed' : 'no_database_url')),
     pgTest: pgEngineCheck.tested ? pgEngineCheck : undefined,
