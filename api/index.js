@@ -312,6 +312,9 @@ function formatDatabaseUrl(rawUrl) {
       if (!url.searchParams.has("connect_timeout")) {
         url.searchParams.set("connect_timeout", "10");
       }
+      if (!url.searchParams.has("sslmode")) {
+        url.searchParams.set("sslmode", "require");
+      }
     }
     return url.toString();
   } catch {
@@ -325,14 +328,18 @@ function getSafeConnectionMetadata() {
   }
   try {
     const url = new URL(raw);
+    const username = url.username || "";
+    const maskedUser = username.length > 12 ? `${username.slice(0, 10)}...${username.slice(-3)}` : username;
     return {
       configured: true,
       host: url.hostname,
       port: url.port || "5432",
       database: url.pathname.replace(/^\//, "") || "postgres",
-      userPrefix: url.username ? url.username.slice(0, 15) : "unknown",
+      userPrefix: maskedUser || "unknown",
       isPoolerPort: url.port === "6543",
-      hasPgbouncer: url.searchParams.has("pgbouncer") || url.hostname.includes("pooler")
+      hasPgbouncer: url.searchParams.has("pgbouncer"),
+      hasSslmode: url.searchParams.has("sslmode"),
+      sslmodeValue: url.searchParams.get("sslmode") || "default"
     };
   } catch {
     return { configured: true, error: "invalid_url_syntax" };
@@ -1891,6 +1898,7 @@ if (process.argv[1] && process.argv[1].endsWith("migrate-to-postgres.ts")) {
 }
 
 // src/server/routes.ts
+import pg from "pg";
 var apiRouter = Router();
 var JWT_SECRET = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
 function requireAuth(req, res, next) {
@@ -1932,7 +1940,37 @@ apiRouter.get("/health", async (_req, res) => {
   let latencyMs = void 0;
   let dbDiagnostic = "resilient_storage";
   let dbDiagnosticReason = void 0;
+  let pgEngineCheck = { tested: false, connected: false, phase: "idle" };
   if (process.env.DATABASE_URL) {
+    const rawUrl = process.env.DATABASE_URL;
+    const formattedUrl = formatDatabaseUrl(rawUrl);
+    pgEngineCheck.tested = true;
+    const pgStart = Date.now();
+    const pgClient = new pg.Client({
+      connectionString: formattedUrl,
+      connectionTimeoutMillis: 7e3,
+      ssl: {
+        rejectUnauthorized: false
+      }
+    });
+    try {
+      pgEngineCheck.phase = "connecting";
+      await pgClient.connect();
+      pgEngineCheck.phase = "query";
+      await pgClient.query("SELECT 1");
+      pgEngineCheck.phase = "ready";
+      pgEngineCheck.connected = true;
+      pgEngineCheck.latencyMs = Date.now() - pgStart;
+    } catch (pgErr) {
+      pgEngineCheck.code = pgErr?.code || pgErr?.name || "ERR_CONNECT";
+      const cleanPgMsg = String(pgErr?.message || "").replace(/postgresql:\/\/[^@]+@/, "postgresql://***:***@").replace(/postgres:[^@]+@/, "postgres:***@");
+      pgEngineCheck.message = cleanPgMsg.slice(0, 160);
+    } finally {
+      try {
+        await pgClient.end();
+      } catch {
+      }
+    }
     const start = Date.now();
     try {
       const client = getPrismaClient();
@@ -1951,8 +1989,10 @@ apiRouter.get("/health", async (_req, res) => {
     } catch (err) {
       logServerError(err, "HealthCheck.DB");
       dbDiagnostic = "postgresql_error";
-      const cleanMsg = String(err?.message || "").split("\n")[0].replace(/postgresql:\/\/[^@]+@/, "postgresql://***:***@").replace(/postgres:[^@]+@/, "postgres:***@");
-      dbDiagnosticReason = cleanMsg ? cleanMsg.slice(0, 160) : err?.code || "handshake_timeout";
+      const rawLines = String(err?.message || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("Invalid `client."));
+      const firstRealLine = rawLines[0] || String(err?.name || "PrismaConnectionError");
+      const cleanMsg = firstRealLine.replace(/postgresql:\/\/[^@]+@/, "postgresql://***:***@").replace(/postgres:[^@]+@/, "postgres:***@");
+      dbDiagnosticReason = cleanMsg.slice(0, 180);
     }
   }
   res.json({
@@ -1961,7 +2001,8 @@ apiRouter.get("/health", async (_req, res) => {
     connected: isDbLive,
     tablesReady,
     latencyMs,
-    diagnostic: dbDiagnosticReason,
+    diagnostic: dbDiagnosticReason || (isDbLive ? "ready" : process.env.DATABASE_URL ? "connection_failed" : "no_database_url"),
+    pgTest: pgEngineCheck.tested ? pgEngineCheck : void 0,
     connection: getSafeConnectionMetadata(),
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });

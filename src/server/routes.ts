@@ -13,8 +13,9 @@ import {
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
 import { logServerError } from './safeLogger';
-import { getPrismaClient, getSafeConnectionMetadata } from '../lib/prisma';
+import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl } from '../lib/prisma';
 import { runSafeMigration } from '../../scripts/migrate-to-postgres';
+import pg from 'pg';
 
 export const apiRouter = Router();
 
@@ -67,7 +68,7 @@ apiRouter.get('/', (_req, res) => {
   });
 });
 
-// Health check endpoint (Live real-time active database ping)
+// Health check endpoint (Live real-time active database ping with dual-engine diagnostics)
 apiRouter.get('/health', async (_req, res) => {
   let isDbLive = false;
   let tablesReady = false;
@@ -75,17 +76,60 @@ apiRouter.get('/health', async (_req, res) => {
   let dbDiagnostic = 'resilient_storage';
   let dbDiagnosticReason: string | undefined = undefined;
 
+  let pgEngineCheck: {
+    tested: boolean;
+    connected: boolean;
+    phase: string;
+    code?: string;
+    message?: string;
+    latencyMs?: number;
+  } = { tested: false, connected: false, phase: 'idle' };
+
   if (process.env.DATABASE_URL) {
+    const rawUrl = process.env.DATABASE_URL;
+    const formattedUrl = formatDatabaseUrl(rawUrl);
+
+    // 1. Independent node-postgres ping (Direct TLS/SSL handshake & credentials check)
+    pgEngineCheck.tested = true;
+    const pgStart = Date.now();
+    const pgClient = new pg.Client({
+      connectionString: formattedUrl,
+      connectionTimeoutMillis: 7000,
+      ssl: {
+        rejectUnauthorized: false,
+      },
+    });
+
+    try {
+      pgEngineCheck.phase = 'connecting';
+      await pgClient.connect();
+      pgEngineCheck.phase = 'query';
+      await pgClient.query('SELECT 1');
+      pgEngineCheck.phase = 'ready';
+      pgEngineCheck.connected = true;
+      pgEngineCheck.latencyMs = Date.now() - pgStart;
+    } catch (pgErr: any) {
+      pgEngineCheck.code = pgErr?.code || pgErr?.name || 'ERR_CONNECT';
+      const cleanPgMsg = String(pgErr?.message || '')
+        .replace(/postgresql:\/\/[^@]+@/, 'postgresql://***:***@')
+        .replace(/postgres:[^@]+@/, 'postgres:***@');
+      pgEngineCheck.message = cleanPgMsg.slice(0, 160);
+    } finally {
+      try {
+        await pgClient.end();
+      } catch {}
+    }
+
+    // 2. Prisma ORM check
     const start = Date.now();
     try {
       const client = getPrismaClient();
       if (client) {
-        // 1. Live handshake query (Read-only non-destructive ping)
         await client.$queryRaw`SELECT 1`;
         isDbLive = true;
         latencyMs = Date.now() - start;
 
-        // 2. Check if schema tables exist in PostgreSQL public schema
+        // Check if schema tables exist in PostgreSQL public schema
         const tables: any[] = await client.$queryRaw`
           SELECT table_name 
           FROM information_schema.tables 
@@ -97,11 +141,19 @@ apiRouter.get('/health', async (_req, res) => {
     } catch (err: any) {
       logServerError(err, 'HealthCheck.DB');
       dbDiagnostic = 'postgresql_error';
-      const cleanMsg = String(err?.message || '')
-        .split('\n')[0]
+
+      // Parse multi-line error cleanly without being fooled by initial newlines
+      const rawLines = String(err?.message || '')
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 0 && !l.startsWith('Invalid `client.'));
+      
+      const firstRealLine = rawLines[0] || String(err?.name || 'PrismaConnectionError');
+      const cleanMsg = firstRealLine
         .replace(/postgresql:\/\/[^@]+@/, 'postgresql://***:***@')
         .replace(/postgres:[^@]+@/, 'postgres:***@');
-      dbDiagnosticReason = cleanMsg ? cleanMsg.slice(0, 160) : (err?.code || 'handshake_timeout');
+
+      dbDiagnosticReason = cleanMsg.slice(0, 180);
     }
   }
 
@@ -111,7 +163,8 @@ apiRouter.get('/health', async (_req, res) => {
     connected: isDbLive,
     tablesReady,
     latencyMs,
-    diagnostic: dbDiagnosticReason,
+    diagnostic: dbDiagnosticReason || (isDbLive ? 'ready' : (process.env.DATABASE_URL ? 'connection_failed' : 'no_database_url')),
+    pgTest: pgEngineCheck.tested ? pgEngineCheck : undefined,
     connection: getSafeConnectionMetadata(),
     timestamp: new Date().toISOString(),
   });

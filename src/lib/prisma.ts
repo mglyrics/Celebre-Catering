@@ -22,6 +22,9 @@ export function formatDatabaseUrl(rawUrl: string): string {
       if (!url.searchParams.has('connect_timeout')) {
         url.searchParams.set('connect_timeout', '10');
       }
+      if (!url.searchParams.has('sslmode')) {
+        url.searchParams.set('sslmode', 'require');
+      }
     }
     return url.toString();
   } catch {
@@ -37,6 +40,8 @@ export function getSafeConnectionMetadata(): {
   userPrefix?: string;
   isPoolerPort?: boolean;
   hasPgbouncer?: boolean;
+  hasSslmode?: boolean;
+  sslmodeValue?: string;
   error?: string;
 } {
   const raw = process.env.DATABASE_URL;
@@ -45,14 +50,21 @@ export function getSafeConnectionMetadata(): {
   }
   try {
     const url = new URL(raw);
+    const username = url.username || '';
+    const maskedUser = username.length > 12 
+      ? `${username.slice(0, 10)}...${username.slice(-3)}` 
+      : username;
+
     return {
       configured: true,
       host: url.hostname,
       port: url.port || '5432',
       database: url.pathname.replace(/^\//, '') || 'postgres',
-      userPrefix: url.username ? url.username.slice(0, 15) : 'unknown',
+      userPrefix: maskedUser || 'unknown',
       isPoolerPort: url.port === '6543',
-      hasPgbouncer: url.searchParams.has('pgbouncer') || url.hostname.includes('pooler'),
+      hasPgbouncer: url.searchParams.has('pgbouncer'),
+      hasSslmode: url.searchParams.has('sslmode'),
+      sslmodeValue: url.searchParams.get('sslmode') || 'default',
     };
   } catch {
     return { configured: true, error: 'invalid_url_syntax' };
