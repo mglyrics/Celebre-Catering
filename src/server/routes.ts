@@ -92,12 +92,16 @@ apiRouter.get('/health', async (_req, res) => {
     // 1. Independent node-postgres ping (Direct TLS/SSL handshake & credentials check)
     pgEngineCheck.tested = true;
     const pgStart = Date.now();
+    const pgUrl = new URL(formattedUrl);
+    pgUrl.searchParams.delete('sslmode'); // Prevents pg-connection-string from overwriting explicit ssl.ca configuration
+
     const pgClient = new pg.Client({
-      connectionString: formattedUrl,
+      connectionString: pgUrl.toString(),
       connectionTimeoutMillis: 7000,
       ssl: {
         rejectUnauthorized: true,
         ca: SUPABASE_ROOT_CA,
+        servername: pgUrl.hostname,
       },
     });
 
