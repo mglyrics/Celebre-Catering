@@ -15,6 +15,7 @@ import { generateMenuPdfHtml } from './menuPdfGenerator';
 import { logServerError } from './safeLogger';
 import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl, SUPABASE_ROOT_CA } from '../lib/prisma';
 import { runSafeMigration } from '../../scripts/migrate-to-postgres';
+import { ensureSchemaReady, checkTablesStatus, REQUIRED_TABLES } from './schemaInit';
 import pg from 'pg';
 
 export const apiRouter = Router();
@@ -75,6 +76,7 @@ apiRouter.get('/health', async (_req, res) => {
   let latencyMs: number | undefined = undefined;
   let dbDiagnostic = 'resilient_storage';
   let dbDiagnosticReason: string | undefined = undefined;
+  let existingTablesList: string[] = [];
 
   let pgEngineCheck: {
     tested: boolean;
@@ -134,13 +136,10 @@ apiRouter.get('/health', async (_req, res) => {
         isDbLive = true;
         latencyMs = Date.now() - start;
 
-        // Check if schema tables exist in PostgreSQL public schema
-        const tables: any[] = await client.$queryRaw`
-          SELECT table_name 
-          FROM information_schema.tables 
-          WHERE table_schema = 'public' AND table_name IN ('bookings', 'meals')
-        `;
-        tablesReady = tables.length >= 2;
+        // Check and safely ensure all required tables exist non-destructively
+        const schemaInitResult = await ensureSchemaReady(client);
+        tablesReady = schemaInitResult.success;
+        existingTablesList = schemaInitResult.tablesFound;
         dbDiagnostic = 'postgresql';
       }
     } catch (err: any) {
@@ -168,6 +167,12 @@ apiRouter.get('/health', async (_req, res) => {
     connected: isDbLive,
     tablesReady,
     latencyMs,
+    tables: {
+      ready: tablesReady,
+      count: existingTablesList.length,
+      required: REQUIRED_TABLES.length,
+      existing: existingTablesList,
+    },
     diagnostic: dbDiagnosticReason || (isDbLive ? 'ready' : (process.env.DATABASE_URL ? 'connection_failed' : 'no_database_url')),
     pgTest: pgEngineCheck.tested ? pgEngineCheck : undefined,
     connection: getSafeConnectionMetadata(),

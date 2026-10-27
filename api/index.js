@@ -1976,6 +1976,205 @@ if (process.argv[1] && process.argv[1].endsWith("migrate-to-postgres.ts")) {
   runSafeMigration();
 }
 
+// src/server/schemaInit.ts
+var REQUIRED_TABLES = [
+  "meals",
+  "bookings",
+  "booking_items",
+  "payments",
+  "factory_orders",
+  "audit_logs",
+  "admin_users"
+];
+var TABLE_DDL_QUERIES = {
+  meals: `
+    CREATE TABLE IF NOT EXISTS "meals" (
+      "id" TEXT PRIMARY KEY,
+      "code" TEXT UNIQUE NOT NULL,
+      "name" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "ingredients" TEXT NOT NULL,
+      "distributorPrice" DOUBLE PRECISION NOT NULL,
+      "factoryPrice" DOUBLE PRECISION NOT NULL,
+      "hasJuice" BOOLEAN NOT NULL DEFAULT true,
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "image" TEXT,
+      "version" INTEGER NOT NULL DEFAULT 1,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  bookings: `
+    CREATE TABLE IF NOT EXISTS "bookings" (
+      "id" TEXT PRIMARY KEY,
+      "bookingCode" TEXT UNIQUE NOT NULL,
+      "securityCode" TEXT NOT NULL,
+      "customerName" TEXT NOT NULL,
+      "customerPhone" TEXT NOT NULL,
+      "customerWhatsapp" TEXT,
+      "preferredContact" TEXT NOT NULL DEFAULT 'whatsapp',
+      "eventName" TEXT NOT NULL,
+      "eventDate" TEXT NOT NULL,
+      "deliveryTime" TEXT NOT NULL,
+      "deliveryGovernorate" TEXT NOT NULL,
+      "deliveryAddress" TEXT NOT NULL,
+      "notes" TEXT,
+      "totalMealsCount" INTEGER NOT NULL,
+      "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "totalFactoryPrice" DOUBLE PRECISION,
+      "profitMargin" DOUBLE PRECISION,
+      "paidAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+      "remainingAmount" DOUBLE PRECISION NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'INITIAL',
+      "statusNotes" TEXT,
+      "version" INTEGER NOT NULL DEFAULT 1,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  booking_items: `
+    CREATE TABLE IF NOT EXISTS "booking_items" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
+      "mealId" TEXT,
+      "mealCode" TEXT NOT NULL,
+      "mealName" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "ingredients" TEXT NOT NULL,
+      "quantity" INTEGER NOT NULL,
+      "drinkOption" TEXT NOT NULL DEFAULT 'standard',
+      "baseDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "unitDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "baseFactoryPrice" DOUBLE PRECISION,
+      "unitFactoryPrice" DOUBLE PRECISION,
+      "totalFactoryPrice" DOUBLE PRECISION,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  payments: `
+    CREATE TABLE IF NOT EXISTS "payments" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
+      "amount" DOUBLE PRECISION NOT NULL,
+      "method" TEXT NOT NULL,
+      "date" TEXT NOT NULL,
+      "notes" TEXT,
+      "receiptNumber" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  factory_orders: `
+    CREATE TABLE IF NOT EXISTS "factory_orders" (
+      "id" TEXT PRIMARY KEY,
+      "orderNumber" TEXT UNIQUE NOT NULL,
+      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
+      "bookingCode" TEXT NOT NULL,
+      "version" INTEGER NOT NULL DEFAULT 1,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "eventDate" TEXT NOT NULL,
+      "deliveryTime" TEXT NOT NULL,
+      "deliveryLocation" TEXT NOT NULL,
+      "itemsJson" TEXT NOT NULL,
+      "packagingNotes" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  audit_logs: `
+    CREATE TABLE IF NOT EXISTS "audit_logs" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT REFERENCES "bookings"("id") ON DELETE SET NULL,
+      "bookingCode" TEXT NOT NULL,
+      "action" TEXT NOT NULL,
+      "performedBy" TEXT NOT NULL,
+      "details" TEXT NOT NULL,
+      "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  admin_users: `
+    CREATE TABLE IF NOT EXISTS "admin_users" (
+      "id" TEXT PRIMARY KEY,
+      "username" TEXT UNIQUE NOT NULL,
+      "email" TEXT UNIQUE NOT NULL,
+      "name" TEXT NOT NULL,
+      "passwordHash" TEXT NOT NULL,
+      "role" TEXT NOT NULL DEFAULT 'admin',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `
+};
+async function checkTablesStatus(client) {
+  try {
+    const rawTables = await client.$queryRaw`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+    `;
+    const existing = rawTables.map((t) => t.table_name);
+    const existingRequired = REQUIRED_TABLES.filter((t) => existing.includes(t));
+    const missing = REQUIRED_TABLES.filter((t) => !existing.includes(t));
+    return {
+      allReady: missing.length === 0,
+      existingTables: existingRequired,
+      missingTables: missing
+    };
+  } catch (err) {
+    logServerError(err, "SchemaInit.CheckTables");
+    return {
+      allReady: false,
+      existingTables: [],
+      missingTables: REQUIRED_TABLES
+    };
+  }
+}
+async function ensureSchemaReady(client) {
+  const status = await checkTablesStatus(client);
+  const created = [];
+  if (!status.allReady) {
+    for (const tableName of status.missingTables) {
+      const ddl = TABLE_DDL_QUERIES[tableName];
+      if (ddl) {
+        try {
+          await client.$executeRawUnsafe(ddl);
+          created.push(tableName);
+        } catch (err) {
+          logServerError(err, `SchemaInit.CreateTable.${tableName}`);
+        }
+      }
+    }
+  }
+  try {
+    const mealCount = await client.meal.count();
+    if (mealCount === 0) {
+      for (const m of INITIAL_MEALS) {
+        await client.meal.create({
+          data: {
+            id: `meal-${m.code}`,
+            code: m.code,
+            name: m.name,
+            category: m.category,
+            ingredients: m.ingredients,
+            distributorPrice: m.distributorPrice,
+            factoryPrice: m.factoryPrice ?? 0,
+            hasJuice: m.hasJuice ?? true,
+            isActive: m.isActive ?? true,
+            image: m.image
+          }
+        }).catch(() => {
+        });
+      }
+    }
+  } catch {
+  }
+  const postCheck = await checkTablesStatus(client);
+  return {
+    success: postCheck.allReady,
+    created,
+    tablesFound: postCheck.existingTables
+  };
+}
+
 // src/server/routes.ts
 import pg from "pg";
 var apiRouter = Router();
@@ -2019,6 +2218,7 @@ apiRouter.get("/health", async (_req, res) => {
   let latencyMs = void 0;
   let dbDiagnostic = "resilient_storage";
   let dbDiagnosticReason = void 0;
+  let existingTablesList = [];
   let pgEngineCheck = { tested: false, connected: false, phase: "idle" };
   if (process.env.DATABASE_URL) {
     const rawUrl = process.env.DATABASE_URL;
@@ -2061,12 +2261,9 @@ apiRouter.get("/health", async (_req, res) => {
         await client.$queryRaw`SELECT 1`;
         isDbLive = true;
         latencyMs = Date.now() - start;
-        const tables = await client.$queryRaw`
-          SELECT table_name 
-          FROM information_schema.tables 
-          WHERE table_schema = 'public' AND table_name IN ('bookings', 'meals')
-        `;
-        tablesReady = tables.length >= 2;
+        const schemaInitResult = await ensureSchemaReady(client);
+        tablesReady = schemaInitResult.success;
+        existingTablesList = schemaInitResult.tablesFound;
         dbDiagnostic = "postgresql";
       }
     } catch (err) {
@@ -2084,6 +2281,12 @@ apiRouter.get("/health", async (_req, res) => {
     connected: isDbLive,
     tablesReady,
     latencyMs,
+    tables: {
+      ready: tablesReady,
+      count: existingTablesList.length,
+      required: REQUIRED_TABLES.length,
+      existing: existingTablesList
+    },
     diagnostic: dbDiagnosticReason || (isDbLive ? "ready" : process.env.DATABASE_URL ? "connection_failed" : "no_database_url"),
     pgTest: pgEngineCheck.tested ? pgEngineCheck : void 0,
     connection: getSafeConnectionMetadata(),
