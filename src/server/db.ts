@@ -292,6 +292,7 @@ export const db = {
     deliveryGovernorate: string;
     deliveryAddress: string;
     notes?: string;
+    isTest?: boolean;
     items: {
       mealCode: string;
       quantity: number;
@@ -364,6 +365,11 @@ export const db = {
 
     const securityCode = generateSecurityCode();
     const now = new Date().toISOString();
+    const isTest = data.isTest ?? Boolean(
+      data.customerName.includes('تجريب') ||
+      (data.notes && data.notes.includes('تجريب')) ||
+      data.eventName.includes('تجريب')
+    );
 
     const newBooking: Booking = {
       id: `bk-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -388,12 +394,14 @@ export const db = {
       remainingAmount: totalDistributorPrice,
       status: 'INITIAL',
       statusNotes: 'حجز مبدئي جديد مسجل عبر الموقع',
+      isTest,
       version: 1,
       createdAt: now,
       updatedAt: now,
     };
 
     memoryDB.bookings.unshift(newBooking);
+    saveLocalDB(memoryDB);
 
     if (databaseUrl) {
       try {
@@ -422,6 +430,7 @@ export const db = {
               remainingAmount: newBooking.remainingAmount,
               status: 'INITIAL',
               statusNotes: newBooking.statusNotes,
+              isTest,
               version: 1,
               items: {
                 create: validatedItems.map(it => ({
@@ -466,6 +475,126 @@ export const db = {
   },
 
   async getBookings(filters?: { status?: string; search?: string }): Promise<Booking[]> {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const whereClause: any = {};
+          if (filters?.status && filters.status !== 'ALL') {
+            whereClause.status = filters.status;
+          }
+          if (filters?.search) {
+            const q = filters.search.trim();
+            whereClause.OR = [
+              { bookingCode: { contains: q, mode: 'insensitive' } },
+              { customerName: { contains: q, mode: 'insensitive' } },
+              { customerPhone: { contains: q } },
+              { eventName: { contains: q, mode: 'insensitive' } },
+            ];
+          }
+
+          const dbBookings = await client.booking.findMany({
+            where: whereClause,
+            include: {
+              items: true,
+              payments: true,
+              factoryOrders: true,
+              auditLogs: true,
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (dbBookings && dbBookings.length > 0) {
+            return dbBookings.map(b => ({
+              id: b.id,
+              bookingCode: b.bookingCode,
+              securityCode: b.securityCode,
+              customerName: b.customerName,
+              customerPhone: b.customerPhone,
+              customerWhatsapp: b.customerWhatsapp || b.customerPhone,
+              preferredContact: (b.preferredContact || 'whatsapp') as any,
+              eventName: b.eventName,
+              eventDate: b.eventDate,
+              deliveryTime: b.deliveryTime,
+              deliveryGovernorate: b.deliveryGovernorate,
+              deliveryAddress: b.deliveryAddress,
+              notes: b.notes || '',
+              totalMealsCount: b.totalMealsCount,
+              totalDistributorPrice: b.totalDistributorPrice,
+              totalFactoryPrice: b.totalFactoryPrice || 0,
+              profitMargin: b.profitMargin || (b.totalDistributorPrice - (b.totalFactoryPrice || 0)),
+              paidAmount: b.paidAmount,
+              remainingAmount: b.remainingAmount,
+              status: (b.status || 'INITIAL') as any,
+              statusNotes: b.statusNotes || '',
+              isTest: b.isTest ?? (b.bookingCode === 'CLB-2026-1699' || b.customerName.includes('تجريب')),
+              version: b.version,
+              createdAt: b.createdAt.toISOString(),
+              updatedAt: b.updatedAt.toISOString(),
+              items: b.items.map(it => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category as any,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: (it.drinkOption || 'standard') as any,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice || 0,
+                unitFactoryPrice: it.unitFactoryPrice || 0,
+                totalFactoryPrice: it.totalFactoryPrice || 0,
+              })),
+              payments: b.payments.map(p => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method as any,
+                date: p.date,
+                notes: p.notes || '',
+                receiptNumber: p.receiptNumber || '',
+                createdAt: p.createdAt.toISOString(),
+              })),
+              factoryOrders: b.factoryOrders.map(fo => {
+                let parsedItems = [];
+                try {
+                  parsedItems = JSON.parse(fo.itemsJson);
+                } catch {}
+                return {
+                  id: fo.id,
+                  orderNumber: fo.orderNumber,
+                  bookingId: fo.bookingId,
+                  bookingCode: fo.bookingCode,
+                  version: fo.version,
+                  status: fo.status as any,
+                  eventDate: fo.eventDate,
+                  deliveryTime: fo.deliveryTime,
+                  deliveryLocation: fo.deliveryLocation,
+                  factoryCostTotal: 0,
+                  items: parsedItems,
+                  packagingNotes: fo.packagingNotes || '',
+                  createdAt: fo.createdAt.toISOString(),
+                  updatedAt: fo.updatedAt.toISOString(),
+                };
+              }),
+              auditLogs: b.auditLogs.map(al => ({
+                id: al.id,
+                bookingId: al.bookingId || '',
+                action: al.action,
+                performedBy: al.performedBy,
+                details: al.details,
+                timestamp: al.timestamp.toISOString(),
+              })),
+            }));
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.getBookings.prisma');
+      }
+    }
+
+    // Fallback to local memoryDB
     memoryDB = loadLocalDB();
     let results = [...memoryDB.bookings];
 
@@ -483,9 +612,9 @@ export const db = {
       );
     }
 
-    // Attach payments & factory orders
     return results.map(b => ({
       ...b,
+      isTest: b.isTest ?? (b.bookingCode === 'CLB-2026-1699' || b.customerName.includes('تجريب')),
       payments: memoryDB.payments.filter(p => p.bookingId === b.id),
       factoryOrders: memoryDB.factoryOrders.filter(fo => fo.bookingId === b.id),
       auditLogs: memoryDB.auditLogs.filter(al => al.bookingId === b.id),
@@ -493,12 +622,121 @@ export const db = {
   },
 
   async getBookingById(id: string): Promise<Booking | null> {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const b = await client.booking.findFirst({
+            where: {
+              OR: [
+                { id },
+                { bookingCode: id },
+              ],
+            },
+            include: {
+              items: true,
+              payments: true,
+              factoryOrders: true,
+              auditLogs: true,
+            },
+          });
+          if (b) {
+            return {
+              id: b.id,
+              bookingCode: b.bookingCode,
+              securityCode: b.securityCode,
+              customerName: b.customerName,
+              customerPhone: b.customerPhone,
+              customerWhatsapp: b.customerWhatsapp || b.customerPhone,
+              preferredContact: (b.preferredContact || 'whatsapp') as any,
+              eventName: b.eventName,
+              eventDate: b.eventDate,
+              deliveryTime: b.deliveryTime,
+              deliveryGovernorate: b.deliveryGovernorate,
+              deliveryAddress: b.deliveryAddress,
+              notes: b.notes || '',
+              totalMealsCount: b.totalMealsCount,
+              totalDistributorPrice: b.totalDistributorPrice,
+              totalFactoryPrice: b.totalFactoryPrice || 0,
+              profitMargin: b.profitMargin || (b.totalDistributorPrice - (b.totalFactoryPrice || 0)),
+              paidAmount: b.paidAmount,
+              remainingAmount: b.remainingAmount,
+              status: (b.status || 'INITIAL') as any,
+              statusNotes: b.statusNotes || '',
+              isTest: b.isTest ?? (b.bookingCode === 'CLB-2026-1699' || b.customerName.includes('تجريب')),
+              version: b.version,
+              createdAt: b.createdAt.toISOString(),
+              updatedAt: b.updatedAt.toISOString(),
+              items: b.items.map(it => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category as any,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: (it.drinkOption || 'standard') as any,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice || 0,
+                unitFactoryPrice: it.unitFactoryPrice || 0,
+                totalFactoryPrice: it.totalFactoryPrice || 0,
+              })),
+              payments: b.payments.map(p => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method as any,
+                date: p.date,
+                notes: p.notes || '',
+                receiptNumber: p.receiptNumber || '',
+                createdAt: p.createdAt.toISOString(),
+              })),
+              factoryOrders: b.factoryOrders.map(fo => {
+                let parsedItems = [];
+                try {
+                  parsedItems = JSON.parse(fo.itemsJson);
+                } catch {}
+                return {
+                  id: fo.id,
+                  orderNumber: fo.orderNumber,
+                  bookingId: fo.bookingId,
+                  bookingCode: fo.bookingCode,
+                  version: fo.version,
+                  status: fo.status as any,
+                  eventDate: fo.eventDate,
+                  deliveryTime: fo.deliveryTime,
+                  deliveryLocation: fo.deliveryLocation,
+                  factoryCostTotal: 0,
+                  items: parsedItems,
+                  packagingNotes: fo.packagingNotes || '',
+                  createdAt: fo.createdAt.toISOString(),
+                  updatedAt: fo.updatedAt.toISOString(),
+                };
+              }),
+              auditLogs: b.auditLogs.map(al => ({
+                id: al.id,
+                bookingId: al.bookingId || '',
+                action: al.action,
+                performedBy: al.performedBy,
+                details: al.details,
+                timestamp: al.timestamp.toISOString(),
+              })),
+            };
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.getBookingById.prisma');
+      }
+    }
+
     memoryDB = loadLocalDB();
     const b = memoryDB.bookings.find(item => item.id === id || item.bookingCode === id);
     if (!b) return null;
 
     return {
       ...b,
+      isTest: b.isTest ?? (b.bookingCode === 'CLB-2026-1699' || b.customerName.includes('تجريب')),
       payments: memoryDB.payments.filter(p => p.bookingId === b.id),
       factoryOrders: memoryDB.factoryOrders.filter(fo => fo.bookingId === b.id),
       auditLogs: memoryDB.auditLogs.filter(al => al.bookingId === b.id),
@@ -731,22 +969,91 @@ export const db = {
     return payment;
   },
 
-  async createFactoryOrder(bookingId: string, performedBy = 'الإدارة'): Promise<FactoryOrder> {
-    memoryDB = loadLocalDB();
-    const booking = memoryDB.bookings.find(b => b.id === bookingId);
+  async getFactoryOrderPreview(bookingId: string) {
+    const booking = await this.getBookingById(bookingId);
+    if (!booking) {
+      throw new Error('الحجز غير موجود لحساب معاينة أمر المصنع');
+    }
+
+    const meals = await this.getMeals(true);
+    const mealsMap = new Map(meals.map(m => [m.code, m]));
+
+    let totalFactoryCost = 0;
+    const previewItems = booking.items.map(item => {
+      const meal = mealsMap.get(item.mealCode);
+      const baseFactPrice = meal?.factoryPrice ?? item.baseFactoryPrice ?? 0;
+      let drinkDelta = 0;
+      if (item.drinkOption === 'no_juice') {
+        drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+      } else if (item.drinkOption === 'pepsi') {
+        drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+      }
+      const unitFactPrice = Math.max(0, baseFactPrice + drinkDelta);
+      const totalFactItemPrice = unitFactPrice * item.quantity;
+      totalFactoryCost += totalFactItemPrice;
+
+      return {
+        mealCode: item.mealCode,
+        mealName: item.mealName,
+        quantity: item.quantity,
+        drinkOption: item.drinkOption,
+        ingredients: meal?.ingredients || item.ingredients,
+        unitFactoryPrice: unitFactPrice,
+        totalFactoryPrice: totalFactItemPrice,
+        specialInstructions: item.drinkOption === 'no_juice' 
+          ? 'بدون عصير (-5 ج)' 
+          : item.drinkOption === 'pepsi' 
+          ? 'استبدال العصير بكانز بيبسي (+10 ج)' 
+          : 'عصير بخيرة القياسي',
+      };
+    });
+
+    const existingOrders = (booking.factoryOrders || []).concat(
+      memoryDB.factoryOrders.filter(fo => fo.bookingId === booking.id)
+    );
+    const uniqueExisting = Array.from(new Map(existingOrders.map(o => [o.orderNumber, o])).values());
+
+    return {
+      bookingId: booking.id,
+      bookingCode: booking.bookingCode,
+      eventName: booking.eventName,
+      eventDate: booking.eventDate,
+      deliveryTime: booking.deliveryTime,
+      deliveryLocation: `${booking.deliveryGovernorate} - ${booking.deliveryAddress}`,
+      totalMealsCount: booking.totalMealsCount,
+      totalFactoryCost,
+      items: previewItems,
+      existingOrdersCount: uniqueExisting.length,
+      existingOrders: uniqueExisting,
+      packagingNotes: `العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. ${booking.notes || ''}`.trim(),
+    };
+  },
+
+  async createFactoryOrder(bookingId: string, performedBy = 'الإدارة', options?: { forceNewVersion?: boolean }): Promise<FactoryOrder> {
+    const booking = await this.getBookingById(bookingId);
     if (!booking) {
       throw new Error('الحجز غير موجود لإصدار أمر المصنع');
     }
 
-    // Check existing factory orders for this booking to handle versioning
-    const existingOrders = memoryDB.factoryOrders.filter(fo => fo.bookingId === bookingId);
-    const version = existingOrders.length + 1;
+    memoryDB = loadLocalDB();
+    const existingOrders = (booking.factoryOrders || []).concat(
+      memoryDB.factoryOrders.filter(fo => fo.bookingId === bookingId)
+    );
+    const uniqueExisting = Array.from(new Map(existingOrders.map(o => [o.orderNumber, o])).values());
 
+    if (uniqueExisting.length > 0 && !options?.forceNewVersion) {
+      const latest = uniqueExisting[uniqueExisting.length - 1];
+      throw new Error(`يوجد بالفعل أمر مصنع صادر لهذا الحجز (${latest.orderNumber} - الإصدار v${latest.version}). إذا تم تعديل الحجز وتريد إصدار نسخة عمل جديدة للمصنع، يرجى تأكيد خيار "إصدار نسخة عمل جديدة".`);
+    }
+
+    const version = uniqueExisting.length + 1;
     memoryDB.factoryOrderCounter += 1;
-    const orderNumber = `FO-2026-${memoryDB.factoryOrderCounter}`;
+    const orderNumber = `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`;
+
+    const preview = await this.getFactoryOrderPreview(bookingId);
 
     const factoryOrder: FactoryOrder = {
-      id: `fo-${Date.now()}`,
+      id: `fo-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       orderNumber,
       bookingId: booking.id,
       bookingCode: booking.bookingCode,
@@ -754,44 +1061,65 @@ export const db = {
       status: 'PENDING',
       eventDate: booking.eventDate,
       deliveryTime: booking.deliveryTime,
-      deliveryLocation: `${booking.deliveryGovernorate} - ${booking.deliveryAddress}`,
-      factoryCostTotal: booking.totalFactoryPrice || 0,
-      // Strictly separate kitchen information:
-      // quantities, meal codes, ingredients list, drink option, packaging notes, factory unit cost
-      // STRICTLY NO distributor prices or profit margins!
-      items: booking.items.map(item => ({
-        mealCode: item.mealCode,
-        mealName: item.mealName,
-        quantity: item.quantity,
-        drinkOption: item.drinkOption,
-        ingredients: item.ingredients,
-        unitFactoryPrice: item.unitFactoryPrice,
-        totalFactoryPrice: item.totalFactoryPrice,
-        specialInstructions: item.drinkOption === 'no_juice' 
-          ? 'بدون عصير' 
-          : item.drinkOption === 'pepsi' 
-          ? 'استبدال العصير بكانز بيبسي' 
-          : 'عصير بخيرة القياسي',
-      })),
-      packagingNotes: `العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. ${booking.notes || ''}`.trim(),
+      deliveryLocation: preview.deliveryLocation,
+      factoryCostTotal: preview.totalFactoryCost,
+      items: preview.items,
+      packagingNotes: preview.packagingNotes,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     memoryDB.factoryOrders.unshift(factoryOrder);
 
-    // Update booking status to IN_PRODUCTION if confirmed
-    if (booking.status === 'CONFIRMED' || booking.status === 'PENDING_CONFIRMATION') {
-      booking.status = 'IN_PRODUCTION';
-      booking.statusNotes = `تم إصدار أمر تشغيل المصنع رقم ${orderNumber} (الإصدار v${version})`;
-      booking.updatedAt = new Date().toISOString();
+    // Save to PostgreSQL if databaseUrl is present
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.create({
+            data: {
+              id: factoryOrder.id,
+              orderNumber: factoryOrder.orderNumber,
+              bookingId: factoryOrder.bookingId,
+              bookingCode: factoryOrder.bookingCode,
+              version: factoryOrder.version,
+              status: factoryOrder.status,
+              eventDate: factoryOrder.eventDate,
+              deliveryTime: factoryOrder.deliveryTime,
+              deliveryLocation: factoryOrder.deliveryLocation,
+              itemsJson: JSON.stringify(factoryOrder.items),
+              packagingNotes: factoryOrder.packagingNotes,
+            },
+          });
+
+          // Transition booking status in PostgreSQL to IN_PRODUCTION
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: 'IN_PRODUCTION',
+              statusNotes: `تم تحويل الحجز للمصنع وإصدار أمر التشغيل ${orderNumber} (الإصدار v${version})`,
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.createFactoryOrder.prisma');
+      }
+    }
+
+    // Update memory booking
+    const memBooking = memoryDB.bookings.find(b => b.id === booking.id);
+    if (memBooking) {
+      memBooking.status = 'IN_PRODUCTION';
+      memBooking.statusNotes = `تم إصدار أمر تشغيل المصنع رقم ${orderNumber} (الإصدار v${version})`;
+      memBooking.updatedAt = new Date().toISOString();
     }
 
     this.addAuditLog({
       bookingId: booking.id,
       action: 'إصدار أمر تشغيل المصنع',
       performedBy,
-      details: `تم إصدار أمر المصنع رقم ${orderNumber} (الإصدار ${version}) بإجمالي ${booking.totalMealsCount} وجبة بدون إظهار هوامش الربح.`,
+      details: `تم إصدار أمر تشغيل المصنع ${orderNumber} (الإصدار v${version}) بإجمالي ${booking.totalMealsCount} وجبة وتكلفة مصنع ${preview.totalFactoryCost} ج (خالٍ تماماً من هوامش ربح الموزع).`,
     });
 
     saveLocalDB(memoryDB);
@@ -799,6 +1127,44 @@ export const db = {
   },
 
   async getFactoryOrders(): Promise<FactoryOrder[]> {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbOrders = await client.factoryOrder.findMany({
+            orderBy: { createdAt: 'desc' },
+          });
+          if (dbOrders && dbOrders.length > 0) {
+            return dbOrders.map(fo => {
+              let parsedItems = [];
+              try {
+                parsedItems = JSON.parse(fo.itemsJson);
+              } catch {}
+              const costTotal = parsedItems.reduce((acc: number, item: any) => acc + (item.totalFactoryPrice || 0), 0);
+              return {
+                id: fo.id,
+                orderNumber: fo.orderNumber,
+                bookingId: fo.bookingId,
+                bookingCode: fo.bookingCode,
+                version: fo.version,
+                status: fo.status as any,
+                eventDate: fo.eventDate,
+                deliveryTime: fo.deliveryTime,
+                deliveryLocation: fo.deliveryLocation,
+                factoryCostTotal: costTotal,
+                items: parsedItems,
+                packagingNotes: fo.packagingNotes || '',
+                createdAt: fo.createdAt.toISOString(),
+                updatedAt: fo.updatedAt.toISOString(),
+              };
+            });
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.getFactoryOrders.prisma');
+      }
+    }
+
     memoryDB = loadLocalDB();
     return memoryDB.factoryOrders;
   },
@@ -810,6 +1176,20 @@ export const db = {
 
     fo.status = status;
     fo.updatedAt = new Date().toISOString();
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.updateMany({
+            where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
+            data: { status, updatedAt: new Date() },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateFactoryOrderStatus.prisma');
+      }
+    }
 
     const booking = memoryDB.bookings.find(b => b.id === fo.bookingId);
     if (booking) {
@@ -840,11 +1220,61 @@ export const db = {
       timestamp: new Date().toISOString(),
       ...log,
     };
+    if (!memoryDB || !Array.isArray(memoryDB.auditLogs)) {
+      memoryDB = loadLocalDB();
+    }
     memoryDB.auditLogs.unshift(newLog);
+    saveLocalDB(memoryDB);
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.auditLog.create({
+            data: {
+              id: newLog.id,
+              bookingId: newLog.bookingId || null,
+              action: newLog.action,
+              performedBy: newLog.performedBy,
+              details: newLog.details,
+            },
+          });
+        }
+      } catch (err: any) {
+        // Safe logging without interrupting response
+        logServerError(err, 'db.addAuditLog.prisma');
+      }
+    }
+
     return newLog;
   },
 
   async getAuditLogs(bookingId?: string): Promise<AuditLog[]> {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const logs = await client.auditLog.findMany({
+            where: bookingId ? { bookingId } : undefined,
+            orderBy: { timestamp: 'desc' },
+            take: 50,
+          });
+          if (logs && logs.length > 0) {
+            return logs.map(l => ({
+              id: l.id,
+              bookingId: l.bookingId || '',
+              action: l.action,
+              performedBy: l.performedBy,
+              details: l.details,
+              timestamp: l.timestamp.toISOString(),
+            }));
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.getAuditLogs.prisma');
+      }
+    }
+
     memoryDB = loadLocalDB();
     if (bookingId) {
       return memoryDB.auditLogs.filter(l => l.bookingId === bookingId);
@@ -853,14 +1283,14 @@ export const db = {
   },
 
   async getStats() {
-    memoryDB = loadLocalDB();
-    const totalBookings = memoryDB.bookings.length;
+    const bookings = await this.getBookings();
+    const totalBookings = bookings.length;
     let totalMeals = 0;
     let totalRevenue = 0;
     let totalFactoryCost = 0;
     let totalCollected = 0;
 
-    memoryDB.bookings.forEach(b => {
+    bookings.forEach(b => {
       if (b.status !== 'CANCELLED') {
         totalMeals += b.totalMealsCount;
         totalRevenue += b.totalDistributorPrice;
@@ -871,6 +1301,8 @@ export const db = {
 
     const totalProfit = totalRevenue - totalFactoryCost;
     const totalOutstanding = Math.max(0, totalRevenue - totalCollected);
+    const meals = await this.getMeals(true);
+    const factoryOrders = await this.getFactoryOrders();
 
     return {
       totalBookings,
@@ -880,12 +1312,46 @@ export const db = {
       totalProfit,
       totalCollected,
       totalOutstanding,
-      activeMealsCount: memoryDB.meals.filter(m => m.isActive).length,
-      factoryOrdersCount: memoryDB.factoryOrders.length,
+      activeMealsCount: meals.filter(m => m.isActive).length,
+      factoryOrdersCount: factoryOrders.length,
     };
   },
 
   async verifyAdmin(username: string, password: string): Promise<AdminUser | null> {
+    if (!username || !password) return null;
+
+    // 1. Check PostgreSQL via Prisma ORM
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbUser = await client.adminUser.findFirst({
+            where: {
+              OR: [
+                { username: { equals: username, mode: 'insensitive' } },
+                { email: { equals: username, mode: 'insensitive' } },
+              ],
+            },
+          });
+          if (dbUser) {
+            const isValid = bcrypt.compareSync(password, dbUser.passwordHash);
+            if (isValid) {
+              return {
+                id: dbUser.id,
+                username: dbUser.username,
+                email: dbUser.email,
+                name: dbUser.name,
+                role: dbUser.role as any,
+              };
+            }
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.verifyAdmin.prisma');
+      }
+    }
+
+    // 2. Check local memoryDB
     memoryDB = loadLocalDB();
     const user = memoryDB.adminUsers.find(
       u => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
@@ -897,5 +1363,160 @@ export const db = {
 
     const { passwordHash, ...safeUser } = user;
     return safeUser;
+  },
+
+  async updateAdminPassword(username: string, newPasswordHash: string, performedBy = 'الإدارة'): Promise<boolean> {
+    // 1. Update memoryDB
+    memoryDB = loadLocalDB();
+    const user = memoryDB.adminUsers.find(
+      u => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
+    );
+    if (user) {
+      user.passwordHash = newPasswordHash;
+      saveLocalDB(memoryDB);
+    }
+
+    // 2. Update PostgreSQL
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.adminUser.updateMany({
+            where: {
+              OR: [
+                { username: { equals: username, mode: 'insensitive' } },
+                { email: { equals: username, mode: 'insensitive' } },
+              ],
+            },
+            data: {
+              passwordHash: newPasswordHash,
+            },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateAdminPassword.prisma');
+      }
+    }
+
+    // 3. Log audit event
+    await this.addAuditLog({
+      bookingId: '',
+      action: 'تغيير كلمة مرور الإداري',
+      performedBy,
+      details: `تم تغيير كلمة المرور للمستخدم (${username}) بنجاح، وتشفيرها عبر bcrypt وإلغاء جميع الجلسات القديمة فوراً.`,
+    });
+
+    return true;
+  },
+
+  // STRICT TEST BOOKING MANAGEMENT: Only bookings with isTest === true can be modified or deleted
+  async updateTestBooking(id: string, updates: Partial<Booking>, performedBy = 'الإدارة'): Promise<Booking> {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error('الحجز غير موجود');
+    }
+
+    const isTest = Boolean(booking.isTest || booking.bookingCode === 'CLB-2026-1699' || booking.customerName.includes('تجريب'));
+    if (!isTest) {
+      throw new Error('ممنوع: لا يمكن تعديل سوى الحجوزات التجريبية فقط (isTest: true). الحجوزات الحقيقية والتاريخية محمية بالكامل ولا تقبل التعديل من هذا المسار.');
+    }
+
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+
+    const updatedBooking: Booking = {
+      ...booking,
+      ...updates,
+      version: booking.version + 1,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              customerName: updates.customerName ?? booking.customerName,
+              customerPhone: updates.customerPhone ?? booking.customerPhone,
+              eventName: updates.eventName ?? booking.eventName,
+              eventDate: updates.eventDate ?? booking.eventDate,
+              deliveryTime: updates.deliveryTime ?? booking.deliveryTime,
+              deliveryGovernorate: updates.deliveryGovernorate ?? booking.deliveryGovernorate,
+              deliveryAddress: updates.deliveryAddress ?? booking.deliveryAddress,
+              notes: updates.notes !== undefined ? updates.notes : booking.notes,
+              status: updates.status ?? booking.status,
+              version: updatedBooking.version,
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateTestBooking.prisma');
+      }
+    }
+
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: 'تعديل حجز تجريبي',
+      performedBy,
+      details: `تم تعديل بيانات الحجز التجريبي ${booking.bookingCode} (الإصدار v${updatedBooking.version}).`,
+    });
+
+    return updatedBooking;
+  },
+
+  async deleteTestBooking(id: string, performedBy = 'الإدارة'): Promise<{ success: boolean; bookingCode: string }> {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error('الحجز غير موجود');
+    }
+
+    const isTest = Boolean(booking.isTest || booking.bookingCode === 'CLB-2026-1699' || booking.customerName.includes('تجريب'));
+    if (!isTest) {
+      throw new Error('ممنوع منعاً باتاً: لا يمكن حذف سوى الحجوزات التجريبية فقط (isTest: true). الحجوزات الحقيقية للعملاء محمية ولا يجوز حذفها.');
+    }
+
+    const bookingCode = booking.bookingCode;
+    const targetId = booking.id;
+
+    // Delete from PostgreSQL
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          // Delete child records first
+          await client.bookingItem.deleteMany({ where: { bookingId: targetId } });
+          await client.payment.deleteMany({ where: { bookingId: targetId } });
+          await client.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+          await client.auditLog.deleteMany({ where: { bookingId: targetId } });
+          await client.booking.delete({ where: { id: targetId } });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.deleteTestBooking.prisma');
+      }
+    }
+
+    // Delete from memoryDB
+    memoryDB = loadLocalDB();
+    memoryDB.bookings = memoryDB.bookings.filter(b => b.id !== targetId && b.bookingCode !== bookingCode);
+    memoryDB.payments = memoryDB.payments.filter(p => p.bookingId !== targetId);
+    memoryDB.factoryOrders = memoryDB.factoryOrders.filter(fo => fo.bookingId !== targetId);
+    saveLocalDB(memoryDB);
+
+    await this.addAuditLog({
+      bookingId: '',
+      action: 'حذف حجز تجريبي',
+      performedBy,
+      details: `تم حذف الحجز التجريبي رقم ${bookingCode} بكافة بنوده التجريبية بعد التأكيد الصريح.`,
+    });
+
+    return { success: true, bookingCode };
   },
 };

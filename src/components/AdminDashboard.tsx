@@ -11,6 +11,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   FileText,
   Printer,
   Edit,
@@ -25,6 +26,9 @@ import {
   MapPin,
   Phone,
   MessageCircle,
+  Key,
+  Trash2,
+  Check,
   X
 } from 'lucide-react';
 
@@ -52,7 +56,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'factory_orders' | 'menu' | 'audit' | 'system'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'factory_orders' | 'menu' | 'audit' | 'system' | 'password'>('overview');
+
+  // Session & notice state
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
 
   // Data states
   const [stats, setStats] = useState<any>(null);
@@ -73,10 +80,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentRecord['method']>('vodafone_cash');
   const [paymentNotes, setPaymentNotes] = useState('');
 
+  // Password Change State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  // Factory Order Review Modal State (strictly server authoritative factory prices & duplicate prevention)
+  const [isFactoryReviewOpen, setIsFactoryReviewOpen] = useState(false);
+  const [factoryPreviewData, setFactoryPreviewData] = useState<any | null>(null);
+  const [isLoadingFactoryPreview, setIsLoadingFactoryPreview] = useState(false);
+  const [forceNewVersion, setForceNewVersion] = useState(false);
+  const [isSubmittingFactoryOrder, setIsSubmittingFactoryOrder] = useState(false);
+  const [factoryOrderError, setFactoryOrderError] = useState<string | null>(null);
+
+  // Test Booking Delete Confirmation Modal State
+  const [deletingTestBooking, setDeletingTestBooking] = useState<Booking | null>(null);
+  const [isDeletingBooking, setIsDeletingBooking] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Test Booking Edit Modal State
+  const [editingTestBooking, setEditingTestBooking] = useState<Booking | null>(null);
+  const [isSavingTestBooking, setIsSavingTestBooking] = useState(false);
+  const [testEditError, setTestEditError] = useState<string | null>(null);
+
   // Edit Meal State
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
 
-  // Edit Booking State
+  // Edit Booking State (General scheduling updates)
   const [isEditBookingModalOpen, setIsEditBookingModalOpen] = useState(false);
   const [editEventDate, setEditEventDate] = useState('');
   const [editDeliveryTime, setEditDeliveryTime] = useState('');
@@ -87,6 +120,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Selected Factory Order for printing
   const [printingFactoryOrder, setPrintingFactoryOrder] = useState<FactoryOrder | null>(null);
 
+  // Handle 401 and server-enforced 15-minute inactivity timeout
+  const handleAuthError = (status: number, data?: any): boolean => {
+    if (status === 401) {
+      const isTimeout = data?.code === 'SESSION_INACTIVITY_TIMEOUT';
+      const msg = isTimeout 
+        ? 'انتهت الجلسة بسبب عدم النشاط (15 دقيقة). يرجى تسجيل الدخول مجدداً.'
+        : (data?.error || 'جلسة الدخول منتهية أو غير صالحة، يرجى تسجيل الدخول مجدداً.');
+      
+      setToken(null);
+      setCurrentUser(null);
+      localStorage.removeItem('celebre_admin_token');
+      localStorage.removeItem('celebre_admin_user');
+      setSessionNotice(msg);
+      setLoginError(msg);
+      return true;
+    }
+    return false;
+  };
+
   // Load data when authenticated
   useEffect(() => {
     if (token && isOpen) {
@@ -95,6 +147,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [token, isOpen]);
 
   const loadAllData = async () => {
+    if (!token) return;
     setIsLoadingData(true);
     try {
       const headers = { Authorization: `Bearer ${token}` };
@@ -102,24 +155,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       // Stats
       if (currentUser?.role !== 'factory') {
         const statsRes = await fetch('/api/admin/stats', { headers });
+        if (statsRes.status === 401) {
+          handleAuthError(401, await statsRes.json());
+          return;
+        }
         if (statsRes.ok) setStats(await statsRes.json());
       }
 
       // Bookings
       const bookingsRes = await fetch('/api/admin/bookings', { headers });
+      if (bookingsRes.status === 401) {
+        handleAuthError(401, await bookingsRes.json());
+        return;
+      }
       if (bookingsRes.ok) setBookings(await bookingsRes.json());
 
       // Factory Orders
       const foRes = await fetch('/api/admin/factory-orders', { headers });
+      if (foRes.status === 401) {
+        handleAuthError(401, await foRes.json());
+        return;
+      }
       if (foRes.ok) setFactoryOrders(await foRes.json());
 
       // Meals
       const mealsRes = await fetch('/api/admin/meals', { headers });
+      if (mealsRes.status === 401) {
+        handleAuthError(401, await mealsRes.json());
+        return;
+      }
       if (mealsRes.ok) setMeals(await mealsRes.json());
 
       // Audit Logs
       if (currentUser?.role !== 'factory') {
         const auditRes = await fetch('/api/admin/audit-logs', { headers });
+        if (auditRes.status === 401) {
+          handleAuthError(401, await auditRes.json());
+          return;
+        }
         if (auditRes.ok) setAuditLogs(await auditRes.json());
       }
     } catch (err) {
@@ -133,6 +206,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     setIsLoggingIn(true);
     setLoginError(null);
+    setSessionNotice(null);
 
     try {
       const res = await fetch('/api/admin/auth/login', {
@@ -163,11 +237,213 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleLogout = () => {
-    setToken(null);
-    setCurrentUser(null);
-    localStorage.removeItem('celebre_admin_token');
-    localStorage.removeItem('celebre_admin_user');
+  const handleLogout = async () => {
+    try {
+      if (token) {
+        await fetch('/api/admin/auth/logout', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+    } catch (err) {
+      console.error('Error logging out on server:', err);
+    } finally {
+      setToken(null);
+      setCurrentUser(null);
+      localStorage.removeItem('celebre_admin_token');
+      localStorage.removeItem('celebre_admin_user');
+      setSelectedBooking(null);
+      setIsPaymentModalOpen(false);
+      setIsFactoryReviewOpen(false);
+      setDeletingTestBooking(null);
+      setEditingTestBooking(null);
+      setSessionNotice('تم تسجيل الخروج بنجاح وإلغاء الجلسة على الخادم.');
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('كلمة المرور الجديدة غير متطابقة مع التأكيد');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError('يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await fetch('/api/admin/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+          confirmPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تغيير كلمة المرور');
+      }
+
+      setPasswordSuccess(data.message || 'تم تحديث كلمة المرور بنجاح.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+
+      // Auto force logout after 2.5 seconds to mandate re-login with new password
+      setTimeout(() => {
+        handleLogout();
+        setLoginError('تم تغيير كلمة المرور بنجاح. يرجى تسجيل الدخول بكلمة المرور الجديدة.');
+      }, 2500);
+    } catch (err: any) {
+      setPasswordError(err.message || 'حدث خطأ أثناء تغيير كلمة المرور');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleOpenFactoryReview = async (bookingId: string) => {
+    setIsLoadingFactoryPreview(true);
+    setFactoryOrderError(null);
+    setForceNewVersion(false);
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/factory-preview`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تحميل معاينة أمر المصنع');
+      }
+      setFactoryPreviewData(data.preview);
+      setIsFactoryReviewOpen(true);
+    } catch (err: any) {
+      alert(err.message || 'فشل فتح معاينة أمر المصنع');
+    } finally {
+      setIsLoadingFactoryPreview(false);
+    }
+  };
+
+  const handleConfirmFactoryOrder = async () => {
+    if (!factoryPreviewData) return;
+    setIsSubmittingFactoryOrder(true);
+    setFactoryOrderError(null);
+    try {
+      const res = await fetch(`/api/admin/bookings/${factoryPreviewData.bookingId}/factory-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ forceNewVersion }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل إصدار أمر المصنع');
+      }
+
+      setIsFactoryReviewOpen(false);
+      loadAllData();
+      if (selectedBooking && selectedBooking.id === factoryPreviewData.bookingId) {
+        const updatedBookingRes = await fetch(`/api/admin/bookings/${factoryPreviewData.bookingId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (updatedBookingRes.ok) {
+          setSelectedBooking(await updatedBookingRes.json());
+        }
+      }
+      setPrintingFactoryOrder(data.factoryOrder);
+    } catch (err: any) {
+      setFactoryOrderError(err.message || 'حدث خطأ أثناء إصدار أمر المصنع');
+    } finally {
+      setIsSubmittingFactoryOrder(false);
+    }
+  };
+
+  const handleConfirmDeleteTestBooking = async () => {
+    if (!deletingTestBooking) return;
+    setIsDeletingBooking(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/bookings/${deletingTestBooking.id}/test-delete`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حذف الحجز التجريبي');
+      }
+
+      setDeletingTestBooking(null);
+      if (selectedBooking && selectedBooking.id === deletingTestBooking.id) {
+        setSelectedBooking(null);
+      }
+      loadAllData();
+    } catch (err: any) {
+      setDeleteError(err.message || 'فشل حذف الحجز');
+    } finally {
+      setIsDeletingBooking(false);
+    }
+  };
+
+  const handleSaveTestBookingEdits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTestBooking) return;
+    setIsSavingTestBooking(true);
+    setTestEditError(null);
+    try {
+      const res = await fetch(`/api/admin/bookings/${editingTestBooking.id}/test-edit`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          customerName: editingTestBooking.customerName,
+          customerPhone: editingTestBooking.customerPhone,
+          eventName: editingTestBooking.eventName,
+          eventDate: editingTestBooking.eventDate,
+          deliveryTime: editingTestBooking.deliveryTime,
+          deliveryGovernorate: editingTestBooking.deliveryGovernorate,
+          deliveryAddress: editingTestBooking.deliveryAddress,
+          notes: editingTestBooking.notes,
+          status: editingTestBooking.status,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حفظ تعديلات الحجز التجريبي');
+      }
+
+      setEditingTestBooking(null);
+      if (selectedBooking && selectedBooking.id === editingTestBooking.id) {
+        setSelectedBooking(data.booking);
+      }
+      loadAllData();
+    } catch (err: any) {
+      setTestEditError(err.message || 'حدث خطأ أثناء تعديل الحجز التجريبي');
+    } finally {
+      setIsSavingTestBooking(false);
+    }
   };
 
   const handleUpdateStatus = async (bookingId: string, newStatus: BookingStatus) => {
@@ -221,25 +497,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     } catch (err) {
       console.error('Error adding payment:', err);
-    }
-  };
-
-  const handleIssueFactoryOrder = async (bookingId: string) => {
-    try {
-      const res = await fetch(`/api/admin/bookings/${bookingId}/factory-order`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        loadAllData();
-        setPrintingFactoryOrder(data.factoryOrder);
-      }
-    } catch (err) {
-      console.error('Error issuing factory order:', err);
     }
   };
 
@@ -356,14 +613,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <div className="flex items-center gap-3">
             {currentUser && (
-              <div className="hidden sm:flex items-center gap-2 text-xs bg-white/10 px-3 py-1.5 rounded-xl">
-                <span className="text-[#DFC066] font-bold">{currentUser.name}</span>
+              <div className="flex items-center gap-2 text-xs bg-white/10 px-3 py-1.5 rounded-xl border border-white/20">
+                <span className="text-[#DFC066] font-bold hidden sm:inline">{currentUser.name}</span>
                 <button
                   onClick={handleLogout}
-                  className="text-white/70 hover:text-white flex items-center gap-1 border-r border-white/20 pr-2 mr-1"
+                  className="text-white hover:text-rose-300 flex items-center gap-1 sm:border-r border-white/20 sm:pr-2 sm:mr-1 transition-colors font-bold"
+                  title="تسجيل الخروج من لوحة الإدارة"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>خروج</span>
+                  <span>تسجيل الخروج</span>
                 </button>
               </div>
             )}
@@ -392,8 +650,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
 
+            {sessionNotice && (
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-center gap-2 text-right">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-600" />
+                <span>{sessionNotice}</span>
+              </div>
+            )}
+
             {loginError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2 text-right">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{loginError}</span>
               </div>
@@ -407,7 +672,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="admin أو factory"
+                  placeholder="اسم المستخدم..."
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
@@ -431,16 +696,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="submit"
                 disabled={isLoggingIn}
-                className="w-full py-3 bg-[#7A0C2E] hover:bg-[#560820] text-white font-black text-sm rounded-xl shadow-md transition-all"
+                className="w-full py-3 bg-[#7A0C2E] hover:bg-[#560820] text-white font-black text-sm rounded-xl shadow-md transition-all disabled:opacity-50"
               >
                 {isLoggingIn ? 'جاري التحقق...' : 'تسجيل الدخول'}
               </button>
             </form>
 
-            <div className="pt-2 text-xs text-slate-400 bg-slate-50 p-3 rounded-xl border border-slate-200 text-right">
-              <span className="font-bold text-slate-600 block mb-1">حسابات التجهيز الأولية:</span>
-              <span>• الإدارة: <strong className="text-slate-800">admin</strong> (كلمة المرور الافتراضية: <strong className="text-slate-800">Celebre@2026</strong>)</span><br />
-              <span>• المصنع: <strong className="text-slate-800">factory</strong> (كلمة المرور: <strong className="text-slate-800">Factory@2026</strong>)</span>
+            <div className="pt-2 text-xs text-slate-400 text-center">
+              <span>نظام محمي ومشفر بالكامل لشركة CÉLÈBRE للضيافة والحفلات.</span>
             </div>
           </div>
         ) : (
@@ -524,6 +787,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   >
                     <Shield className="w-4 h-4" />
                     <span>حالة النظام والربط (Supabase / Vercel)</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('password')}
+                    className={`px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all ${
+                      activeTab === 'password'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'text-slate-700 hover:text-[#7A0C2E]'
+                    }`}
+                  >
+                    <Key className="w-4 h-4" />
+                    <span>تغيير كلمة المرور</span>
                   </button>
                 </>
               )}
@@ -689,9 +964,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           return matchesStatus && matchesSearch;
                         })
                         .map(b => (
-                          <tr key={b.id} className="hover:bg-slate-50">
-                            <td className="p-3 font-mono font-bold text-[#7A0C2E]">
-                              {b.bookingCode}
+                          <tr key={b.id} className={`hover:bg-slate-50 ${b.isTest ? 'bg-purple-50/30' : ''}`}>
+                            <td className="p-3">
+                              <span className="font-mono font-bold text-[#7A0C2E] block">{b.bookingCode}</span>
+                              {b.isTest && (
+                                <span className="inline-block mt-1 bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-purple-200">
+                                  حجز تجريبي
+                                </span>
+                              )}
                             </td>
                             <td className="p-3">
                               <strong className="text-slate-900 block">{b.customerName}</strong>
@@ -731,17 +1011,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <button
                                   onClick={() => setSelectedBooking(b)}
                                   className="p-1.5 bg-[#7A0C2E]/10 hover:bg-[#7A0C2E]/20 text-[#7A0C2E] rounded-lg"
-                                  title="عرض وتعديل التفاصيل وتسجيل المدفوعات"
+                                  title="عرض تفاصيل الحجز وتسجيل المدفوعات"
                                 >
                                   <Eye className="w-4 h-4" />
                                 </button>
                                 <button
-                                  onClick={() => handleIssueFactoryOrder(b.id)}
+                                  onClick={() => handleOpenFactoryReview(b.id)}
                                   className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg"
-                                  title="إصدار أمر تشغيل المصنع"
+                                  title="إنشاء طلب مصنع (مراجعة واعتماد)"
                                 >
                                   <Package className="w-4 h-4" />
                                 </button>
+
+                                {/* STRICT: Edit and Delete buttons are ONLY shown for test bookings */}
+                                {b.isTest && (
+                                  <>
+                                    <button
+                                      onClick={() => setEditingTestBooking(b)}
+                                      className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg"
+                                      title="تعديل الحجز التجريبي"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => setDeletingTestBooking(b)}
+                                      className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg"
+                                      title="حذف الحجز التجريبي"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -963,6 +1263,104 @@ APP_URL="https://celebre-eg.com"`}
               </div>
             )}
 
+            {/* Tab 7: CHANGE ADMIN PASSWORD */}
+            {activeTab === 'password' && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-xl mx-auto w-full">
+                <div className="bg-white p-6 sm:p-8 rounded-3xl border-2 border-[#E8DCC0] shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                    <div className="w-10 h-10 rounded-2xl bg-[#7A0C2E]/10 text-[#7A0C2E] flex items-center justify-center border border-[#7A0C2E]/20">
+                      <Key className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-lg font-black text-[#560820]">تغيير كلمة مرور الإداري</h4>
+                      <p className="text-xs text-slate-500">
+                        قم بتعيين كلمة مرور جديدة قوية لحساب المشرف الحالي ({currentUser?.username})
+                      </p>
+                    </div>
+                  </div>
+
+                  {passwordSuccess && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span>{passwordSuccess}</span>
+                    </div>
+                  )}
+
+                  {passwordError && (
+                    <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      <span>{passwordError}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleChangePassword} className="space-y-4 text-right">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        كلمة المرور الحالية
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="أدخل كلمة المرور الحالية..."
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        كلمة المرور الجديدة
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="كلمة مرور جديدة (8 أحرف على الأقل)..."
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                      />
+                      <span className="text-[11px] text-slate-400 block mt-1">
+                        يجب أن تتكون من 8 خانات على الأقل وتجمع بين الحروف والأرقام.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        تأكيد كلمة المرور الجديدة
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="أعد إدخال كلمة المرور الجديدة..."
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        disabled={isChangingPassword}
+                        className="w-full py-3 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        <Shield className="w-4 h-4 text-[#DFC066]" />
+                        <span>{isChangingPassword ? 'جاري الحفظ والتشفير...' : 'حفظ كلمة المرور الجديدة وإلغاء الجلسات القديمة'}</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500 space-y-1">
+                    <strong>ملاحظة أمنية:</strong>
+                    <p>
+                      عند تغيير كلمة المرور، سيتم تشفيرها فوراً بخوارزمية bcrypt، وحفظها في قاعدة بيانات Supabase PostgreSQL، وإلغاء جميع الجلسات النشطة على الخادم، مما يفرض إعادة تسجيل الدخول بكلمة المرور الجديدة.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
@@ -1033,20 +1431,56 @@ APP_URL="https://celebre-eg.com"`}
                 ))}
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => handleOpenEditBooking(selectedBooking)}
-                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
-                >
-                  <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
-                  <span>تعديل بيانات الحجز والموعد</span>
-                </button>
-                <button
-                  onClick={() => handleIssueFactoryOrder(selectedBooking.id)}
-                  className="px-4 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-xs"
-                >
-                  إصدار أمر تشغيل للمصنع
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  {selectedBooking.isTest && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const target = selectedBooking;
+                          setSelectedBooking(null);
+                          setEditingTestBooking(target);
+                        }}
+                        className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl flex items-center gap-1.5 border border-blue-200"
+                        title="تعديل الحجز التجريبي"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                        <span>تعديل الحجز التجريبي</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const target = selectedBooking;
+                          setSelectedBooking(null);
+                          setDeletingTestBooking(target);
+                        }}
+                        className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl flex items-center gap-1.5 border border-rose-200"
+                        title="حذف الحجز التجريبي"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف الحجز التجريبي</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenEditBooking(selectedBooking)}
+                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
+                    <span>تعديل الموعد والحالة</span>
+                  </button>
+                  <button
+                    onClick={() => handleOpenFactoryReview(selectedBooking.id)}
+                    disabled={isLoadingFactoryPreview}
+                    className="px-4 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Package className="w-4 h-4 text-[#DFC066]" />
+                    <span>{isLoadingFactoryPreview ? 'جاري التحضير...' : 'إنشاء طلب مصنع'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1340,6 +1774,369 @@ APP_URL="https://celebre-eg.com"`}
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Factory Order Review Modal (Strictly factory costs, server-calculated, duplicate prevention) */}
+        {isFactoryReviewOpen && factoryPreviewData && (
+          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-4 text-xs">
+              
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-xl">
+                    <Package className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-[#560820]">
+                      مراجعة واعتماد أمر تشغيل المصنع (CÉLÈBRE Kitchen Order)
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      رقم الحجز: <strong className="font-mono text-[#7A0C2E]">{factoryPreviewData.bookingCode}</strong>
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsFactoryReviewOpen(false)}
+                  className="p-1 rounded-lg hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              {factoryOrderError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{factoryOrderError}</span>
+                </div>
+              )}
+
+              {/* Event & Logistics Details */}
+              <div className="grid grid-cols-2 gap-3 bg-[#FAF8F5] p-3 rounded-xl border border-[#E8DCC0]">
+                <div>المناسبة: <strong className="text-slate-900">{factoryPreviewData.eventName}</strong></div>
+                <div>موعد التسليم: <strong className="text-slate-900">{factoryPreviewData.eventDate} ({factoryPreviewData.deliveryTime})</strong></div>
+                <div className="col-span-2">مكان التسليم: <span>{factoryPreviewData.deliveryLocation}</span></div>
+                <div>إجمالي الوجبات: <strong className="text-[#7A0C2E]">{factoryPreviewData.totalMealsCount} بوكس</strong></div>
+                <div>إجمالي تكلفة المصنع: <strong className="text-emerald-700 text-sm">{factoryPreviewData.totalFactoryCost.toLocaleString()} ج.م</strong></div>
+              </div>
+
+              {/* Duplicate Prevention Alert & Versioning */}
+              {factoryPreviewData.existingOrdersCount > 0 && (
+                <div className="p-3.5 bg-amber-50 border-2 border-amber-300 rounded-2xl space-y-2">
+                  <div className="flex items-start gap-2 text-amber-900">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold">تنبيه أمني لمنع التكرار:</strong>
+                      <span>
+                        يوجد بالفعل أمر تشغيل مصنع صادر لهذا الحجز ({factoryPreviewData.existingOrders[0]?.orderNumber} - الإصدار v{factoryPreviewData.existingOrders[0]?.version}).
+                      </span>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 pt-1 font-bold text-amber-950 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={forceNewVersion}
+                      onChange={(e) => setForceNewVersion(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#7A0C2E] focus:ring-[#7A0C2E]"
+                    />
+                    <span>تأكيد إصدار نسخة تشغيل جديدة محدثة للمصنع (الإصدار v{factoryPreviewData.existingOrdersCount + 1})</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Confidential Factory Items Breakdown */}
+              <div className="space-y-2">
+                <span className="font-bold text-slate-800 block">تفاصيل الوجبات وتكلفة المصنع (مسترجعة من قاعدة البيانات):</span>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-[#FAF8F5] text-slate-700 font-bold border-b">
+                      <tr>
+                        <th className="p-2.5">كود الوجبة</th>
+                        <th className="p-2.5">الكمية والمشروب</th>
+                        <th className="p-2.5">سعر المصنع للوحدة</th>
+                        <th className="p-2.5">إجمالي تكلفة المصنع</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {factoryPreviewData.items.map((it: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-2.5">
+                            <span className="font-mono font-bold text-[#7A0C2E]">{it.mealCode}</span>
+                            <span className="block text-[11px] text-slate-500">{it.mealName}</span>
+                          </td>
+                          <td className="p-2.5">
+                            <strong className="text-slate-800">{it.quantity} بوكس</strong>
+                            <span className="block text-[11px] text-[#7A0C2E]">{it.specialInstructions}</span>
+                          </td>
+                          <td className="p-2.5 font-mono font-bold text-slate-700">
+                            {it.unitFactoryPrice} ج
+                          </td>
+                          <td className="p-2.5 font-mono font-bold text-emerald-700">
+                            {it.totalFactoryPrice} ج
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Server Authority & Privacy Note */}
+              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span>
+                  الأسعار والتكاليف محسوبة على الخادم حصراً وفق جدول المصنع المعتمد. أسعار البيع وهوامش الربح محجوبة تماماً عن المصنع.
+                </span>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setIsFactoryReviewOpen(false)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFactoryOrder}
+                  disabled={isSubmittingFactoryOrder || (factoryPreviewData.existingOrdersCount > 0 && !forceNewVersion)}
+                  className="px-5 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-all"
+                >
+                  <Package className="w-4 h-4 text-[#DFC066]" />
+                  <span>
+                    {isSubmittingFactoryOrder 
+                      ? 'جاري الإصدار والربط...' 
+                      : (factoryPreviewData.existingOrdersCount > 0 
+                          ? `تأكيد إصدار النسخة v${factoryPreviewData.existingOrdersCount + 1}` 
+                          : 'تأكيد وإصدار أمر المصنع')}
+                  </span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* Delete Test Booking Warning Modal */}
+        {deletingTestBooking && (
+          <div className="fixed inset-0 z-80 bg-black/70 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h4 className="text-lg font-black text-slate-900">تأكيد حذف الحجز التجريبي</h4>
+                <p className="text-xs text-slate-500">
+                  أنت على وشك حذف الحجز التجريبي رقم <strong className="font-mono text-[#7A0C2E]">{deletingTestBooking.bookingCode}</strong>
+                </p>
+              </div>
+
+              {deleteError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div className="bg-[#FAF8F5] p-3 rounded-xl border text-xs space-y-1 text-slate-700">
+                <div>العميل: <strong className="text-slate-900">{deletingTestBooking.customerName}</strong></div>
+                <div>المناسبة: <strong className="text-slate-900">{deletingTestBooking.eventName}</strong></div>
+                <div>الوجبات: <strong>{deletingTestBooking.totalMealsCount} وجبة</strong> بقيمة <strong>{deletingTestBooking.totalDistributorPrice} ج</strong></div>
+              </div>
+
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 space-y-1">
+                <strong>تحذير أمني:</strong>
+                <p>
+                  سيتم حذف بيانات الحجز التجريبي وبنوده ومدفوعاته التجريبية نهائياً من قاعدة بيانات PostgreSQL. الحجوزات الحقيقية للعملاء محمية بالكامل ولا تقبل الحذف.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingBooking}
+                  onClick={() => setDeletingTestBooking(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingBooking}
+                  onClick={handleConfirmDeleteTestBooking}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeletingBooking ? 'جاري الحذف...' : 'تأكيد الحذف نهائياً'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Test Booking Modal */}
+        {editingTestBooking && (
+          <div className="fixed inset-0 z-80 bg-black/70 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4 text-xs">
+              
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                    <Edit className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-900">تعديل بيانات الحجز التجريبي</h4>
+                    <span className="text-[11px] font-mono text-[#7A0C2E] font-bold">{editingTestBooking.bookingCode}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditingTestBooking(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              {testEditError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{testEditError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveTestBookingEdits} className="space-y-3 text-right">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">اسم العميل (تجريبي)</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingTestBooking.customerName}
+                    onChange={(e) => setEditingTestBooking({ ...editingTestBooking, customerName: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-xl"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">رقم الهاتف</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingTestBooking.customerPhone}
+                      onChange={(e) => setEditingTestBooking({ ...editingTestBooking, customerPhone: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-xl font-mono"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">اسم المناسبة</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingTestBooking.eventName}
+                      onChange={(e) => setEditingTestBooking({ ...editingTestBooking, eventName: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">تاريخ المناسبة</label>
+                    <input
+                      type="date"
+                      required
+                      value={editingTestBooking.eventDate}
+                      onChange={(e) => setEditingTestBooking({ ...editingTestBooking, eventDate: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">وقت التسليم</label>
+                    <input
+                      type="time"
+                      required
+                      value={editingTestBooking.deliveryTime}
+                      onChange={(e) => setEditingTestBooking({ ...editingTestBooking, deliveryTime: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">المحافظة</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingTestBooking.deliveryGovernorate}
+                      onChange={(e) => setEditingTestBooking({ ...editingTestBooking, deliveryGovernorate: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">حالة الحجز</label>
+                    <select
+                      value={editingTestBooking.status}
+                      onChange={(e) => setEditingTestBooking({ ...editingTestBooking, status: e.target.value as any })}
+                      className="w-full px-3 py-2 border rounded-xl font-bold"
+                    >
+                      <option value="INITIAL">INITIAL</option>
+                      <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION</option>
+                      <option value="CONFIRMED">CONFIRMED</option>
+                      <option value="IN_PRODUCTION">IN_PRODUCTION</option>
+                      <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY</option>
+                      <option value="DELIVERED">DELIVERED</option>
+                      <option value="CANCELLED">CANCELLED</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">عنوان التسليم بالتفصيل</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingTestBooking.deliveryAddress}
+                    onChange={(e) => setEditingTestBooking({ ...editingTestBooking, deliveryAddress: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">ملاحظات الحجز</label>
+                  <textarea
+                    rows={2}
+                    value={editingTestBooking.notes || ''}
+                    onChange={(e) => setEditingTestBooking({ ...editingTestBooking, notes: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-xl"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTestBooking(null)}
+                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingTestBooking}
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+                  >
+                    {isSavingTestBooking ? 'جاري الحفظ...' : 'حفظ تعديلات الحجز التجريبي'}
+                  </button>
+                </div>
+              </form>
+
             </div>
           </div>
         )}

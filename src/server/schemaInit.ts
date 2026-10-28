@@ -60,6 +60,7 @@ export const TABLE_DDL_QUERIES: Record<string, string> = {
       "remainingAmount" DOUBLE PRECISION NOT NULL,
       "status" TEXT NOT NULL DEFAULT 'INITIAL',
       "statusNotes" TEXT,
+      "isTest" BOOLEAN NOT NULL DEFAULT false,
       "version" INTEGER NOT NULL DEFAULT 1,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -236,6 +237,11 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
       }
     }
   }
+
+  // Ensure isTest column exists on bookings table
+  try {
+    await client.$executeRawUnsafe('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
+  } catch {}
 
   // Seed meals if meals table exists and is empty
   try {

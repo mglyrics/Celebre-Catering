@@ -98,6 +98,7 @@ export const DDL_STATEMENTS = [
         "remainingAmount" DOUBLE PRECISION NOT NULL,
         "status" TEXT NOT NULL DEFAULT 'INITIAL',
         "statusNotes" TEXT,
+        "isTest" BOOLEAN NOT NULL DEFAULT false,
         "version" INTEGER NOT NULL DEFAULT 1,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -222,6 +223,11 @@ export async function runInitScript() {
       await client.query(statement.sql);
       console.log('✅ Ready');
     }
+
+    // Ensure isTest column exists on bookings table
+    try {
+      await client.query('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
+    } catch {}
 
     // Verify all 7 tables
     const checkRes = await client.query(`

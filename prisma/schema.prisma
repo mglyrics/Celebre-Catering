@@ -48,6 +48,7 @@ model Booking {
   remainingAmount      Float
   status               String        @default("INITIAL") // INITIAL, PENDING_CONFIRMATION, CONFIRMED, IN_PRODUCTION, READY_FOR_DELIVERY, DELIVERED, CANCELLED
   statusNotes          String?
+  isTest               Boolean       @default(false)
   version              Int           @default(1)
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt

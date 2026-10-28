@@ -1,17 +1,16 @@
 import React from 'react';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
-import { Phone, Lock, Heart, ShieldAlert, FileText, ArrowUp } from 'lucide-react';
+import { Phone, Heart, ShieldAlert, FileText, ArrowUp } from 'lucide-react';
 
 interface FooterProps {
   onOpenPdfMenu: () => void;
   onOpenTracking: () => void;
-  onOpenAdmin: () => void;
+  onOpenAdmin?: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
   onOpenPdfMenu,
   onOpenTracking,
-  onOpenAdmin,
 }) => {
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -147,18 +146,6 @@ export const Footer: React.FC<FooterProps> = ({
             >
               <span>للأعلى</span>
               <ArrowUp className="w-3.5 h-3.5" />
-            </button>
-
-            <span className="text-slate-700">|</span>
-
-            {/* Discreet Admin Lock */}
-            <button
-              onClick={onOpenAdmin}
-              className="flex items-center gap-1 text-slate-500 hover:text-[#C59B27] transition-colors text-[11px]"
-              title="دخول الإدارة والمصنع"
-            >
-              <Lock className="w-3 h-3" />
-              <span>بوابة الإدارة</span>
             </button>
           </div>
         </div>

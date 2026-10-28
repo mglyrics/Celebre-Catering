@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { db } from './db';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import { AdminUser } from '../types';
@@ -16,33 +17,38 @@ import { logServerError } from './safeLogger';
 import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl, SUPABASE_ROOT_CA } from '../lib/prisma';
 import { runSafeMigration } from '../../scripts/migrate-to-postgres';
 import { ensureSchemaReady, checkTablesStatus, REQUIRED_TABLES } from './schemaInit';
+import {
+  createAdminSession,
+  validateAdminSession,
+  revokeAdminSession,
+  revokeAllUserSessions,
+  INACTIVITY_TIMEOUT_MS,
+} from './authSession';
 import pg from 'pg';
 
 export const apiRouter = Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'celebre-catering-jwt-super-secret-key-2026';
 
-// Middleware for authentication
+// Middleware for authentication with 15-minute inactivity timeout enforcement
 interface AuthenticatedRequest extends Request {
   user?: AdminUser;
+  sessionId?: string;
 }
 
 function requireAuth(req: AuthenticatedRequest, res: Response, next: () => void) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'غير مصرح: يلزم تسجيل الدخول' });
+  const result = validateAdminSession(req, res);
+  if (!result.valid || !result.user) {
+    res.status(401).json({
+      error: result.error || 'غير مصرح: يلزم تسجيل الدخول',
+      code: result.code || 'UNAUTHORIZED',
+    });
     return;
   }
 
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AdminUser;
-    req.user = decoded;
-    next();
-  } catch (err) {
-    res.status(401).json({ error: 'جلسة الدخول منتهية أو غير صالحة' });
-    return;
-  }
+  req.user = result.user;
+  req.sessionId = result.session?.sessionId;
+  next();
 }
 
 function requireRole(allowedRoles: ('super_admin' | 'admin' | 'factory')[]) {
@@ -395,25 +401,96 @@ apiRouter.post('/admin/auth/login', async (req, res) => {
       return;
     }
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        name: user.name,
-      },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    // Create server-authoritative session with 15-minute inactivity tracking & secure cookie
+    const { token, sessionId, session } = createAdminSession(user, res);
 
     res.json({
       success: true,
       token,
+      sessionId,
       user,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'خطأ أثناء تسجيل الدخول' });
+  }
+});
+
+apiRouter.post('/admin/auth/logout', (req, res) => {
+  let sessionId = (req as any).sessionId;
+
+  // Also extract from token if available
+  const authHeader = req.headers.authorization;
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
+  if (!token && req.cookies && req.cookies.celebre_admin_session) {
+    token = req.cookies.celebre_admin_session;
+  }
+
+  if (token) {
+    try {
+      const decoded = jwt.decode(token) as any;
+      if (decoded && decoded.sessionId) {
+        sessionId = decoded.sessionId;
+      }
+    } catch {}
+  }
+
+  if (sessionId) {
+    revokeAdminSession(sessionId, res);
+  } else if (res && typeof res.clearCookie === 'function') {
+    res.clearCookie('celebre_admin_session', { path: '/' });
+  }
+
+  res.json({
+    success: true,
+    message: 'تم تسجيل الخروج بنجاح وإلغاء الجلسة على الخادم',
+  });
+});
+
+apiRouter.post('/admin/auth/change-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      res.status(400).json({ error: 'يرجى إدخال كلمة المرور الحالية وكلمة المرور الجديدة وتأكيدها' });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({ error: 'كلمة المرور الجديدة غير متطابقة مع التأكيد' });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      res.status(400).json({ error: 'يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل' });
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      res.status(400).json({ error: 'كلمة المرور الجديدة يجب أن تكون مختلفة عن كلمة المرور الحالية' });
+      return;
+    }
+
+    const username = req.user!.username;
+    const verified = await db.verifyAdmin(username, currentPassword);
+    if (!verified) {
+      res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
+      return;
+    }
+
+    const salt = bcrypt.genSaltSync(10);
+    const newPasswordHash = bcrypt.hashSync(newPassword, salt);
+
+    await db.updateAdminPassword(username, newPasswordHash, req.user!.name || req.user!.username);
+
+    // Revoke all active sessions for this user on the server to enforce immediate re-login
+    revokeAllUserSessions(req.user!.id, res);
+
+    res.json({
+      success: true,
+      message: 'تم تحديث كلمة المرور بنجاح. تم إلغاء جميع الجلسات القديمة على الخادم، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'حدث خطأ أثناء تغيير كلمة المرور' });
   }
 });
 
@@ -566,14 +643,48 @@ apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_
   }
 });
 
-// Create Factory Order
+// Factory Order Preview (Review modal before issuing order to factory)
+apiRouter.get('/admin/bookings/:id/factory-preview', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const preview = await db.getFactoryOrderPreview(id);
+    res.json({ success: true, preview });
+  } catch (err: any) {
+    res.status(404).json({ error: err.message || 'فشل استرجاع معاينة أمر المصنع' });
+  }
+});
+
+// Create Factory Order (strictly authoritative server prices with duplicate warning & versioning)
 apiRouter.post('/admin/bookings/:id/factory-order', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const factoryOrder = await db.createFactoryOrder(id, req.user?.name || 'الإدارة');
+    const { forceNewVersion } = req.body || {};
+    const factoryOrder = await db.createFactoryOrder(id, req.user?.name || 'الإدارة', { forceNewVersion });
     res.json({ success: true, factoryOrder });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Edit Test Booking Only (Strictly rejects non-test bookings)
+apiRouter.put('/admin/bookings/:id/test-edit', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateTestBooking(id, req.body, req.user?.name || 'الإدارة');
+    res.json({ success: true, booking: updated });
+  } catch (err: any) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// Delete Test Booking Only (Strictly rejects non-test bookings, requires explicit confirmation)
+apiRouter.delete('/admin/bookings/:id/test-delete', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.deleteTestBooking(id, req.user?.name || 'الإدارة');
+    res.json({ success: true, message: `تم حذف الحجز التجريبي ${result.bookingCode} بنجاح` });
+  } catch (err: any) {
+    res.status(403).json({ error: err.message });
   }
 });
 

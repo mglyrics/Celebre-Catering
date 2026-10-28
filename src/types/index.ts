@@ -113,6 +113,7 @@ export interface Booking {
   
   status: BookingStatus;
   statusNotes?: string;
+  isTest?: boolean; // علامة تمييز الحجز التجريبي
   
   // Versioning
   version: number;
