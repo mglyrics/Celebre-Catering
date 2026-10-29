@@ -135,11 +135,16 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
                   className="p-3.5 rounded-xl border border-[#E2D5BA] bg-[#FAF8F5] flex flex-col justify-between"
                 >
                   <div>
-                    <div className="flex items-center justify-between border-b border-[#E8DCC0] pb-1.5 mb-2">
-                      <span className="font-mono font-black text-xs text-[#7A0C2E] bg-white px-2 py-0.5 rounded border border-[#EBDDC3]">
-                        {meal.code}
-                      </span>
-                      <span className="font-black text-sm text-[#7A0C2E]">
+                    <div className="flex items-center justify-between border-b border-[#E8DCC0] pb-1.5 mb-2 gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-black text-xs text-[#7A0C2E] bg-white px-2 py-0.5 rounded border border-[#EBDDC3]">
+                          {meal.code}
+                        </span>
+                        <span className="font-bold text-xs text-[#7A0C2E]">
+                          {meal.name}
+                        </span>
+                      </div>
+                      <span className="font-black text-sm text-[#7A0C2E] whitespace-nowrap">
                         {meal.distributorPrice} جنيه
                       </span>
                     </div>
@@ -173,11 +178,16 @@ export const MenuPdfView: React.FC<MenuPdfViewProps> = ({ isOpen, onClose, meals
                   className="p-3.5 rounded-xl border border-[#E2D5BA] bg-[#FAF8F5] flex flex-col justify-between"
                 >
                   <div>
-                    <div className="flex items-center justify-between border-b border-[#E8DCC0] pb-1.5 mb-2">
-                      <span className="font-mono font-black text-xs text-[#7A0C2E] bg-white px-2 py-0.5 rounded border border-[#EBDDC3]">
-                        {meal.code}
-                      </span>
-                      <span className="font-black text-sm text-[#7A0C2E]">
+                    <div className="flex items-center justify-between border-b border-[#E8DCC0] pb-1.5 mb-2 gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-black text-xs text-[#7A0C2E] bg-white px-2 py-0.5 rounded border border-[#EBDDC3]">
+                          {meal.code}
+                        </span>
+                        <span className="font-bold text-xs text-[#7A0C2E]">
+                          {meal.name}
+                        </span>
+                      </div>
+                      <span className="font-black text-sm text-[#7A0C2E] whitespace-nowrap">
                         {meal.distributorPrice} جنيه
                       </span>
                     </div>

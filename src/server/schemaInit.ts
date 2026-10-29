@@ -263,6 +263,12 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
           },
         }).catch(() => {});
       }
+    } else {
+      // Ensure Meal 12 name is updated to 'باتية' in PostgreSQL
+      await client.meal.updateMany({
+        where: { code: 'Sale-12' },
+        data: { name: 'باتية' },
+      }).catch(() => {});
     }
   } catch {}
 

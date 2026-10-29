@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
-import { Meal, Booking, PaymentRecord, FactoryOrder, AuditLog, AdminUser, DrinkModification } from '../types';
+import { Meal, Booking, BookingStatus, PaymentRecord, FactoryOrder, AuditLog, AdminUser, DrinkModification } from '../types';
 import { INITIAL_MEALS, CELEBRE_CONFIG } from '../data/defaultMeals';
 
 const IS_SERVERLESS = Boolean(
@@ -270,6 +270,30 @@ export const db = {
 
     memoryDB.meals[idx] = updated;
 
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.meal.updateMany({
+            where: {
+              OR: [{ id }, { code: id }],
+            },
+            data: {
+              name: updates.name !== undefined ? updates.name : undefined,
+              distributorPrice: updates.distributorPrice !== undefined ? updates.distributorPrice : undefined,
+              factoryPrice: updates.factoryPrice !== undefined ? updates.factoryPrice : undefined,
+              ingredients: updates.ingredients !== undefined ? updates.ingredients : undefined,
+              isActive: updates.isActive !== undefined ? updates.isActive : undefined,
+              version: { increment: 1 },
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateMeal.prisma');
+      }
+    }
+
     this.addAuditLog({
       bookingId: '',
       action: 'تحديث وجبة في المنيو',
@@ -354,6 +378,11 @@ export const db = {
         totalFactoryPrice: itemTotalFactory,
       };
     });
+
+    // Enforce Minimum Order: 50 meals
+    if (totalMealsCount < 50) {
+      throw new Error(`الحد الأدنى للطلب 50 وجبة. إجمالي عدد الوجبات المحددة (${totalMealsCount} وجبة) أقل من الحد الأدنى.`);
+    }
 
     // Ensure unique booking code without collision
     let bookingCode = generateBookingCode();
@@ -994,7 +1023,7 @@ export const db = {
 
       return {
         mealCode: item.mealCode,
-        mealName: item.mealName,
+        mealName: meal?.name || item.mealName,
         quantity: item.quantity,
         drinkOption: item.drinkOption,
         ingredients: meal?.ingredients || item.ingredients,
@@ -1035,6 +1064,11 @@ export const db = {
       throw new Error('الحجز غير موجود لإصدار أمر المصنع');
     }
 
+    // Minimum 50 meals validation before issuing factory order
+    if (booking.totalMealsCount < 50) {
+      throw new Error(`لا يمكن إصدار أمر تشغيل للمصنع لحجز يقل إجمالي وجباته عن 50 وجبة (العدد الحالي: ${booking.totalMealsCount} وجبة). يرجى مراجعة وتعديل كميات الحجز إلى 50 وجبة فأكثر أولاً.`);
+    }
+
     memoryDB = loadLocalDB();
     const existingOrders = (booking.factoryOrders || []).concat(
       memoryDB.factoryOrders.filter(fo => fo.bookingId === bookingId)
@@ -1058,7 +1092,7 @@ export const db = {
       bookingId: booking.id,
       bookingCode: booking.bookingCode,
       version,
-      status: 'PENDING',
+      status: 'READY_TO_SEND',
       eventDate: booking.eventDate,
       deliveryTime: booking.deliveryTime,
       deliveryLocation: preview.deliveryLocation,
@@ -1519,4 +1553,277 @@ export const db = {
 
     return { success: true, bookingCode };
   },
+
+  async updateBookingByAdmin(
+    id: string,
+    updates: {
+      customerName?: string;
+      customerPhone?: string;
+      customerWhatsapp?: string;
+      preferredContact?: 'whatsapp' | 'phone';
+      eventName?: string;
+      eventDate?: string;
+      deliveryTime?: string;
+      deliveryGovernorate?: string;
+      deliveryAddress?: string;
+      notes?: string;
+      status?: BookingStatus;
+      statusNotes?: string;
+      items?: {
+        mealCode: string;
+        quantity: number;
+        drinkOption: DrinkModification;
+      }[];
+    },
+    performedBy = 'الإدارة'
+  ): Promise<Booking> {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error('الحجز غير موجود');
+    }
+
+    const meals = await this.getMeals(true);
+    const mealsMap = new Map(meals.map(m => [m.code, m]));
+
+    let validatedItems = booking.items;
+    let totalMealsCount = booking.totalMealsCount;
+    let totalDistributorPrice = booking.totalDistributorPrice;
+    let totalFactoryPrice = booking.totalFactoryPrice || 0;
+    let profitMargin = booking.profitMargin || 0;
+    let remainingAmount = booking.remainingAmount;
+
+    if (updates.items && Array.isArray(updates.items)) {
+      if (updates.items.length === 0) {
+        throw new Error('يجب أن يحتوي الحجز على صنف واحد على الأقل');
+      }
+
+      totalMealsCount = 0;
+      totalDistributorPrice = 0;
+      totalFactoryPrice = 0;
+
+      validatedItems = updates.items.map(item => {
+        const meal = mealsMap.get(item.mealCode);
+        if (!meal) {
+          throw new Error(`الوجبة ${item.mealCode} غير موجودة في المنيو المعتمد`);
+        }
+        const quantity = Math.max(1, Math.floor(item.quantity));
+        totalMealsCount += quantity;
+
+        const baseDistributorPrice = meal.distributorPrice;
+        const baseFactoryPrice = meal.factoryPrice || 0;
+
+        let drinkDelta = 0;
+        if (meal.hasJuice) {
+          if (item.drinkOption === 'no_juice') {
+            drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          } else if (item.drinkOption === 'pepsi') {
+            drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+          }
+        }
+
+        const unitDistributorPrice = Math.max(0, baseDistributorPrice + drinkDelta);
+        const unitFactoryPrice = Math.max(0, baseFactoryPrice + drinkDelta);
+        const itemTotalDistributor = unitDistributorPrice * quantity;
+        const itemTotalFactory = unitFactoryPrice * quantity;
+
+        totalDistributorPrice += itemTotalDistributor;
+        totalFactoryPrice += itemTotalFactory;
+
+        return {
+          mealId: meal.id,
+          mealCode: meal.code,
+          mealName: meal.name,
+          category: meal.category,
+          ingredients: meal.ingredients,
+          quantity,
+          drinkOption: item.drinkOption,
+          baseDistributorPrice,
+          unitDistributorPrice,
+          totalDistributorPrice: itemTotalDistributor,
+          baseFactoryPrice,
+          unitFactoryPrice,
+          totalFactoryPrice: itemTotalFactory,
+        };
+      });
+
+      profitMargin = totalDistributorPrice - totalFactoryPrice;
+      remainingAmount = Math.max(0, totalDistributorPrice - booking.paidAmount);
+    }
+
+    const targetStatus = updates.status || booking.status;
+    if ((targetStatus === 'CONFIRMED' || targetStatus === 'IN_PRODUCTION') && totalMealsCount < 50) {
+      throw new Error(`لا يمكن اعتماد الحجز أو نقله للتشغيل بكمية تقل عن 50 وجبة (الكمية الإجمالية الحالية: ${totalMealsCount} وجبة). يرجى تعديل الكميات أولاً.`);
+    }
+
+    const updatedBooking: Booking = {
+      ...booking,
+      customerName: updates.customerName !== undefined ? updates.customerName.trim() : booking.customerName,
+      customerPhone: updates.customerPhone !== undefined ? updates.customerPhone.trim() : booking.customerPhone,
+      customerWhatsapp: updates.customerWhatsapp !== undefined ? updates.customerWhatsapp.trim() : booking.customerWhatsapp,
+      preferredContact: updates.preferredContact || booking.preferredContact,
+      eventName: updates.eventName !== undefined ? updates.eventName.trim() : booking.eventName,
+      eventDate: updates.eventDate || booking.eventDate,
+      deliveryTime: updates.deliveryTime || booking.deliveryTime,
+      deliveryGovernorate: updates.deliveryGovernorate || booking.deliveryGovernorate,
+      deliveryAddress: updates.deliveryAddress !== undefined ? updates.deliveryAddress.trim() : booking.deliveryAddress,
+      notes: updates.notes !== undefined ? updates.notes.trim() : booking.notes,
+      status: targetStatus,
+      statusNotes: updates.statusNotes !== undefined ? updates.statusNotes : booking.statusNotes,
+      items: validatedItems,
+      totalMealsCount,
+      totalDistributorPrice,
+      totalFactoryPrice,
+      profitMargin,
+      remainingAmount,
+      version: booking.version + 1,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Update MemoryDB
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+
+    // Update PostgreSQL
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              customerName: updatedBooking.customerName,
+              customerPhone: updatedBooking.customerPhone,
+              customerWhatsapp: updatedBooking.customerWhatsapp,
+              preferredContact: updatedBooking.preferredContact,
+              eventName: updatedBooking.eventName,
+              eventDate: updatedBooking.eventDate,
+              deliveryTime: updatedBooking.deliveryTime,
+              deliveryGovernorate: updatedBooking.deliveryGovernorate,
+              deliveryAddress: updatedBooking.deliveryAddress,
+              notes: updatedBooking.notes,
+              status: updatedBooking.status,
+              statusNotes: updatedBooking.statusNotes,
+              totalMealsCount: updatedBooking.totalMealsCount,
+              totalDistributorPrice: updatedBooking.totalDistributorPrice,
+              totalFactoryPrice: updatedBooking.totalFactoryPrice,
+              profitMargin: updatedBooking.profitMargin,
+              remainingAmount: updatedBooking.remainingAmount,
+              version: updatedBooking.version,
+              updatedAt: new Date(),
+            },
+          });
+
+          if (updates.items && Array.isArray(updates.items)) {
+            await client.bookingItem.deleteMany({ where: { bookingId: booking.id } });
+            await client.bookingItem.createMany({
+              data: validatedItems.map(it => ({
+                bookingId: booking.id,
+                mealId: it.mealId,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice,
+                unitFactoryPrice: it.unitFactoryPrice,
+                totalFactoryPrice: it.totalFactoryPrice,
+              })),
+            });
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateBookingByAdmin.prisma');
+      }
+    }
+
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: 'تعديل حجز بواسطة الإدارة',
+      performedBy,
+      details: `تم تعديل بيانات الحجز ${booking.bookingCode} (الإصدار v${updatedBooking.version}). إجمالي الوجبات: ${totalMealsCount}، إجمالي القيمة: ${totalDistributorPrice} ج.`,
+    });
+
+    return updatedBooking;
+  },
+
+  async confirmFactoryOrderSent(orderId: string, performedBy = 'الإدارة'): Promise<FactoryOrder> {
+    memoryDB = loadLocalDB();
+    const order = memoryDB.factoryOrders.find(fo => fo.id === orderId || fo.orderNumber === orderId);
+    if (!order) {
+      throw new Error('أمر المصنع غير موجود');
+    }
+
+    const now = new Date().toISOString();
+    order.status = 'MANUALLY_CONFIRMED' as any;
+    order.updatedAt = now;
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.updateMany({
+            where: { OR: [{ id: order.id }, { orderNumber: order.orderNumber }] },
+            data: { status: 'MANUALLY_CONFIRMED', updatedAt: new Date() },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.confirmFactoryOrderSent.prisma');
+      }
+    }
+
+    await this.addAuditLog({
+      bookingId: order.bookingId,
+      action: 'تأكيد إرسال أمر التشغيل للمصنع يدوياً',
+      performedBy,
+      details: `قام الإداري (${performedBy}) بتأكيد إرسال أمر التشغيل ${order.orderNumber} (الإصدار v${order.version}) إلى واتساب المصنع يدوياً في ${now}.`,
+    });
+
+    saveLocalDB(memoryDB);
+    return order;
+  },
 };
+
+export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking: Booking, factoryPhone?: string): { messageText: string; whatsappUrl: string } {
+  const itemsText = factoryOrder.items.map((it) => {
+    return [
+      `• *كود:* ${it.mealCode} | *اسم الوجبة:* ${it.mealName}`,
+      `  - *الكمية:* ${it.quantity} بوكس | ${it.specialInstructions || it.drinkOption}`,
+      `  - *سعر المصنع:* ${it.unitFactoryPrice ?? 0} ج | *إجمالي المصنع:* ${it.totalFactoryPrice ?? 0} ج`,
+      `  - *المكونات:* ${it.ingredients}`
+    ].join('\n');
+  }).join('\n\n');
+
+  const totalCost = factoryOrder.factoryCostTotal || 0;
+
+  const lines = [
+    `*أمر تشغيل مطبخ ومصنع CÉLÈBRE CATERING*`,
+    `-----------------------------------------`,
+    `*رقم أمر التشغيل:* ${factoryOrder.orderNumber} (الإصدار v${factoryOrder.version})`,
+    `*رقم الحجز المرجعي:* ${booking.bookingCode}`,
+    `*تاريخ وموعد التسليم:* ${factoryOrder.eventDate} الساعة ${factoryOrder.deliveryTime}`,
+    `*مكان التسليم:* ${factoryOrder.deliveryLocation}`,
+    `*العميل / المستلم:* ${booking.customerName} (${booking.customerPhone})`,
+    `-----------------------------------------`,
+    `*بيان الوجبات والتشغيل المطلوب:*`,
+    itemsText,
+    `-----------------------------------------`,
+    `*إجمالي عدد البوكسات:* ${booking.totalMealsCount} بوكس`,
+    `*إجمالي تكلفة المصنع المعتمدة:* ${totalCost.toLocaleString('ar-EG')} جنيه مصري`,
+    `*تعليمات التعبئة والتغليف:* ${factoryOrder.packagingNotes}`,
+    `-----------------------------------------`,
+    `*تنبيه تشغيلي:* هذه وثيقة تشغيل وتكلفة مصنع رسمية صادرة من إدارة سيليبري (خالية من هوامش ربح الموزع).`
+  ];
+
+  const messageText = lines.join('\n');
+  const cleanPhone = (factoryPhone || '').replace(/\D/g, '');
+  const whatsappUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}` : '';
+  return { messageText, whatsappUrl };
+}

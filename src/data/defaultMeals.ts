@@ -125,7 +125,7 @@ export const INITIAL_MEALS: Omit<Meal, 'id' | 'updatedAt' | 'version'>[] = [
   },
   {
     code: 'Sale-12',
-    name: 'ميكس بوكس 12 - جاتوه وبانية بالزبدة نكهات مختلفة',
+    name: 'باتية',
     category: 'mix_box',
     ingredients: 'قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل',
     distributorPrice: 44,

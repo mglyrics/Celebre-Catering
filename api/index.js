@@ -1,10 +1,12 @@
 // src/server/api.ts
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 
 // src/server/routes.ts
 import { Router } from "express";
-import jwt from "jsonwebtoken";
+import jwt2 from "jsonwebtoken";
+import bcrypt2 from "bcryptjs";
 
 // src/server/db.ts
 import fs2 from "fs";
@@ -137,7 +139,7 @@ var INITIAL_MEALS = [
   },
   {
     code: "Sale-12",
-    name: "\u0645\u064A\u0643\u0633 \u0628\u0648\u0643\u0633 12 - \u062C\u0627\u062A\u0648\u0647 \u0648\u0628\u0627\u0646\u064A\u0629 \u0628\u0627\u0644\u0632\u0628\u062F\u0629 \u0646\u0643\u0647\u0627\u062A \u0645\u062E\u062A\u0644\u0641\u0629",
+    name: "\u0628\u0627\u062A\u064A\u0629",
     category: "mix_box",
     ingredients: "\u0642\u0637\u0639\u0629 \u062C\u0627\u062A\u0648\u0629 \u0645\u063A\u0644\u0641\u0629 + \u0628\u0627\u0646\u064A\u0629 \u0628\u0627\u0644\u0630\u0628\u062F\u0629 \u0646\u0643\u0647\u0627\u062A \u0645\u062E\u062A\u0644\u0641\u0629 + \u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 + \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644",
     distributorPrice: 44,
@@ -667,6 +669,29 @@ var db = {
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     memoryDB.meals[idx] = updated;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.meal.updateMany({
+            where: {
+              OR: [{ id }, { code: id }]
+            },
+            data: {
+              name: updates.name !== void 0 ? updates.name : void 0,
+              distributorPrice: updates.distributorPrice !== void 0 ? updates.distributorPrice : void 0,
+              factoryPrice: updates.factoryPrice !== void 0 ? updates.factoryPrice : void 0,
+              ingredients: updates.ingredients !== void 0 ? updates.ingredients : void 0,
+              isActive: updates.isActive !== void 0 ? updates.isActive : void 0,
+              version: { increment: 1 },
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.updateMeal.prisma");
+      }
+    }
     this.addAuditLog({
       bookingId: "",
       action: "\u062A\u062D\u062F\u064A\u062B \u0648\u062C\u0628\u0629 \u0641\u064A \u0627\u0644\u0645\u0646\u064A\u0648",
@@ -720,6 +745,9 @@ var db = {
         totalFactoryPrice: itemTotalFactory
       };
     });
+    if (totalMealsCount < 50) {
+      throw new Error(`\u0627\u0644\u062D\u062F \u0627\u0644\u0623\u062F\u0646\u0649 \u0644\u0644\u0637\u0644\u0628 50 \u0648\u062C\u0628\u0629. \u0625\u062C\u0645\u0627\u0644\u064A \u0639\u062F\u062F \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0627\u0644\u0645\u062D\u062F\u062F\u0629 (${totalMealsCount} \u0648\u062C\u0628\u0629) \u0623\u0642\u0644 \u0645\u0646 \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u062F\u0646\u0649.`);
+    }
     let bookingCode = generateBookingCode();
     let collisionAttempts = 0;
     while (memoryDB.bookings.some((b) => b.bookingCode === bookingCode) && collisionAttempts < 10) {
@@ -728,6 +756,9 @@ var db = {
     }
     const securityCode = generateSecurityCode();
     const now = (/* @__PURE__ */ new Date()).toISOString();
+    const isTest = data.isTest ?? Boolean(
+      data.customerName.includes("\u062A\u062C\u0631\u064A\u0628") || data.notes && data.notes.includes("\u062A\u062C\u0631\u064A\u0628") || data.eventName.includes("\u062A\u062C\u0631\u064A\u0628")
+    );
     const newBooking = {
       id: `bk-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
       bookingCode,
@@ -751,11 +782,13 @@ var db = {
       remainingAmount: totalDistributorPrice,
       status: "INITIAL",
       statusNotes: "\u062D\u062C\u0632 \u0645\u0628\u062F\u0626\u064A \u062C\u062F\u064A\u062F \u0645\u0633\u062C\u0644 \u0639\u0628\u0631 \u0627\u0644\u0645\u0648\u0642\u0639",
+      isTest,
       version: 1,
       createdAt: now,
       updatedAt: now
     };
     memoryDB.bookings.unshift(newBooking);
+    saveLocalDB(memoryDB);
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
@@ -783,6 +816,7 @@ var db = {
               remainingAmount: newBooking.remainingAmount,
               status: "INITIAL",
               statusNotes: newBooking.statusNotes,
+              isTest,
               version: 1,
               items: {
                 create: validatedItems.map((it) => ({
@@ -823,6 +857,123 @@ var db = {
     return newBooking;
   },
   async getBookings(filters) {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const whereClause = {};
+          if (filters?.status && filters.status !== "ALL") {
+            whereClause.status = filters.status;
+          }
+          if (filters?.search) {
+            const q = filters.search.trim();
+            whereClause.OR = [
+              { bookingCode: { contains: q, mode: "insensitive" } },
+              { customerName: { contains: q, mode: "insensitive" } },
+              { customerPhone: { contains: q } },
+              { eventName: { contains: q, mode: "insensitive" } }
+            ];
+          }
+          const dbBookings = await client.booking.findMany({
+            where: whereClause,
+            include: {
+              items: true,
+              payments: true,
+              factoryOrders: true,
+              auditLogs: true
+            },
+            orderBy: { createdAt: "desc" }
+          });
+          if (dbBookings && dbBookings.length > 0) {
+            return dbBookings.map((b) => ({
+              id: b.id,
+              bookingCode: b.bookingCode,
+              securityCode: b.securityCode,
+              customerName: b.customerName,
+              customerPhone: b.customerPhone,
+              customerWhatsapp: b.customerWhatsapp || b.customerPhone,
+              preferredContact: b.preferredContact || "whatsapp",
+              eventName: b.eventName,
+              eventDate: b.eventDate,
+              deliveryTime: b.deliveryTime,
+              deliveryGovernorate: b.deliveryGovernorate,
+              deliveryAddress: b.deliveryAddress,
+              notes: b.notes || "",
+              totalMealsCount: b.totalMealsCount,
+              totalDistributorPrice: b.totalDistributorPrice,
+              totalFactoryPrice: b.totalFactoryPrice || 0,
+              profitMargin: b.profitMargin || b.totalDistributorPrice - (b.totalFactoryPrice || 0),
+              paidAmount: b.paidAmount,
+              remainingAmount: b.remainingAmount,
+              status: b.status || "INITIAL",
+              statusNotes: b.statusNotes || "",
+              isTest: b.isTest ?? (b.bookingCode === "CLB-2026-1699" || b.customerName.includes("\u062A\u062C\u0631\u064A\u0628")),
+              version: b.version,
+              createdAt: b.createdAt.toISOString(),
+              updatedAt: b.updatedAt.toISOString(),
+              items: b.items.map((it) => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption || "standard",
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice || 0,
+                unitFactoryPrice: it.unitFactoryPrice || 0,
+                totalFactoryPrice: it.totalFactoryPrice || 0
+              })),
+              payments: b.payments.map((p) => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method,
+                date: p.date,
+                notes: p.notes || "",
+                receiptNumber: p.receiptNumber || "",
+                createdAt: p.createdAt.toISOString()
+              })),
+              factoryOrders: b.factoryOrders.map((fo) => {
+                let parsedItems = [];
+                try {
+                  parsedItems = JSON.parse(fo.itemsJson);
+                } catch {
+                }
+                return {
+                  id: fo.id,
+                  orderNumber: fo.orderNumber,
+                  bookingId: fo.bookingId,
+                  bookingCode: fo.bookingCode,
+                  version: fo.version,
+                  status: fo.status,
+                  eventDate: fo.eventDate,
+                  deliveryTime: fo.deliveryTime,
+                  deliveryLocation: fo.deliveryLocation,
+                  factoryCostTotal: 0,
+                  items: parsedItems,
+                  packagingNotes: fo.packagingNotes || "",
+                  createdAt: fo.createdAt.toISOString(),
+                  updatedAt: fo.updatedAt.toISOString()
+                };
+              }),
+              auditLogs: b.auditLogs.map((al) => ({
+                id: al.id,
+                bookingId: al.bookingId || "",
+                action: al.action,
+                performedBy: al.performedBy,
+                details: al.details,
+                timestamp: al.timestamp.toISOString()
+              }))
+            }));
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.getBookings.prisma");
+      }
+    }
     memoryDB = loadLocalDB();
     let results = [...memoryDB.bookings];
     if (filters?.status && filters.status !== "ALL") {
@@ -836,17 +987,127 @@ var db = {
     }
     return results.map((b) => ({
       ...b,
+      isTest: b.isTest ?? (b.bookingCode === "CLB-2026-1699" || b.customerName.includes("\u062A\u062C\u0631\u064A\u0628")),
       payments: memoryDB.payments.filter((p) => p.bookingId === b.id),
       factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id),
       auditLogs: memoryDB.auditLogs.filter((al) => al.bookingId === b.id)
     }));
   },
   async getBookingById(id) {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const b2 = await client.booking.findFirst({
+            where: {
+              OR: [
+                { id },
+                { bookingCode: id }
+              ]
+            },
+            include: {
+              items: true,
+              payments: true,
+              factoryOrders: true,
+              auditLogs: true
+            }
+          });
+          if (b2) {
+            return {
+              id: b2.id,
+              bookingCode: b2.bookingCode,
+              securityCode: b2.securityCode,
+              customerName: b2.customerName,
+              customerPhone: b2.customerPhone,
+              customerWhatsapp: b2.customerWhatsapp || b2.customerPhone,
+              preferredContact: b2.preferredContact || "whatsapp",
+              eventName: b2.eventName,
+              eventDate: b2.eventDate,
+              deliveryTime: b2.deliveryTime,
+              deliveryGovernorate: b2.deliveryGovernorate,
+              deliveryAddress: b2.deliveryAddress,
+              notes: b2.notes || "",
+              totalMealsCount: b2.totalMealsCount,
+              totalDistributorPrice: b2.totalDistributorPrice,
+              totalFactoryPrice: b2.totalFactoryPrice || 0,
+              profitMargin: b2.profitMargin || b2.totalDistributorPrice - (b2.totalFactoryPrice || 0),
+              paidAmount: b2.paidAmount,
+              remainingAmount: b2.remainingAmount,
+              status: b2.status || "INITIAL",
+              statusNotes: b2.statusNotes || "",
+              isTest: b2.isTest ?? (b2.bookingCode === "CLB-2026-1699" || b2.customerName.includes("\u062A\u062C\u0631\u064A\u0628")),
+              version: b2.version,
+              createdAt: b2.createdAt.toISOString(),
+              updatedAt: b2.updatedAt.toISOString(),
+              items: b2.items.map((it) => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption || "standard",
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice || 0,
+                unitFactoryPrice: it.unitFactoryPrice || 0,
+                totalFactoryPrice: it.totalFactoryPrice || 0
+              })),
+              payments: b2.payments.map((p) => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method,
+                date: p.date,
+                notes: p.notes || "",
+                receiptNumber: p.receiptNumber || "",
+                createdAt: p.createdAt.toISOString()
+              })),
+              factoryOrders: b2.factoryOrders.map((fo) => {
+                let parsedItems = [];
+                try {
+                  parsedItems = JSON.parse(fo.itemsJson);
+                } catch {
+                }
+                return {
+                  id: fo.id,
+                  orderNumber: fo.orderNumber,
+                  bookingId: fo.bookingId,
+                  bookingCode: fo.bookingCode,
+                  version: fo.version,
+                  status: fo.status,
+                  eventDate: fo.eventDate,
+                  deliveryTime: fo.deliveryTime,
+                  deliveryLocation: fo.deliveryLocation,
+                  factoryCostTotal: 0,
+                  items: parsedItems,
+                  packagingNotes: fo.packagingNotes || "",
+                  createdAt: fo.createdAt.toISOString(),
+                  updatedAt: fo.updatedAt.toISOString()
+                };
+              }),
+              auditLogs: b2.auditLogs.map((al) => ({
+                id: al.id,
+                bookingId: al.bookingId || "",
+                action: al.action,
+                performedBy: al.performedBy,
+                details: al.details,
+                timestamp: al.timestamp.toISOString()
+              }))
+            };
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.getBookingById.prisma");
+      }
+    }
     memoryDB = loadLocalDB();
     const b = memoryDB.bookings.find((item) => item.id === id || item.bookingCode === id);
     if (!b) return null;
     return {
       ...b,
+      isTest: b.isTest ?? (b.bookingCode === "CLB-2026-1699" || b.customerName.includes("\u062A\u062C\u0631\u064A\u0628")),
       payments: memoryDB.payments.filter((p) => p.bookingId === b.id),
       factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id),
       auditLogs: memoryDB.auditLogs.filter((al) => al.bookingId === b.id)
@@ -1041,60 +1302,180 @@ var db = {
     saveLocalDB(memoryDB);
     return payment;
   },
-  async createFactoryOrder(bookingId, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
-    memoryDB = loadLocalDB();
-    const booking = memoryDB.bookings.find((b) => b.id === bookingId);
+  async getFactoryOrderPreview(bookingId) {
+    const booking = await this.getBookingById(bookingId);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0644\u062D\u0633\u0627\u0628 \u0645\u0639\u0627\u064A\u0646\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639");
+    }
+    const meals = await this.getMeals(true);
+    const mealsMap = new Map(meals.map((m) => [m.code, m]));
+    let totalFactoryCost = 0;
+    const previewItems = booking.items.map((item) => {
+      const meal = mealsMap.get(item.mealCode);
+      const baseFactPrice = meal?.factoryPrice ?? item.baseFactoryPrice ?? 0;
+      let drinkDelta = 0;
+      if (item.drinkOption === "no_juice") {
+        drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+      } else if (item.drinkOption === "pepsi") {
+        drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+      }
+      const unitFactPrice = Math.max(0, baseFactPrice + drinkDelta);
+      const totalFactItemPrice = unitFactPrice * item.quantity;
+      totalFactoryCost += totalFactItemPrice;
+      return {
+        mealCode: item.mealCode,
+        mealName: meal?.name || item.mealName,
+        quantity: item.quantity,
+        drinkOption: item.drinkOption,
+        ingredients: meal?.ingredients || item.ingredients,
+        unitFactoryPrice: unitFactPrice,
+        totalFactoryPrice: totalFactItemPrice,
+        specialInstructions: item.drinkOption === "no_juice" ? "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (-5 \u062C)" : item.drinkOption === "pepsi" ? "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A (+10 \u062C)" : "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A"
+      };
+    });
+    const existingOrders = (booking.factoryOrders || []).concat(
+      memoryDB.factoryOrders.filter((fo) => fo.bookingId === booking.id)
+    );
+    const uniqueExisting = Array.from(new Map(existingOrders.map((o) => [o.orderNumber, o])).values());
+    return {
+      bookingId: booking.id,
+      bookingCode: booking.bookingCode,
+      eventName: booking.eventName,
+      eventDate: booking.eventDate,
+      deliveryTime: booking.deliveryTime,
+      deliveryLocation: `${booking.deliveryGovernorate} - ${booking.deliveryAddress}`,
+      totalMealsCount: booking.totalMealsCount,
+      totalFactoryCost,
+      items: previewItems,
+      existingOrdersCount: uniqueExisting.length,
+      existingOrders: uniqueExisting,
+      packagingNotes: `\u0627\u0644\u0639\u0644\u0628\u0629 \u0627\u0644\u0628\u064A\u0636\u0627\u0621 \u0627\u0644\u0631\u0633\u0645\u064A\u0629 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629 \u0644\u0640 Celebre Catering. \u0648\u0636\u0639 \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644 \u0645\u0639\u0637\u0631 \u0645\u0639 \u0643\u0644 \u0648\u062C\u0628\u0629. \u0641\u062D\u0635 \u0627\u0644\u062C\u0648\u062F\u0629 \u0648\u062A\u0627\u0631\u064A\u062E \u0627\u0644\u062A\u0639\u0628\u0626\u0629. ${booking.notes || ""}`.trim()
+    };
+  },
+  async createFactoryOrder(bookingId, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", options) {
+    const booking = await this.getBookingById(bookingId);
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0644\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639");
     }
-    const existingOrders = memoryDB.factoryOrders.filter((fo) => fo.bookingId === bookingId);
-    const version = existingOrders.length + 1;
+    if (booking.totalMealsCount < 50) {
+      throw new Error(`\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0644\u0644\u0645\u0635\u0646\u0639 \u0644\u062D\u062C\u0632 \u064A\u0642\u0644 \u0625\u062C\u0645\u0627\u0644\u064A \u0648\u062C\u0628\u0627\u062A\u0647 \u0639\u0646 50 \u0648\u062C\u0628\u0629 (\u0627\u0644\u0639\u062F\u062F \u0627\u0644\u062D\u0627\u0644\u064A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629). \u064A\u0631\u062C\u0649 \u0645\u0631\u0627\u062C\u0639\u0629 \u0648\u062A\u0639\u062F\u064A\u0644 \u0643\u0645\u064A\u0627\u062A \u0627\u0644\u062D\u062C\u0632 \u0625\u0644\u0649 50 \u0648\u062C\u0628\u0629 \u0641\u0623\u0643\u062B\u0631 \u0623\u0648\u0644\u0627\u064B.`);
+    }
+    memoryDB = loadLocalDB();
+    const existingOrders = (booking.factoryOrders || []).concat(
+      memoryDB.factoryOrders.filter((fo) => fo.bookingId === bookingId)
+    );
+    const uniqueExisting = Array.from(new Map(existingOrders.map((o) => [o.orderNumber, o])).values());
+    if (uniqueExisting.length > 0 && !options?.forceNewVersion) {
+      const latest = uniqueExisting[uniqueExisting.length - 1];
+      throw new Error(`\u064A\u0648\u062C\u062F \u0628\u0627\u0644\u0641\u0639\u0644 \u0623\u0645\u0631 \u0645\u0635\u0646\u0639 \u0635\u0627\u062F\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u062C\u0632 (${latest.orderNumber} - \u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${latest.version}). \u0625\u0630\u0627 \u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u0648\u062A\u0631\u064A\u062F \u0625\u0635\u062F\u0627\u0631 \u0646\u0633\u062E\u0629 \u0639\u0645\u0644 \u062C\u062F\u064A\u062F\u0629 \u0644\u0644\u0645\u0635\u0646\u0639\u060C \u064A\u0631\u062C\u0649 \u062A\u0623\u0643\u064A\u062F \u062E\u064A\u0627\u0631 "\u0625\u0635\u062F\u0627\u0631 \u0646\u0633\u062E\u0629 \u0639\u0645\u0644 \u062C\u062F\u064A\u062F\u0629".`);
+    }
+    const version = uniqueExisting.length + 1;
     memoryDB.factoryOrderCounter += 1;
-    const orderNumber = `FO-2026-${memoryDB.factoryOrderCounter}`;
+    const orderNumber = `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, "0")}`;
+    const preview = await this.getFactoryOrderPreview(bookingId);
     const factoryOrder = {
-      id: `fo-${Date.now()}`,
+      id: `fo-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
       orderNumber,
       bookingId: booking.id,
       bookingCode: booking.bookingCode,
       version,
-      status: "PENDING",
+      status: "READY_TO_SEND",
       eventDate: booking.eventDate,
       deliveryTime: booking.deliveryTime,
-      deliveryLocation: `${booking.deliveryGovernorate} - ${booking.deliveryAddress}`,
-      factoryCostTotal: booking.totalFactoryPrice || 0,
-      // Strictly separate kitchen information:
-      // quantities, meal codes, ingredients list, drink option, packaging notes, factory unit cost
-      // STRICTLY NO distributor prices or profit margins!
-      items: booking.items.map((item) => ({
-        mealCode: item.mealCode,
-        mealName: item.mealName,
-        quantity: item.quantity,
-        drinkOption: item.drinkOption,
-        ingredients: item.ingredients,
-        unitFactoryPrice: item.unitFactoryPrice,
-        totalFactoryPrice: item.totalFactoryPrice,
-        specialInstructions: item.drinkOption === "no_juice" ? "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631" : item.drinkOption === "pepsi" ? "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A" : "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A"
-      })),
-      packagingNotes: `\u0627\u0644\u0639\u0644\u0628\u0629 \u0627\u0644\u0628\u064A\u0636\u0627\u0621 \u0627\u0644\u0631\u0633\u0645\u064A\u0629 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629 \u0644\u0640 Celebre Catering. \u0648\u0636\u0639 \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644 \u0645\u0639\u0637\u0631 \u0645\u0639 \u0643\u0644 \u0648\u062C\u0628\u0629. \u0641\u062D\u0635 \u0627\u0644\u062C\u0648\u062F\u0629 \u0648\u062A\u0627\u0631\u064A\u062E \u0627\u0644\u062A\u0639\u0628\u0626\u0629. ${booking.notes || ""}`.trim(),
+      deliveryLocation: preview.deliveryLocation,
+      factoryCostTotal: preview.totalFactoryCost,
+      items: preview.items,
+      packagingNotes: preview.packagingNotes,
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     memoryDB.factoryOrders.unshift(factoryOrder);
-    if (booking.status === "CONFIRMED" || booking.status === "PENDING_CONFIRMATION") {
-      booking.status = "IN_PRODUCTION";
-      booking.statusNotes = `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0631\u0642\u0645 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`;
-      booking.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.create({
+            data: {
+              id: factoryOrder.id,
+              orderNumber: factoryOrder.orderNumber,
+              bookingId: factoryOrder.bookingId,
+              bookingCode: factoryOrder.bookingCode,
+              version: factoryOrder.version,
+              status: factoryOrder.status,
+              eventDate: factoryOrder.eventDate,
+              deliveryTime: factoryOrder.deliveryTime,
+              deliveryLocation: factoryOrder.deliveryLocation,
+              itemsJson: JSON.stringify(factoryOrder.items),
+              packagingNotes: factoryOrder.packagingNotes
+            }
+          });
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: "IN_PRODUCTION",
+              statusNotes: `\u062A\u0645 \u062A\u062D\u0648\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u0644\u0644\u0645\u0635\u0646\u0639 \u0648\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.createFactoryOrder.prisma");
+      }
+    }
+    const memBooking = memoryDB.bookings.find((b) => b.id === booking.id);
+    if (memBooking) {
+      memBooking.status = "IN_PRODUCTION";
+      memBooking.statusNotes = `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0631\u0642\u0645 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`;
+      memBooking.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     this.addAuditLog({
       bookingId: booking.id,
       action: "\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639",
       performedBy,
-      details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0631\u0642\u0645 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 ${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0628\u062F\u0648\u0646 \u0625\u0638\u0647\u0627\u0631 \u0647\u0648\u0627\u0645\u0634 \u0627\u0644\u0631\u0628\u062D.`
+      details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 ${preview.totalFactoryCost} \u062C (\u062E\u0627\u0644\u064D \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).`
     });
     saveLocalDB(memoryDB);
     return factoryOrder;
   },
   async getFactoryOrders() {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbOrders = await client.factoryOrder.findMany({
+            orderBy: { createdAt: "desc" }
+          });
+          if (dbOrders && dbOrders.length > 0) {
+            return dbOrders.map((fo) => {
+              let parsedItems = [];
+              try {
+                parsedItems = JSON.parse(fo.itemsJson);
+              } catch {
+              }
+              const costTotal = parsedItems.reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
+              return {
+                id: fo.id,
+                orderNumber: fo.orderNumber,
+                bookingId: fo.bookingId,
+                bookingCode: fo.bookingCode,
+                version: fo.version,
+                status: fo.status,
+                eventDate: fo.eventDate,
+                deliveryTime: fo.deliveryTime,
+                deliveryLocation: fo.deliveryLocation,
+                factoryCostTotal: costTotal,
+                items: parsedItems,
+                packagingNotes: fo.packagingNotes || "",
+                createdAt: fo.createdAt.toISOString(),
+                updatedAt: fo.updatedAt.toISOString()
+              };
+            });
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.getFactoryOrders.prisma");
+      }
+    }
     memoryDB = loadLocalDB();
     return memoryDB.factoryOrders;
   },
@@ -1104,6 +1485,19 @@ var db = {
     if (!fo) return null;
     fo.status = status;
     fo.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.updateMany({
+            where: { OR: [{ id: orderId }, { orderNumber: orderId }] },
+            data: { status, updatedAt: /* @__PURE__ */ new Date() }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.updateFactoryOrderStatus.prisma");
+      }
+    }
     const booking = memoryDB.bookings.find((b) => b.id === fo.bookingId);
     if (booking) {
       if (status === "COMPLETED") {
@@ -1130,10 +1524,56 @@ var db = {
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       ...log
     };
+    if (!memoryDB || !Array.isArray(memoryDB.auditLogs)) {
+      memoryDB = loadLocalDB();
+    }
     memoryDB.auditLogs.unshift(newLog);
+    saveLocalDB(memoryDB);
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.auditLog.create({
+            data: {
+              id: newLog.id,
+              bookingId: newLog.bookingId || null,
+              action: newLog.action,
+              performedBy: newLog.performedBy,
+              details: newLog.details
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.addAuditLog.prisma");
+      }
+    }
     return newLog;
   },
   async getAuditLogs(bookingId) {
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const logs = await client.auditLog.findMany({
+            where: bookingId ? { bookingId } : void 0,
+            orderBy: { timestamp: "desc" },
+            take: 50
+          });
+          if (logs && logs.length > 0) {
+            return logs.map((l) => ({
+              id: l.id,
+              bookingId: l.bookingId || "",
+              action: l.action,
+              performedBy: l.performedBy,
+              details: l.details,
+              timestamp: l.timestamp.toISOString()
+            }));
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.getAuditLogs.prisma");
+      }
+    }
     memoryDB = loadLocalDB();
     if (bookingId) {
       return memoryDB.auditLogs.filter((l) => l.bookingId === bookingId);
@@ -1141,13 +1581,13 @@ var db = {
     return memoryDB.auditLogs.slice(0, 50);
   },
   async getStats() {
-    memoryDB = loadLocalDB();
-    const totalBookings = memoryDB.bookings.length;
+    const bookings = await this.getBookings();
+    const totalBookings = bookings.length;
     let totalMeals = 0;
     let totalRevenue = 0;
     let totalFactoryCost = 0;
     let totalCollected = 0;
-    memoryDB.bookings.forEach((b) => {
+    bookings.forEach((b) => {
       if (b.status !== "CANCELLED") {
         totalMeals += b.totalMealsCount;
         totalRevenue += b.totalDistributorPrice;
@@ -1157,6 +1597,8 @@ var db = {
     });
     const totalProfit = totalRevenue - totalFactoryCost;
     const totalOutstanding = Math.max(0, totalRevenue - totalCollected);
+    const meals = await this.getMeals(true);
+    const factoryOrders = await this.getFactoryOrders();
     return {
       totalBookings,
       totalMeals,
@@ -1165,11 +1607,41 @@ var db = {
       totalProfit,
       totalCollected,
       totalOutstanding,
-      activeMealsCount: memoryDB.meals.filter((m) => m.isActive).length,
-      factoryOrdersCount: memoryDB.factoryOrders.length
+      activeMealsCount: meals.filter((m) => m.isActive).length,
+      factoryOrdersCount: factoryOrders.length
     };
   },
   async verifyAdmin(username, password) {
+    if (!username || !password) return null;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbUser = await client.adminUser.findFirst({
+            where: {
+              OR: [
+                { username: { equals: username, mode: "insensitive" } },
+                { email: { equals: username, mode: "insensitive" } }
+              ]
+            }
+          });
+          if (dbUser) {
+            const isValid2 = bcrypt.compareSync(password, dbUser.passwordHash);
+            if (isValid2) {
+              return {
+                id: dbUser.id,
+                username: dbUser.username,
+                email: dbUser.email,
+                name: dbUser.name,
+                role: dbUser.role
+              };
+            }
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.verifyAdmin.prisma");
+      }
+    }
     memoryDB = loadLocalDB();
     const user = memoryDB.adminUsers.find(
       (u) => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
@@ -1179,8 +1651,359 @@ var db = {
     if (!isValid) return null;
     const { passwordHash, ...safeUser } = user;
     return safeUser;
+  },
+  async updateAdminPassword(username, newPasswordHash, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    memoryDB = loadLocalDB();
+    const user = memoryDB.adminUsers.find(
+      (u) => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
+    );
+    if (user) {
+      user.passwordHash = newPasswordHash;
+      saveLocalDB(memoryDB);
+    }
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.adminUser.updateMany({
+            where: {
+              OR: [
+                { username: { equals: username, mode: "insensitive" } },
+                { email: { equals: username, mode: "insensitive" } }
+              ]
+            },
+            data: {
+              passwordHash: newPasswordHash
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.updateAdminPassword.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: "",
+      action: "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u0625\u062F\u0627\u0631\u064A",
+      performedBy,
+      details: `\u062A\u0645 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0644\u0644\u0645\u0633\u062A\u062E\u062F\u0645 (${username}) \u0628\u0646\u062C\u0627\u062D\u060C \u0648\u062A\u0634\u0641\u064A\u0631\u0647\u0627 \u0639\u0628\u0631 bcrypt \u0648\u0625\u0644\u063A\u0627\u0621 \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0642\u062F\u064A\u0645\u0629 \u0641\u0648\u0631\u0627\u064B.`
+    });
+    return true;
+  },
+  // STRICT TEST BOOKING MANAGEMENT: Only bookings with isTest === true can be modified or deleted
+  async updateTestBooking(id, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    const isTest = Boolean(booking.isTest || booking.bookingCode === "CLB-2026-1699" || booking.customerName.includes("\u062A\u062C\u0631\u064A\u0628"));
+    if (!isTest) {
+      throw new Error("\u0645\u0645\u0646\u0648\u0639: \u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0639\u062F\u064A\u0644 \u0633\u0648\u0649 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0642\u0637 (isTest: true). \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0648\u0627\u0644\u062A\u0627\u0631\u064A\u062E\u064A\u0629 \u0645\u062D\u0645\u064A\u0629 \u0628\u0627\u0644\u0643\u0627\u0645\u0644 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u0627\u0631.");
+    }
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const updatedBooking = {
+      ...booking,
+      ...updates,
+      version: booking.version + 1,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              customerName: updates.customerName ?? booking.customerName,
+              customerPhone: updates.customerPhone ?? booking.customerPhone,
+              eventName: updates.eventName ?? booking.eventName,
+              eventDate: updates.eventDate ?? booking.eventDate,
+              deliveryTime: updates.deliveryTime ?? booking.deliveryTime,
+              deliveryGovernorate: updates.deliveryGovernorate ?? booking.deliveryGovernorate,
+              deliveryAddress: updates.deliveryAddress ?? booking.deliveryAddress,
+              notes: updates.notes !== void 0 ? updates.notes : booking.notes,
+              status: updates.status ?? booking.status,
+              version: updatedBooking.version,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.updateTestBooking.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: "\u062A\u0639\u062F\u064A\u0644 \u062D\u062C\u0632 \u062A\u062C\u0631\u064A\u0628\u064A",
+      performedBy,
+      details: `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A ${booking.bookingCode} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${updatedBooking.version}).`
+    });
+    return updatedBooking;
+  },
+  async deleteTestBooking(id, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    const isTest = Boolean(booking.isTest || booking.bookingCode === "CLB-2026-1699" || booking.customerName.includes("\u062A\u062C\u0631\u064A\u0628"));
+    if (!isTest) {
+      throw new Error("\u0645\u0645\u0646\u0648\u0639 \u0645\u0646\u0639\u0627\u064B \u0628\u0627\u062A\u0627\u064B: \u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0633\u0648\u0649 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0642\u0637 (isTest: true). \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0644\u0644\u0639\u0645\u0644\u0627\u0621 \u0645\u062D\u0645\u064A\u0629 \u0648\u0644\u0627 \u064A\u062C\u0648\u0632 \u062D\u0630\u0641\u0647\u0627.");
+    }
+    const bookingCode = booking.bookingCode;
+    const targetId = booking.id;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.bookingItem.deleteMany({ where: { bookingId: targetId } });
+          await client.payment.deleteMany({ where: { bookingId: targetId } });
+          await client.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+          await client.auditLog.deleteMany({ where: { bookingId: targetId } });
+          await client.booking.delete({ where: { id: targetId } });
+        }
+      } catch (err) {
+        logServerError(err, "db.deleteTestBooking.prisma");
+      }
+    }
+    memoryDB = loadLocalDB();
+    memoryDB.bookings = memoryDB.bookings.filter((b) => b.id !== targetId && b.bookingCode !== bookingCode);
+    memoryDB.payments = memoryDB.payments.filter((p) => p.bookingId !== targetId);
+    memoryDB.factoryOrders = memoryDB.factoryOrders.filter((fo) => fo.bookingId !== targetId);
+    saveLocalDB(memoryDB);
+    await this.addAuditLog({
+      bookingId: "",
+      action: "\u062D\u0630\u0641 \u062D\u062C\u0632 \u062A\u062C\u0631\u064A\u0628\u064A",
+      performedBy,
+      details: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A \u0631\u0642\u0645 ${bookingCode} \u0628\u0643\u0627\u0641\u0629 \u0628\u0646\u0648\u062F\u0647 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0628\u0639\u062F \u0627\u0644\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0635\u0631\u064A\u062D.`
+    });
+    return { success: true, bookingCode };
+  },
+  async updateBookingByAdmin(id, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    const meals = await this.getMeals(true);
+    const mealsMap = new Map(meals.map((m) => [m.code, m]));
+    let validatedItems = booking.items;
+    let totalMealsCount = booking.totalMealsCount;
+    let totalDistributorPrice = booking.totalDistributorPrice;
+    let totalFactoryPrice = booking.totalFactoryPrice || 0;
+    let profitMargin = booking.profitMargin || 0;
+    let remainingAmount = booking.remainingAmount;
+    if (updates.items && Array.isArray(updates.items)) {
+      if (updates.items.length === 0) {
+        throw new Error("\u064A\u062C\u0628 \u0623\u0646 \u064A\u062D\u062A\u0648\u064A \u0627\u0644\u062D\u062C\u0632 \u0639\u0644\u0649 \u0635\u0646\u0641 \u0648\u0627\u062D\u062F \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644");
+      }
+      totalMealsCount = 0;
+      totalDistributorPrice = 0;
+      totalFactoryPrice = 0;
+      validatedItems = updates.items.map((item) => {
+        const meal = mealsMap.get(item.mealCode);
+        if (!meal) {
+          throw new Error(`\u0627\u0644\u0648\u062C\u0628\u0629 ${item.mealCode} \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629 \u0641\u064A \u0627\u0644\u0645\u0646\u064A\u0648 \u0627\u0644\u0645\u0639\u062A\u0645\u062F`);
+        }
+        const quantity = Math.max(1, Math.floor(item.quantity));
+        totalMealsCount += quantity;
+        const baseDistributorPrice = meal.distributorPrice;
+        const baseFactoryPrice = meal.factoryPrice || 0;
+        let drinkDelta = 0;
+        if (meal.hasJuice) {
+          if (item.drinkOption === "no_juice") {
+            drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          } else if (item.drinkOption === "pepsi") {
+            drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+          }
+        }
+        const unitDistributorPrice = Math.max(0, baseDistributorPrice + drinkDelta);
+        const unitFactoryPrice = Math.max(0, baseFactoryPrice + drinkDelta);
+        const itemTotalDistributor = unitDistributorPrice * quantity;
+        const itemTotalFactory = unitFactoryPrice * quantity;
+        totalDistributorPrice += itemTotalDistributor;
+        totalFactoryPrice += itemTotalFactory;
+        return {
+          mealId: meal.id,
+          mealCode: meal.code,
+          mealName: meal.name,
+          category: meal.category,
+          ingredients: meal.ingredients,
+          quantity,
+          drinkOption: item.drinkOption,
+          baseDistributorPrice,
+          unitDistributorPrice,
+          totalDistributorPrice: itemTotalDistributor,
+          baseFactoryPrice,
+          unitFactoryPrice,
+          totalFactoryPrice: itemTotalFactory
+        };
+      });
+      profitMargin = totalDistributorPrice - totalFactoryPrice;
+      remainingAmount = Math.max(0, totalDistributorPrice - booking.paidAmount);
+    }
+    const targetStatus = updates.status || booking.status;
+    if ((targetStatus === "CONFIRMED" || targetStatus === "IN_PRODUCTION") && totalMealsCount < 50) {
+      throw new Error(`\u0644\u0627 \u064A\u0645\u0643\u0646 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632 \u0623\u0648 \u0646\u0642\u0644\u0647 \u0644\u0644\u062A\u0634\u063A\u064A\u0644 \u0628\u0643\u0645\u064A\u0629 \u062A\u0642\u0644 \u0639\u0646 50 \u0648\u062C\u0628\u0629 (\u0627\u0644\u0643\u0645\u064A\u0629 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A\u0629 \u0627\u0644\u062D\u0627\u0644\u064A\u0629: ${totalMealsCount} \u0648\u062C\u0628\u0629). \u064A\u0631\u062C\u0649 \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0643\u0645\u064A\u0627\u062A \u0623\u0648\u0644\u0627\u064B.`);
+    }
+    const updatedBooking = {
+      ...booking,
+      customerName: updates.customerName !== void 0 ? updates.customerName.trim() : booking.customerName,
+      customerPhone: updates.customerPhone !== void 0 ? updates.customerPhone.trim() : booking.customerPhone,
+      customerWhatsapp: updates.customerWhatsapp !== void 0 ? updates.customerWhatsapp.trim() : booking.customerWhatsapp,
+      preferredContact: updates.preferredContact || booking.preferredContact,
+      eventName: updates.eventName !== void 0 ? updates.eventName.trim() : booking.eventName,
+      eventDate: updates.eventDate || booking.eventDate,
+      deliveryTime: updates.deliveryTime || booking.deliveryTime,
+      deliveryGovernorate: updates.deliveryGovernorate || booking.deliveryGovernorate,
+      deliveryAddress: updates.deliveryAddress !== void 0 ? updates.deliveryAddress.trim() : booking.deliveryAddress,
+      notes: updates.notes !== void 0 ? updates.notes.trim() : booking.notes,
+      status: targetStatus,
+      statusNotes: updates.statusNotes !== void 0 ? updates.statusNotes : booking.statusNotes,
+      items: validatedItems,
+      totalMealsCount,
+      totalDistributorPrice,
+      totalFactoryPrice,
+      profitMargin,
+      remainingAmount,
+      version: booking.version + 1,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              customerName: updatedBooking.customerName,
+              customerPhone: updatedBooking.customerPhone,
+              customerWhatsapp: updatedBooking.customerWhatsapp,
+              preferredContact: updatedBooking.preferredContact,
+              eventName: updatedBooking.eventName,
+              eventDate: updatedBooking.eventDate,
+              deliveryTime: updatedBooking.deliveryTime,
+              deliveryGovernorate: updatedBooking.deliveryGovernorate,
+              deliveryAddress: updatedBooking.deliveryAddress,
+              notes: updatedBooking.notes,
+              status: updatedBooking.status,
+              statusNotes: updatedBooking.statusNotes,
+              totalMealsCount: updatedBooking.totalMealsCount,
+              totalDistributorPrice: updatedBooking.totalDistributorPrice,
+              totalFactoryPrice: updatedBooking.totalFactoryPrice,
+              profitMargin: updatedBooking.profitMargin,
+              remainingAmount: updatedBooking.remainingAmount,
+              version: updatedBooking.version,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+          if (updates.items && Array.isArray(updates.items)) {
+            await client.bookingItem.deleteMany({ where: { bookingId: booking.id } });
+            await client.bookingItem.createMany({
+              data: validatedItems.map((it) => ({
+                bookingId: booking.id,
+                mealId: it.mealId,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice,
+                unitFactoryPrice: it.unitFactoryPrice,
+                totalFactoryPrice: it.totalFactoryPrice
+              }))
+            });
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.updateBookingByAdmin.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: "\u062A\u0639\u062F\u064A\u0644 \u062D\u062C\u0632 \u0628\u0648\u0627\u0633\u0637\u0629 \u0627\u0644\u0625\u062F\u0627\u0631\u0629",
+      performedBy,
+      details: `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062D\u062C\u0632 ${booking.bookingCode} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${updatedBooking.version}). \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0648\u062C\u0628\u0627\u062A: ${totalMealsCount}\u060C \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0642\u064A\u0645\u0629: ${totalDistributorPrice} \u062C.`
+    });
+    return updatedBooking;
+  },
+  async confirmFactoryOrderSent(orderId, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    memoryDB = loadLocalDB();
+    const order = memoryDB.factoryOrders.find((fo) => fo.id === orderId || fo.orderNumber === orderId);
+    if (!order) {
+      throw new Error("\u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    order.status = "MANUALLY_CONFIRMED";
+    order.updatedAt = now;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.updateMany({
+            where: { OR: [{ id: order.id }, { orderNumber: order.orderNumber }] },
+            data: { status: "MANUALLY_CONFIRMED", updatedAt: /* @__PURE__ */ new Date() }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.confirmFactoryOrderSent.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: order.bookingId,
+      action: "\u062A\u0623\u0643\u064A\u062F \u0625\u0631\u0633\u0627\u0644 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0644\u0644\u0645\u0635\u0646\u0639 \u064A\u062F\u0648\u064A\u0627\u064B",
+      performedBy,
+      details: `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062A\u0623\u0643\u064A\u062F \u0625\u0631\u0633\u0627\u0644 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${order.version}) \u0625\u0644\u0649 \u0648\u0627\u062A\u0633\u0627\u0628 \u0627\u0644\u0645\u0635\u0646\u0639 \u064A\u062F\u0648\u064A\u0627\u064B \u0641\u064A ${now}.`
+    });
+    saveLocalDB(memoryDB);
+    return order;
   }
 };
+function buildFactoryWhatsAppMessage(factoryOrder, booking, factoryPhone) {
+  const itemsText = factoryOrder.items.map((it) => {
+    return [
+      `\u2022 *\u0643\u0648\u062F:* ${it.mealCode} | *\u0627\u0633\u0645 \u0627\u0644\u0648\u062C\u0628\u0629:* ${it.mealName}`,
+      `  - *\u0627\u0644\u0643\u0645\u064A\u0629:* ${it.quantity} \u0628\u0648\u0643\u0633 | ${it.specialInstructions || it.drinkOption}`,
+      `  - *\u0633\u0639\u0631 \u0627\u0644\u0645\u0635\u0646\u0639:* ${it.unitFactoryPrice ?? 0} \u062C | *\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0645\u0635\u0646\u0639:* ${it.totalFactoryPrice ?? 0} \u062C`,
+      `  - *\u0627\u0644\u0645\u0643\u0648\u0646\u0627\u062A:* ${it.ingredients}`
+    ].join("\n");
+  }).join("\n\n");
+  const totalCost = factoryOrder.factoryCostTotal || 0;
+  const lines = [
+    `*\u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0645\u0637\u0628\u062E \u0648\u0645\u0635\u0646\u0639 C\xC9L\xC8BRE CATERING*`,
+    `-----------------------------------------`,
+    `*\u0631\u0642\u0645 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644:* ${factoryOrder.orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${factoryOrder.version})`,
+    `*\u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0631\u062C\u0639\u064A:* ${booking.bookingCode}`,
+    `*\u062A\u0627\u0631\u064A\u062E \u0648\u0645\u0648\u0639\u062F \u0627\u0644\u062A\u0633\u0644\u064A\u0645:* ${factoryOrder.eventDate} \u0627\u0644\u0633\u0627\u0639\u0629 ${factoryOrder.deliveryTime}`,
+    `*\u0645\u0643\u0627\u0646 \u0627\u0644\u062A\u0633\u0644\u064A\u0645:* ${factoryOrder.deliveryLocation}`,
+    `*\u0627\u0644\u0639\u0645\u064A\u0644 / \u0627\u0644\u0645\u0633\u062A\u0644\u0645:* ${booking.customerName} (${booking.customerPhone})`,
+    `-----------------------------------------`,
+    `*\u0628\u064A\u0627\u0646 \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0648\u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628:*`,
+    itemsText,
+    `-----------------------------------------`,
+    `*\u0625\u062C\u0645\u0627\u0644\u064A \u0639\u062F\u062F \u0627\u0644\u0628\u0648\u0643\u0633\u0627\u062A:* ${booking.totalMealsCount} \u0628\u0648\u0643\u0633`,
+    `*\u0625\u062C\u0645\u0627\u0644\u064A \u062A\u0643\u0644\u0641\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629:* ${totalCost.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`,
+    `*\u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u062A\u0639\u0628\u0626\u0629 \u0648\u0627\u0644\u062A\u063A\u0644\u064A\u0641:* ${factoryOrder.packagingNotes}`,
+    `-----------------------------------------`,
+    `*\u062A\u0646\u0628\u064A\u0647 \u062A\u0634\u063A\u064A\u0644\u064A:* \u0647\u0630\u0647 \u0648\u062B\u064A\u0642\u0629 \u062A\u0634\u063A\u064A\u0644 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 \u0631\u0633\u0645\u064A\u0629 \u0635\u0627\u062F\u0631\u0629 \u0645\u0646 \u0625\u062F\u0627\u0631\u0629 \u0633\u064A\u0644\u064A\u0628\u0631\u064A (\u062E\u0627\u0644\u064A\u0629 \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).`
+  ];
+  const messageText = lines.join("\n");
+  const cleanPhone = (factoryPhone || "").replace(/\D/g, "");
+  const whatsappUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}` : "";
+  return { messageText, whatsappUrl };
+}
 
 // src/server/metaService.ts
 var META_CONFIG = {
@@ -2028,6 +2851,7 @@ var TABLE_DDL_QUERIES = {
       "remainingAmount" DOUBLE PRECISION NOT NULL,
       "status" TEXT NOT NULL DEFAULT 'INITIAL',
       "statusNotes" TEXT,
+      "isTest" BOOLEAN NOT NULL DEFAULT false,
       "version" INTEGER NOT NULL DEFAULT 1,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -2188,6 +3012,10 @@ async function ensureSchemaReady(client) {
     }
   }
   try {
+    await client.$executeRawUnsafe('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
+  } catch {
+  }
+  try {
     const mealCount = await client.meal.count();
     if (mealCount === 0) {
       for (const m of INITIAL_MEALS) {
@@ -2207,6 +3035,12 @@ async function ensureSchemaReady(client) {
         }).catch(() => {
         });
       }
+    } else {
+      await client.meal.updateMany({
+        where: { code: "Sale-12" },
+        data: { name: "\u0628\u0627\u062A\u064A\u0629" }
+      }).catch(() => {
+      });
     }
   } catch {
   }
@@ -2219,25 +3053,171 @@ async function ensureSchemaReady(client) {
   };
 }
 
+// src/server/authSession.ts
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
+var JWT_SECRET = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
+var INACTIVITY_TIMEOUT_MS = 15 * 60 * 1e3;
+var activeSessions = /* @__PURE__ */ new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, session] of activeSessions.entries()) {
+    if (now - session.lastActivityAt > INACTIVITY_TIMEOUT_MS * 2) {
+      activeSessions.delete(sid);
+    }
+  }
+}, 5 * 60 * 1e3);
+function createAdminSession(user, res) {
+  const sessionId = crypto.randomUUID();
+  const now = Date.now();
+  const session = {
+    sessionId,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    name: user.name,
+    createdAt: now,
+    lastActivityAt: now
+  };
+  activeSessions.set(sessionId, session);
+  const token = jwt.sign(
+    {
+      id: user.id,
+      sessionId,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      name: user.name
+    },
+    JWT_SECRET,
+    { expiresIn: "2h" }
+    // Hard expiration cap (while inactivity enforces 15 mins)
+  );
+  if (res && typeof res.cookie === "function") {
+    res.cookie("celebre_admin_session", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: INACTIVITY_TIMEOUT_MS,
+      path: "/"
+    });
+  }
+  return { token, sessionId, session };
+}
+function validateAdminSession(req, res) {
+  let token = void 0;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
+  } else if (req.cookies && req.cookies.celebre_admin_session) {
+    token = req.cookies.celebre_admin_session;
+  }
+  if (!token) {
+    return {
+      valid: false,
+      error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D: \u064A\u0644\u0632\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0644\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0644\u0648\u062D\u0629 \u0627\u0644\u0625\u062F\u0627\u0631\u0629",
+      code: "UNAUTHORIZED"
+    };
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const sessionId = decoded.sessionId;
+    if (!sessionId) {
+      return {
+        valid: false,
+        error: "\u062C\u0644\u0633\u0629 \u0642\u062F\u064A\u0645\u0629 \u0623\u0648 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629\u060C \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B",
+        code: "INVALID_TOKEN"
+      };
+    }
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+      if (res && typeof res.clearCookie === "function") {
+        res.clearCookie("celebre_admin_session", { path: "/" });
+      }
+      return {
+        valid: false,
+        error: "\u062C\u0644\u0633\u0629 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0644\u063A\u0627\u0629 \u0623\u0648 \u0645\u0646\u062A\u0647\u064A\u0629\u060C \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B",
+        code: "SESSION_REVOKED"
+      };
+    }
+    const now = Date.now();
+    if (now - session.lastActivityAt > INACTIVITY_TIMEOUT_MS) {
+      activeSessions.delete(sessionId);
+      if (res && typeof res.clearCookie === "function") {
+        res.clearCookie("celebre_admin_session", { path: "/" });
+      }
+      return {
+        valid: false,
+        error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629 \u0628\u0633\u0628\u0628 \u0639\u062F\u0645 \u0627\u0644\u0646\u0634\u0627\u0637 (15 \u062F\u0642\u064A\u0642\u0629)",
+        code: "SESSION_INACTIVITY_TIMEOUT"
+      };
+    }
+    session.lastActivityAt = now;
+    if (res && typeof res.cookie === "function") {
+      res.cookie("celebre_admin_session", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: INACTIVITY_TIMEOUT_MS,
+        path: "/"
+      });
+    }
+    const user = {
+      id: session.userId,
+      username: session.username,
+      email: decoded.email || `${session.username}@celebre-eg.com`,
+      role: session.role,
+      name: session.name
+    };
+    return {
+      valid: true,
+      user,
+      session
+    };
+  } catch (err) {
+    if (res && typeof res.clearCookie === "function") {
+      res.clearCookie("celebre_admin_session", { path: "/" });
+    }
+    return {
+      valid: false,
+      error: "\u062C\u0644\u0633\u0629 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0646\u062A\u0647\u064A\u0629 \u0623\u0648 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629",
+      code: "INVALID_TOKEN"
+    };
+  }
+}
+function revokeAdminSession(sessionId, res) {
+  activeSessions.delete(sessionId);
+  if (res && typeof res.clearCookie === "function") {
+    res.clearCookie("celebre_admin_session", { path: "/" });
+  }
+}
+function revokeAllUserSessions(userId, res) {
+  for (const [sid, session] of activeSessions.entries()) {
+    if (session.userId === userId) {
+      activeSessions.delete(sid);
+    }
+  }
+  if (res && typeof res.clearCookie === "function") {
+    res.clearCookie("celebre_admin_session", { path: "/" });
+  }
+}
+
 // src/server/routes.ts
 import pg2 from "pg";
 var apiRouter = Router();
-var JWT_SECRET = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
+var JWT_SECRET2 = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
 function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D: \u064A\u0644\u0632\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644" });
+  const result = validateAdminSession(req, res);
+  if (!result.valid || !result.user) {
+    res.status(401).json({
+      error: result.error || "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D: \u064A\u0644\u0632\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644",
+      code: result.code || "UNAUTHORIZED"
+    });
     return;
   }
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    res.status(401).json({ error: "\u062C\u0644\u0633\u0629 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0646\u062A\u0647\u064A\u0629 \u0623\u0648 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
-    return;
-  }
+  req.user = result.user;
+  req.sessionId = result.session?.sessionId;
+  next();
 }
 function requireRole(allowedRoles) {
   return (req, res, next) => {
@@ -2424,6 +3404,14 @@ apiRouter.post("/bookings", async (req, res) => {
       res.status(400).json({ success: false, error: "\u064A\u062C\u0628 \u0627\u062E\u062A\u064A\u0627\u0631 \u0648\u062C\u0628\u0629 \u0648\u0627\u062D\u062F\u0629 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644 \u0644\u0625\u062A\u0645\u0627\u0645 \u0627\u0644\u062D\u062C\u0632" });
       return;
     }
+    const totalMealsRequested = items.reduce((sum, it) => sum + Math.max(1, Math.floor(Number(it.quantity) || 0)), 0);
+    if (totalMealsRequested < 50) {
+      res.status(400).json({
+        success: false,
+        error: `\u0627\u0644\u062D\u062F \u0627\u0644\u0623\u062F\u0646\u0649 \u0644\u0644\u0637\u0644\u0628 50 \u0648\u062C\u0628\u0629. \u0625\u062C\u0645\u0627\u0644\u064A \u0639\u062F\u062F \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0627\u0644\u0645\u062D\u062F\u062F\u0629 \u062D\u0627\u0644\u064A\u0627\u064B (${totalMealsRequested} \u0648\u062C\u0628\u0629) \u0623\u0642\u0644 \u0645\u0646 \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u062F\u0646\u0649. \u064A\u0631\u062C\u0649 \u0632\u064A\u0627\u062F\u0629 \u0627\u0644\u0643\u0645\u064A\u0629 \u0625\u0644\u0649 50 \u0648\u062C\u0628\u0629 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644 \u0644\u0625\u062A\u0645\u0627\u0645 \u0627\u0644\u062D\u062C\u0632.`
+      });
+      return;
+    }
     const booking = await db.createBooking({
       customerName,
       customerPhone,
@@ -2506,24 +3494,78 @@ apiRouter.post("/admin/auth/login", async (req, res) => {
       res.status(401).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
       return;
     }
-    const token = jwt.sign(
-      {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        name: user.name
-      },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const { token, sessionId, session } = createAdminSession(user, res);
     res.json({
       success: true,
       token,
+      sessionId,
       user
     });
   } catch (err) {
     res.status(500).json({ error: err.message || "\u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644" });
+  }
+});
+apiRouter.post("/admin/auth/logout", (req, res) => {
+  let sessionId = req.sessionId;
+  const authHeader = req.headers.authorization;
+  let token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : void 0;
+  if (!token && req.cookies && req.cookies.celebre_admin_session) {
+    token = req.cookies.celebre_admin_session;
+  }
+  if (token) {
+    try {
+      const decoded = jwt2.decode(token);
+      if (decoded && decoded.sessionId) {
+        sessionId = decoded.sessionId;
+      }
+    } catch {
+    }
+  }
+  if (sessionId) {
+    revokeAdminSession(sessionId, res);
+  } else if (res && typeof res.clearCookie === "function") {
+    res.clearCookie("celebre_admin_session", { path: "/" });
+  }
+  res.json({
+    success: true,
+    message: "\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062E\u0631\u0648\u062C \u0628\u0646\u062C\u0627\u062D \u0648\u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062C\u0644\u0633\u0629 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645"
+  });
+});
+apiRouter.post("/admin/auth/change-password", requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0648\u062A\u0623\u0643\u064A\u062F\u0647\u0627" });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u063A\u064A\u0631 \u0645\u062A\u0637\u0627\u0628\u0642\u0629 \u0645\u0639 \u0627\u0644\u062A\u0623\u0643\u064A\u062F" });
+      return;
+    }
+    if (newPassword.length < 8) {
+      res.status(400).json({ error: "\u064A\u062C\u0628 \u0623\u0646 \u062A\u062A\u0643\u0648\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0645\u0646 8 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644" });
+      return;
+    }
+    if (currentPassword === newPassword) {
+      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0645\u062E\u062A\u0644\u0641\u0629 \u0639\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629" });
+      return;
+    }
+    const username = req.user.username;
+    const verified = await db.verifyAdmin(username, currentPassword);
+    if (!verified) {
+      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+      return;
+    }
+    const salt = bcrypt2.genSaltSync(10);
+    const newPasswordHash = bcrypt2.hashSync(newPassword, salt);
+    await db.updateAdminPassword(username, newPasswordHash, req.user.name || req.user.username);
+    revokeAllUserSessions(req.user.id, res);
+    res.json({
+      success: true,
+      message: "\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0628\u0646\u062C\u0627\u062D. \u062A\u0645 \u0625\u0644\u063A\u0627\u0621 \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0642\u062F\u064A\u0645\u0629 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645\u060C \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B \u0628\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629."
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "\u062D\u062F\u062B \u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" });
   }
 });
 apiRouter.get("/admin/auth/me", requireAuth, (req, res) => {
@@ -2644,13 +3686,91 @@ apiRouter.post("/admin/bookings/:id/payments", requireAuth, requireRole(["super_
     res.status(500).json({ error: err.message });
   }
 });
+apiRouter.get("/admin/bookings/:id/factory-preview", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const preview = await db.getFactoryOrderPreview(id);
+    res.json({ success: true, preview });
+  } catch (err) {
+    res.status(404).json({ error: err.message || "\u0641\u0634\u0644 \u0627\u0633\u062A\u0631\u062C\u0627\u0639 \u0645\u0639\u0627\u064A\u0646\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639" });
+  }
+});
 apiRouter.post("/admin/bookings/:id/factory-order", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const factoryOrder = await db.createFactoryOrder(id, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    const { forceNewVersion } = req.body || {};
+    const factoryOrder = await db.createFactoryOrder(id, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", { forceNewVersion });
     res.json({ success: true, factoryOrder });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.put("/admin/bookings/:id", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateBookingByAdmin(id, req.body, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, booking: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/bookings/:id/factory-order/whatsapp", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { factoryPhone, forceNewVersion } = req.body || {};
+    const booking = await db.getBookingById(id);
+    if (!booking) {
+      res.status(404).json({ error: "\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      return;
+    }
+    if (booking.totalMealsCount < 50) {
+      res.status(400).json({
+        error: `\u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u062C\u0647\u064A\u0632 \u0637\u0644\u0628 \u0627\u0644\u0645\u0635\u0646\u0639 \u0644\u062D\u062C\u0632 \u064A\u0642\u0644 \u0625\u062C\u0645\u0627\u0644\u064A \u0648\u062C\u0628\u0627\u062A\u0647 \u0639\u0646 50 \u0648\u062C\u0628\u0629 (\u0627\u0644\u0639\u062F\u062F \u0627\u0644\u062D\u0627\u0644\u064A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629). \u064A\u0631\u062C\u0649 \u0645\u0631\u0627\u062C\u0639\u0629 \u0648\u062A\u0639\u062F\u064A\u0644 \u0643\u0645\u064A\u0627\u062A \u0627\u0644\u062D\u062C\u0632 \u0625\u0644\u0649 50 \u0648\u062C\u0628\u0629 \u0641\u0623\u0643\u062B\u0631 \u0623\u0648\u0644\u0627\u064B.`
+      });
+      return;
+    }
+    let factoryOrder = booking.factoryOrders && booking.factoryOrders.length > 0 ? booking.factoryOrders[booking.factoryOrders.length - 1] : null;
+    if (!factoryOrder || forceNewVersion) {
+      factoryOrder = await db.createFactoryOrder(id, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", { forceNewVersion: Boolean(forceNewVersion) });
+    }
+    const phoneToUse = factoryPhone || CELEBRE_CONFIG.whatsappNumber;
+    const { messageText, whatsappUrl } = buildFactoryWhatsAppMessage(factoryOrder, booking, phoneToUse);
+    res.json({
+      success: true,
+      factoryOrder,
+      messageText,
+      whatsappUrl,
+      factoryPhone: phoneToUse
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/factory-orders/:id/confirm-sent", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await db.confirmFactoryOrderSent(id, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, factoryOrder: order });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.put("/admin/bookings/:id/test-edit", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateTestBooking(id, req.body, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, booking: updated });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+apiRouter.delete("/admin/bookings/:id/test-delete", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.deleteTestBooking(id, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A ${result.bookingCode} \u0628\u0646\u062C\u0627\u062D` });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
   }
 });
 apiRouter.get("/admin/factory-orders", requireAuth, async (req, res) => {
@@ -2717,7 +3837,8 @@ apiRouter.post("/admin/system/migrate", requireAuth, requireRole(["super_admin"]
 
 // src/server/api.ts
 var app = express();
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
 app.use(express.json());
 app.use((req, res, next) => {
   const queryPath = typeof req.query.__path === "string" ? req.query.__path : null;

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { db } from './db';
+import { db, buildFactoryWhatsAppMessage } from './db';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import { AdminUser } from '../types';
 import {
@@ -292,6 +292,16 @@ apiRouter.post('/bookings', async (req, res) => {
 
     if (!Array.isArray(items) || items.length === 0) {
       res.status(400).json({ success: false, error: 'يجب اختيار وجبة واحدة على الأقل لإتمام الحجز' });
+      return;
+    }
+
+    // Minimum Order Rule: 50 meals total
+    const totalMealsRequested = items.reduce((sum: number, it: any) => sum + Math.max(1, Math.floor(Number(it.quantity) || 0)), 0);
+    if (totalMealsRequested < 50) {
+      res.status(400).json({
+        success: false,
+        error: `الحد الأدنى للطلب 50 وجبة. إجمالي عدد الوجبات المحددة حالياً (${totalMealsRequested} وجبة) أقل من الحد الأدنى. يرجى زيادة الكمية إلى 50 وجبة على الأقل لإتمام الحجز.`
+      });
       return;
     }
 
@@ -661,6 +671,69 @@ apiRouter.post('/admin/bookings/:id/factory-order', requireAuth, requireRole(['s
     const { forceNewVersion } = req.body || {};
     const factoryOrder = await db.createFactoryOrder(id, req.user?.name || 'الإدارة', { forceNewVersion });
     res.json({ success: true, factoryOrder });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Admin Review & Edit of Booking (re-calculates authoritative prices from DB & logs audit)
+apiRouter.put('/admin/bookings/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateBookingByAdmin(id, req.body, req.user?.name || req.user?.username || 'الإدارة');
+    res.json({ success: true, booking: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Generate Factory WhatsApp Message & Dispatch Package
+apiRouter.post('/admin/bookings/:id/factory-order/whatsapp', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { factoryPhone, forceNewVersion } = req.body || {};
+    const booking = await db.getBookingById(id);
+    if (!booking) {
+      res.status(404).json({ error: 'الحجز غير موجود' });
+      return;
+    }
+
+    if (booking.totalMealsCount < 50) {
+      res.status(400).json({
+        error: `لا يمكن تجهيز طلب المصنع لحجز يقل إجمالي وجباته عن 50 وجبة (العدد الحالي: ${booking.totalMealsCount} وجبة). يرجى مراجعة وتعديل كميات الحجز إلى 50 وجبة فأكثر أولاً.`
+      });
+      return;
+    }
+
+    let factoryOrder = booking.factoryOrders && booking.factoryOrders.length > 0
+      ? booking.factoryOrders[booking.factoryOrders.length - 1]
+      : null;
+
+    if (!factoryOrder || forceNewVersion) {
+      factoryOrder = await db.createFactoryOrder(id, req.user?.name || 'الإدارة', { forceNewVersion: Boolean(forceNewVersion) });
+    }
+
+    const phoneToUse = factoryPhone || CELEBRE_CONFIG.whatsappNumber;
+    const { messageText, whatsappUrl } = buildFactoryWhatsAppMessage(factoryOrder, booking, phoneToUse);
+
+    res.json({
+      success: true,
+      factoryOrder,
+      messageText,
+      whatsappUrl,
+      factoryPhone: phoneToUse,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Confirm Factory Order Sent Manually
+apiRouter.post('/admin/factory-orders/:id/confirm-sent', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const order = await db.confirmFactoryOrderSent(id, req.user?.name || 'الإدارة');
+    res.json({ success: true, factoryOrder: order });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

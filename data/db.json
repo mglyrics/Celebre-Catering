@@ -156,7 +156,7 @@
     },
     {
       "code": "Sale-12",
-      "name": "ميكس بوكس 12 - جاتوه وبانية بالزبدة نكهات مختلفة",
+      "name": "باتية",
       "category": "mix_box",
       "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
       "distributorPrice": 44,
@@ -254,6 +254,347 @@
     }
   ],
   "bookings": [
+    {
+      "id": "bk-1793267886336-857",
+      "bookingCode": "CLB-2026-4013",
+      "securityCode": "6674",
+      "customerName": "فحص تجريبي معدل بالكامل",
+      "customerPhone": "01033334444",
+      "customerWhatsapp": "01033334444",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي تجريبي",
+      "eventDate": "2026-06-15",
+      "deliveryTime": "12:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "المعادي - برج النيل",
+      "notes": "تم إلغاء الحجز التجريبي بعد انتهاء الفحص",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "no_juice",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 45,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 30,
+          "totalFactoryPrice": 900
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1620,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1260
+        }
+      ],
+      "totalMealsCount": 60,
+      "totalDistributorPrice": 2970,
+      "totalFactoryPrice": 2160,
+      "profitMargin": 810,
+      "paidAmount": 0,
+      "remainingAmount": 2970,
+      "status": "CANCELLED",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": true,
+      "version": 3,
+      "createdAt": "2026-10-29T09:58:06.336Z",
+      "updatedAt": "2026-10-29T09:58:06.423Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793267886339-506",
+          "timestamp": "2026-10-29T09:58:06.339Z",
+          "bookingId": "bk-1793267886336-857",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-4013 بإجمالي 50 وجبة وقيمة 2350 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793267886326-214",
+      "bookingCode": "CLB-2026-4840",
+      "securityCode": "3395",
+      "customerName": "فحص تجريبي 50 وجبة مفردة",
+      "customerPhone": "01022223333",
+      "customerWhatsapp": "01022223333",
+      "preferredContact": "phone",
+      "eventName": "حفل افتتاح تجريبي",
+      "eventDate": "2026-06-01",
+      "deliveryTime": "15:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الشيخ زايد",
+      "notes": "تم إلغاء الحجز التجريبي بعد انتهاء الفحص",
+      "items": [
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 50,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 44,
+          "totalDistributorPrice": 2200,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 32,
+          "totalFactoryPrice": 1600
+        }
+      ],
+      "totalMealsCount": 50,
+      "totalDistributorPrice": 2200,
+      "totalFactoryPrice": 1600,
+      "profitMargin": 600,
+      "paidAmount": 0,
+      "remainingAmount": 2200,
+      "status": "CANCELLED",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "isTest": true,
+      "version": 2,
+      "createdAt": "2026-10-29T09:58:06.326Z",
+      "updatedAt": "2026-10-29T09:58:06.417Z"
+    },
+    {
+      "id": "bk-1793267822290-441",
+      "bookingCode": "CLB-2026-8367",
+      "securityCode": "1948",
+      "customerName": "فحص تجريبي معدل بالكامل",
+      "customerPhone": "01033334444",
+      "customerWhatsapp": "01033334444",
+      "eventName": "مؤتمر سنوي تجريبي",
+      "eventDate": "2026-06-15",
+      "deliveryTime": "12:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "المعادي - برج النيل",
+      "notes": "تم إلغاء الحجز التجريبي بعد انتهاء الفحص",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "no_juice",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 45,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 30,
+          "totalFactoryPrice": 900
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1620,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1260
+        }
+      ],
+      "totalMealsCount": 60,
+      "totalDistributorPrice": 2970,
+      "totalFactoryPrice": 2160,
+      "profitMargin": 810,
+      "paidAmount": 0,
+      "remainingAmount": 2970,
+      "status": "CANCELLED",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": true,
+      "version": 3,
+      "createdAt": "2026-10-29T09:57:02.290Z",
+      "updatedAt": "2026-10-29T09:57:02.368Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793267822292-30",
+          "timestamp": "2026-10-29T09:57:02.292Z",
+          "bookingId": "bk-1793267822290-441",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-8367 بإجمالي 50 وجبة وقيمة 2350 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793267822284-894",
+      "bookingCode": "CLB-2026-4289",
+      "securityCode": "2713",
+      "customerName": "فحص تجريبي 50 وجبة مفردة",
+      "customerPhone": "01022223333",
+      "customerWhatsapp": "01022223333",
+      "eventName": "حفل افتتاح تجريبي",
+      "eventDate": "2026-06-01",
+      "deliveryTime": "15:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الشيخ زايد",
+      "notes": "تم إلغاء الحجز التجريبي بعد انتهاء الفحص",
+      "items": [
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 50,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 44,
+          "totalDistributorPrice": 2200,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 32,
+          "totalFactoryPrice": 1600
+        }
+      ],
+      "totalMealsCount": 50,
+      "totalDistributorPrice": 2200,
+      "totalFactoryPrice": 1600,
+      "profitMargin": 600,
+      "paidAmount": 0,
+      "remainingAmount": 2200,
+      "status": "CANCELLED",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "isTest": true,
+      "version": 2,
+      "createdAt": "2026-10-29T09:57:02.283Z",
+      "updatedAt": "2026-10-29T09:57:02.363Z"
+    },
+    {
+      "id": "bk-1793267747528-686",
+      "bookingCode": "CLB-2026-4499",
+      "securityCode": "7757",
+      "customerName": "فحص تجريبي معدل بالكامل",
+      "customerPhone": "01033334444",
+      "customerWhatsapp": "01033334444",
+      "eventName": "مؤتمر سنوي تجريبي",
+      "eventDate": "2026-06-15",
+      "deliveryTime": "12:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "المعادي - برج النيل",
+      "notes": "ملاحظة تجريبية خاصة بعد التعديل",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "no_juice",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 45,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 30,
+          "totalFactoryPrice": 900
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1620,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1260
+        }
+      ],
+      "totalMealsCount": 60,
+      "totalDistributorPrice": 2970,
+      "totalFactoryPrice": 2160,
+      "profitMargin": 810,
+      "paidAmount": 0,
+      "remainingAmount": 2970,
+      "status": "IN_PRODUCTION",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": true,
+      "version": 2,
+      "createdAt": "2026-10-29T09:55:47.528Z",
+      "updatedAt": "2026-10-29T09:55:47.577Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793267747531-465",
+          "timestamp": "2026-10-29T09:55:47.532Z",
+          "bookingId": "bk-1793267747528-686",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-4499 بإجمالي 50 وجبة وقيمة 2350 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793267747522-754",
+      "bookingCode": "CLB-2026-5556",
+      "securityCode": "5072",
+      "customerName": "فحص تجريبي 50 وجبة مفردة",
+      "customerPhone": "01022223333",
+      "customerWhatsapp": "01022223333",
+      "eventName": "حفل افتتاح تجريبي",
+      "eventDate": "2026-06-01",
+      "deliveryTime": "15:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الشيخ زايد",
+      "notes": "",
+      "items": [
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 50,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 44,
+          "totalDistributorPrice": 2200,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 32,
+          "totalFactoryPrice": 1600
+        }
+      ],
+      "totalMealsCount": 50,
+      "totalDistributorPrice": 2200,
+      "totalFactoryPrice": 1600,
+      "profitMargin": 600,
+      "paidAmount": 0,
+      "remainingAmount": 2200,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "isTest": true,
+      "version": 1,
+      "createdAt": "2026-10-29T09:55:47.521Z",
+      "updatedAt": "2026-10-29T09:55:47.521Z"
+    },
     {
       "id": "bk-1792934715525-440",
       "bookingCode": "CLB-2026-3236",
@@ -2310,6 +2651,117 @@
   ],
   "factoryOrders": [
     {
+      "id": "fo-1793267886378-535",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793267886336-857",
+      "bookingCode": "CLB-2026-4013",
+      "version": 1,
+      "status": "MANUALLY_CONFIRMED",
+      "eventDate": "2026-06-15",
+      "deliveryTime": "12:00",
+      "deliveryLocation": "القاهرة - المعادي - برج النيل",
+      "factoryCostTotal": 2160,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "no_juice",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 30,
+          "totalFactoryPrice": 900,
+          "specialInstructions": "بدون عصير (-5 ج)"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1260,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. ملاحظة تجريبية خاصة بعد التعديل",
+      "createdAt": "2026-10-29T09:58:06.378Z",
+      "updatedAt": "2026-10-29T09:58:06.410Z"
+    },
+    {
+      "id": "fo-1793267822329-886",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793267822290-441",
+      "bookingCode": "CLB-2026-8367",
+      "version": 1,
+      "status": "MANUALLY_CONFIRMED",
+      "eventDate": "2026-06-15",
+      "deliveryTime": "12:00",
+      "deliveryLocation": "القاهرة - المعادي - برج النيل",
+      "factoryCostTotal": 2160,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "no_juice",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 30,
+          "totalFactoryPrice": 900,
+          "specialInstructions": "بدون عصير (-5 ج)"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1260,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. ملاحظة تجريبية خاصة بعد التعديل",
+      "createdAt": "2026-10-29T09:57:02.329Z",
+      "updatedAt": "2026-10-29T09:57:02.358Z"
+    },
+    {
+      "id": "fo-1793267747577-131",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793267747528-686",
+      "bookingCode": "CLB-2026-4499",
+      "version": 1,
+      "status": "READY_TO_SEND",
+      "eventDate": "2026-06-15",
+      "deliveryTime": "12:00",
+      "deliveryLocation": "القاهرة - المعادي - برج النيل",
+      "factoryCostTotal": 2160,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "no_juice",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 30,
+          "totalFactoryPrice": 900,
+          "specialInstructions": "بدون عصير (-5 ج)"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 30,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1260,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. ملاحظة تجريبية خاصة بعد التعديل",
+      "createdAt": "2026-10-29T09:55:47.577Z",
+      "updatedAt": "2026-10-29T09:55:47.577Z"
+    },
+    {
       "id": "fo-1792845517602",
       "orderNumber": "FO-2026-108",
       "bookingId": "bk-1792845517378-774",
@@ -2607,6 +3059,150 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1793267886423-399",
+      "timestamp": "2026-10-29T09:58:06.423Z",
+      "bookingId": "bk-1793267886336-857",
+      "action": "تعديل الحجز",
+      "performedBy": "فحص_آلي",
+      "details": "تم تحديث الحجز (الإصدار v3). تغيير الحالة من IN_PRODUCTION إلى CANCELLED"
+    },
+    {
+      "id": "log-1793267886417-206",
+      "timestamp": "2026-10-29T09:58:06.417Z",
+      "bookingId": "bk-1793267886326-214",
+      "action": "تعديل الحجز",
+      "performedBy": "فحص_آلي",
+      "details": "تم تحديث الحجز (الإصدار v2). تغيير الحالة من INITIAL إلى CANCELLED"
+    },
+    {
+      "id": "log-1793267886410-744",
+      "timestamp": "2026-10-29T09:58:06.410Z",
+      "bookingId": "bk-1793267886336-857",
+      "action": "تأكيد إرسال أمر التشغيل للمصنع يدوياً",
+      "performedBy": "مدير_المطبخ",
+      "details": "قام الإداري (مدير_المطبخ) بتأكيد إرسال أمر التشغيل FO-2026-109 (الإصدار v1) إلى واتساب المصنع يدوياً في 2026-10-29T09:58:06.410Z."
+    },
+    {
+      "id": "log-1793267886378-34",
+      "timestamp": "2026-10-29T09:58:06.378Z",
+      "bookingId": "bk-1793267886336-857",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "مدير_النظام",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 60 وجبة وتكلفة مصنع 2160 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793267886357-711",
+      "timestamp": "2026-10-29T09:58:06.357Z",
+      "bookingId": "bk-1793267886336-857",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "مدير_النظام_المعتمد",
+      "details": "تم تعديل بيانات الحجز CLB-2026-4013 (الإصدار v2). إجمالي الوجبات: 60، إجمالي القيمة: 2970 ج."
+    },
+    {
+      "id": "log-1793267886339-506",
+      "timestamp": "2026-10-29T09:58:06.339Z",
+      "bookingId": "bk-1793267886336-857",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4013 بإجمالي 50 وجبة وقيمة 2350 جنيه."
+    },
+    {
+      "id": "log-1793267886328-437",
+      "timestamp": "2026-10-29T09:58:06.328Z",
+      "bookingId": "bk-1793267886326-214",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4840 بإجمالي 50 وجبة وقيمة 2200 جنيه."
+    },
+    {
+      "id": "log-1793267822368-233",
+      "timestamp": "2026-10-29T09:57:02.368Z",
+      "bookingId": "bk-1793267822290-441",
+      "action": "تعديل الحجز",
+      "performedBy": "فحص_آلي",
+      "details": "تم تحديث الحجز (الإصدار v3). تغيير الحالة من IN_PRODUCTION إلى CANCELLED"
+    },
+    {
+      "id": "log-1793267822363-414",
+      "timestamp": "2026-10-29T09:57:02.363Z",
+      "bookingId": "bk-1793267822284-894",
+      "action": "تعديل الحجز",
+      "performedBy": "فحص_آلي",
+      "details": "تم تحديث الحجز (الإصدار v2). تغيير الحالة من INITIAL إلى CANCELLED"
+    },
+    {
+      "id": "log-1793267822358-287",
+      "timestamp": "2026-10-29T09:57:02.358Z",
+      "bookingId": "bk-1793267822290-441",
+      "action": "تأكيد إرسال أمر التشغيل للمصنع يدوياً",
+      "performedBy": "مدير_المطبخ",
+      "details": "قام الإداري (مدير_المطبخ) بتأكيد إرسال أمر التشغيل FO-2026-109 (الإصدار v1) إلى واتساب المصنع يدوياً في 2026-10-29T09:57:02.358Z."
+    },
+    {
+      "id": "log-1793267822329-404",
+      "timestamp": "2026-10-29T09:57:02.329Z",
+      "bookingId": "bk-1793267822290-441",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "مدير_النظام",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 60 وجبة وتكلفة مصنع 2160 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793267822310-679",
+      "timestamp": "2026-10-29T09:57:02.310Z",
+      "bookingId": "bk-1793267822290-441",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "مدير_النظام_المعتمد",
+      "details": "تم تعديل بيانات الحجز CLB-2026-8367 (الإصدار v2). إجمالي الوجبات: 60، إجمالي القيمة: 2970 ج."
+    },
+    {
+      "id": "log-1793267822292-30",
+      "timestamp": "2026-10-29T09:57:02.292Z",
+      "bookingId": "bk-1793267822290-441",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8367 بإجمالي 50 وجبة وقيمة 2350 جنيه."
+    },
+    {
+      "id": "log-1793267822285-863",
+      "timestamp": "2026-10-29T09:57:02.285Z",
+      "bookingId": "bk-1793267822284-894",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4289 بإجمالي 50 وجبة وقيمة 2200 جنيه."
+    },
+    {
+      "id": "log-1793267747577-193",
+      "timestamp": "2026-10-29T09:55:47.577Z",
+      "bookingId": "bk-1793267747528-686",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": true,
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 60 وجبة وتكلفة مصنع 2160 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793267747550-797",
+      "timestamp": "2026-10-29T09:55:47.550Z",
+      "bookingId": "bk-1793267747528-686",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "مدير_النظام_المعتمد",
+      "details": "تم تعديل بيانات الحجز CLB-2026-4499 (الإصدار v2). إجمالي الوجبات: 60، إجمالي القيمة: 2970 ج."
+    },
+    {
+      "id": "log-1793267747531-465",
+      "timestamp": "2026-10-29T09:55:47.532Z",
+      "bookingId": "bk-1793267747528-686",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4499 بإجمالي 50 وجبة وقيمة 2350 جنيه."
+    },
+    {
+      "id": "log-1793267747523-25",
+      "timestamp": "2026-10-29T09:55:47.523Z",
+      "bookingId": "bk-1793267747522-754",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-5556 بإجمالي 50 وجبة وقيمة 2200 جنيه."
+    },
     {
       "id": "log-1793181788368-946",
       "timestamp": "2026-10-28T10:03:08.368Z",

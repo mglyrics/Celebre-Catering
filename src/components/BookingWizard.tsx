@@ -172,6 +172,10 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
       setErrorMsg('يرجى اختيار وجبة واحدة على الأقل');
       return;
     }
+    if (calculations.totalMeals < 50) {
+      setErrorMsg(`الحد الأدنى للطلب 50 وجبة. إجمالي عدد الوجبات المحددة حالياً هو ${calculations.totalMeals} وجبة. يرجى إضافة ${50 - calculations.totalMeals} وجبة إضافية لإتمام الطلب.`);
+      return;
+    }
     setErrorMsg(null);
     setStep(2);
   };
@@ -201,6 +205,11 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
   const handleSubmitOrder = async () => {
     // Prevent duplicate clicks if already processing
     if (isSubmitting) return;
+
+    if (calculations.totalMeals < 50) {
+      setErrorMsg(`الحد الأدنى للطلب 50 وجبة. إجمالي عدد الوجبات الحالي (${calculations.totalMeals} وجبة) أقل من الحد الأدنى.`);
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorMsg(null);
@@ -354,6 +363,38 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
           {/* STEP 1: Meals & Quantities */}
           {step === 1 && (
             <div className="space-y-6">
+
+              {/* Minimum Order 50 Meals Banner */}
+              <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+                calculations.totalMeals >= 50
+                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-300 text-amber-900'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl flex-shrink-0 ${
+                    calculations.totalMeals >= 50 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {calculations.totalMeals >= 50 ? (
+                      <CheckCircle2 className="w-5 h-5" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <h5 className="font-extrabold text-sm">الحد الأدنى للطلب 50 وجبة</h5>
+                    <p className="text-xs mt-0.5 opacity-90">
+                      {calculations.totalMeals >= 50
+                        ? `طلبك الحالي مستوفٍ للحد الأدنى (إجمالي الوجبات: ${calculations.totalMeals} وجبة). يمكنك توزيع الكمية بحرية بين الأصناف المختلفة.`
+                        : `إجمالي الوجبات المحددة حالياً (${calculations.totalMeals} وجبة). متبقي ${50 - calculations.totalMeals} وجبة للوصول للحد الأدنى المطلوب.`}
+                    </p>
+                  </div>
+                </div>
+                <div className={`px-3 py-1.5 rounded-xl font-black text-xs flex-shrink-0 whitespace-nowrap ${
+                  calculations.totalMeals >= 50 ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white'
+                }`}>
+                  {calculations.totalMeals} / 50 وجبة
+                </div>
+              </div>
               
               <div className="flex items-center justify-between">
                 <div>
@@ -780,9 +821,14 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
           {step === 1 && (
             <button
               onClick={handleNextToStep2}
-              className="flex items-center gap-2 px-6 py-2.5 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all"
+              disabled={calculations.totalMeals < 50}
+              className={`flex items-center gap-2 px-6 py-2.5 font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all ${
+                calculations.totalMeals < 50
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                  : 'bg-[#7A0C2E] hover:bg-[#560820] text-white'
+              }`}
             >
-              <span>متابعة بيانات المناسبة</span>
+              <span>متابعة بيانات المناسبة ({calculations.totalMeals} / 50 وجبة)</span>
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}

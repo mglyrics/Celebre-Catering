@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Meal, Booking, FactoryOrder, AdminUser, BookingStatus, PaymentRecord, AuditLog } from '../types';
+import { Meal, Booking, FactoryOrder, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import {
   Lock,
@@ -16,6 +16,7 @@ import {
   Printer,
   Edit,
   Plus,
+  Minus,
   RefreshCw,
   Search,
   Filter,
@@ -109,13 +110,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Edit Meal State
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
 
-  // Edit Booking State (General scheduling updates)
+  // Edit Booking State (Full customer, schedule, and meals review/edit)
   const [isEditBookingModalOpen, setIsEditBookingModalOpen] = useState(false);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editCustomerPhone, setEditCustomerPhone] = useState('');
+  const [editCustomerWhatsapp, setEditCustomerWhatsapp] = useState('');
+  const [editPreferredContact, setEditPreferredContact] = useState<'whatsapp' | 'phone'>('whatsapp');
+  const [editEventName, setEditEventName] = useState('');
   const [editEventDate, setEditEventDate] = useState('');
   const [editDeliveryTime, setEditDeliveryTime] = useState('');
+  const [editDeliveryGovernorate, setEditDeliveryGovernorate] = useState('القاهرة');
   const [editDeliveryAddress, setEditDeliveryAddress] = useState('');
   const [editStatus, setEditStatus] = useState<BookingStatus>('INITIAL');
   const [editNotes, setEditNotes] = useState('');
+  const [editItems, setEditItems] = useState<{ mealCode: string; quantity: number; drinkOption: DrinkModification }[]>([]);
+  const [editBookingError, setEditBookingError] = useState<string | null>(null);
+  const [isSavingBookingEdits, setIsSavingBookingEdits] = useState(false);
+
+  // Factory WhatsApp Dispatch Modal State
+  const [isFactoryWhatsappModalOpen, setIsFactoryWhatsappModalOpen] = useState(false);
+  const [factoryWhatsappData, setFactoryWhatsappData] = useState<any | null>(null);
+  const [customFactoryPhone, setCustomFactoryPhone] = useState(CELEBRE_CONFIG.whatsappNumber || '201284484868');
+  const [isGeneratingWhatsapp, setIsGeneratingWhatsapp] = useState(false);
+  const [isConfirmingSent, setIsConfirmingSent] = useState(false);
+  const [whatsappModalError, setWhatsappModalError] = useState<string | null>(null);
 
   // Selected Factory Order for printing
   const [printingFactoryOrder, setPrintingFactoryOrder] = useState<FactoryOrder | null>(null);
@@ -501,11 +519,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleOpenEditBooking = (b: Booking) => {
-    setEditEventDate(b.eventDate);
-    setEditDeliveryTime(b.deliveryTime);
-    setEditDeliveryAddress(b.deliveryAddress);
-    setEditStatus(b.status);
+    setEditCustomerName(b.customerName || '');
+    setEditCustomerPhone(b.customerPhone || '');
+    setEditCustomerWhatsapp(b.customerWhatsapp || b.customerPhone || '');
+    setEditPreferredContact(b.preferredContact || 'whatsapp');
+    setEditEventName(b.eventName || '');
+    setEditEventDate(b.eventDate || '');
+    setEditDeliveryTime(b.deliveryTime || '');
+    setEditDeliveryGovernorate(b.deliveryGovernorate || 'القاهرة');
+    setEditDeliveryAddress(b.deliveryAddress || '');
+    setEditStatus(b.status || 'INITIAL');
     setEditNotes(b.notes || '');
+    setEditItems(
+      (b.items || []).map(it => ({
+        mealCode: it.mealCode,
+        quantity: it.quantity,
+        drinkOption: it.drinkOption || 'standard',
+      }))
+    );
+    setEditBookingError(null);
     setIsEditBookingModalOpen(true);
   };
 
@@ -513,30 +545,114 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     if (!selectedBooking) return;
 
+    const totalQty = editItems.reduce((acc, it) => acc + Math.max(1, Number(it.quantity) || 0), 0);
+    if (totalQty < 50 && (editStatus === 'CONFIRMED' || editStatus === 'IN_PRODUCTION')) {
+      setEditBookingError(`الحد الأدنى للطلب 50 وجبة. لا يمكن اعتماد الحجز أو نقله للتشغيل والكمية الحالية (${totalQty} وجبة). يرجى تعديل الكميات أولاً.`);
+      return;
+    }
+
+    setIsSavingBookingEdits(true);
+    setEditBookingError(null);
+
     try {
       const res = await fetch(`/api/admin/bookings/${selectedBooking.id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          customerName: editCustomerName,
+          customerPhone: editCustomerPhone,
+          customerWhatsapp: editCustomerWhatsapp,
+          preferredContact: editPreferredContact,
+          eventName: editEventName,
           eventDate: editEventDate,
           deliveryTime: editDeliveryTime,
+          deliveryGovernorate: editDeliveryGovernorate,
           deliveryAddress: editDeliveryAddress,
           status: editStatus,
           notes: editNotes,
+          items: editItems,
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedBooking(data.booking);
-        setIsEditBookingModalOpen(false);
-        loadAllData();
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حفظ تعديلات الحجز');
       }
-    } catch (err) {
-      console.error('Error saving booking edits:', err);
+
+      setSelectedBooking(data.booking);
+      setIsEditBookingModalOpen(false);
+      loadAllData();
+    } catch (err: any) {
+      setEditBookingError(err.message || 'خطأ أثناء حفظ التعديلات');
+    } finally {
+      setIsSavingBookingEdits(false);
+    }
+  };
+
+  const handleOpenFactoryWhatsapp = async (bookingId: string) => {
+    setIsGeneratingWhatsapp(true);
+    setWhatsappModalError(null);
+    try {
+      const phoneToUse = customFactoryPhone || CELEBRE_CONFIG.whatsappNumber;
+      const res = await fetch(`/api/admin/bookings/${bookingId}/factory-order/whatsapp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          factoryPhone: phoneToUse,
+          forceNewVersion,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تجهيز طلب المصنع عبر واتساب');
+      }
+
+      setFactoryWhatsappData(data);
+      setIsFactoryWhatsappModalOpen(true);
+      loadAllData();
+    } catch (err: any) {
+      alert(err.message || 'فشل فتح نموذج طلب المصنع عبر واتساب');
+    } finally {
+      setIsGeneratingWhatsapp(false);
+    }
+  };
+
+  const handleConfirmSentToFactory = async (orderId: string) => {
+    setIsConfirmingSent(true);
+    try {
+      const res = await fetch(`/api/admin/factory-orders/${orderId}/confirm-sent`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تأكيد الإرسال');
+      }
+
+      if (factoryWhatsappData) {
+        setFactoryWhatsappData({
+          ...factoryWhatsappData,
+          factoryOrder: data.factoryOrder,
+        });
+      }
+      loadAllData();
+    } catch (err: any) {
+      alert(err.message || 'خطأ أثناء تأكيد الإرسال');
+    } finally {
+      setIsConfirmingSent(false);
     }
   };
 
@@ -1464,21 +1580,32 @@ APP_URL="https://celebre-eg.com"`}
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => handleOpenEditBooking(selectedBooking)}
                     className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
                   >
                     <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
-                    <span>تعديل الموعد والحالة</span>
+                    <span>تعديل بيانات وبنود الحجز</span>
                   </button>
+
+                  <button
+                    onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
+                    disabled={isGeneratingWhatsapp}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                    title="تجهيز رسالة واتساب الرسمية للمصنع"
+                  >
+                    <MessageCircle className="w-4 h-4 text-emerald-100" />
+                    <span>{isGeneratingWhatsapp ? 'جاري التجهيز...' : 'تجهيز طلب المصنع عبر واتساب'}</span>
+                  </button>
+
                   <button
                     onClick={() => handleOpenFactoryReview(selectedBooking.id)}
                     disabled={isLoadingFactoryPreview}
                     className="px-4 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 disabled:opacity-50"
                   >
                     <Package className="w-4 h-4 text-[#DFC066]" />
-                    <span>{isLoadingFactoryPreview ? 'جاري التحضير...' : 'إنشاء طلب مصنع'}</span>
+                    <span>{isLoadingFactoryPreview ? 'جاري التحضير...' : 'معاينة أمر المصنع'}</span>
                   </button>
                 </div>
               </div>
@@ -1550,95 +1677,465 @@ APP_URL="https://celebre-eg.com"`}
           </div>
         )}
 
-        {/* Edit Booking Modal */}
+        {/* Comprehensive Edit Booking Modal (Customer, Logistics, Meals, and Quantities) */}
         {isEditBookingModalOpen && selectedBooking && (
           <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
-            <div className="bg-white w-full max-w-md rounded-2xl p-5 shadow-2xl space-y-4 text-xs">
-              <div className="flex items-center justify-between border-b pb-2">
-                <h4 className="font-bold text-sm text-[#7A0C2E]">تعديل بيانات الحجز {selectedBooking.bookingCode}</h4>
-                <button onClick={() => setIsEditBookingModalOpen(false)} className="p-1 hover:bg-slate-100 rounded">
-                  <X className="w-4 h-4 text-slate-500" />
+            <div className="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl space-y-4 text-xs max-h-[92vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-xl">
+                    <Edit className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-[#7A0C2E]">
+                      تعديل ومراجعة الحجز الكامل: {selectedBooking.bookingCode}
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      يتم إعادة حساب الإجماليات وأسعار المصنع والموزع طبقاً لقاعدة البيانات حصراً
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => setIsEditBookingModalOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg">
+                  <X className="w-5 h-5 text-slate-500" />
                 </button>
               </div>
 
-              <form onSubmit={handleSaveBookingEdits} className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+              {editBookingError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{editBookingError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveBookingEdits} className="space-y-4">
+                
+                {/* Section 1: Customer Details */}
+                <div className="bg-[#FAF8F5] p-3.5 rounded-2xl border border-[#E8DCC0] space-y-3">
+                  <span className="font-bold text-slate-800 block text-xs border-b pb-1">
+                    أولاً: بيانات العميل والتواصل
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">اسم العميل *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editCustomerName}
+                        onChange={(e) => setEditCustomerName(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">رقم الموبايل *</label>
+                      <input
+                        type="tel"
+                        required
+                        value={editCustomerPhone}
+                        onChange={(e) => setEditCustomerPhone(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white font-mono"
+                        dir="ltr"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">رقم واتساب</label>
+                      <input
+                        type="tel"
+                        value={editCustomerWhatsapp}
+                        onChange={(e) => setEditCustomerWhatsapp(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white font-mono"
+                        dir="ltr"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">طريقة التواصل المفضلة</label>
+                      <select
+                        value={editPreferredContact}
+                        onChange={(e) => setEditPreferredContact(e.target.value as any)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      >
+                        <option value="whatsapp">واتساب (WhatsApp)</option>
+                        <option value="phone">اتصال هاتفي (Phone Call)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Logistics & Schedule */}
+                <div className="bg-[#FAF8F5] p-3.5 rounded-2xl border border-[#E8DCC0] space-y-3">
+                  <span className="font-bold text-slate-800 block text-xs border-b pb-1">
+                    ثانياً: المناسبة ومكان وموعد التسليم
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">اسم المناسبة *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editEventName}
+                        onChange={(e) => setEditEventName(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">تاريخ التسليم *</label>
+                      <input
+                        type="date"
+                        required
+                        value={editEventDate}
+                        onChange={(e) => setEditEventDate(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">وقت التسليم *</label>
+                      <input
+                        type="time"
+                        required
+                        value={editDeliveryTime}
+                        onChange={(e) => setEditDeliveryTime(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">المحافظة</label>
+                      <input
+                        type="text"
+                        value={editDeliveryGovernorate}
+                        onChange={(e) => setEditDeliveryGovernorate(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-slate-700 font-bold mb-1">عنوان التسليم بالتفصيل *</label>
+                      <input
+                        type="text"
+                        required
+                        value={editDeliveryAddress}
+                        onChange={(e) => setEditDeliveryAddress(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Meals, Quantities, and Drink Options */}
+                <div className="bg-[#FAF8F5] p-3.5 rounded-2xl border border-[#E8DCC0] space-y-3">
+                  <div className="flex items-center justify-between border-b pb-1">
+                    <span className="font-bold text-slate-800 text-xs">
+                      ثالثاً: الوجبات والكميات والمشروبات
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (meals.length > 0) {
+                          setEditItems([...editItems, { mealCode: meals[0].code, quantity: 10, drinkOption: 'standard' }]);
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-[#7A0C2E] hover:bg-[#560820] text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>إضافة وجبة</span>
+                    </button>
+                  </div>
+
+                  {/* Items List */}
+                  <div className="space-y-2">
+                    {editItems.map((item, idx) => (
+                      <div key={idx} className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex-1 min-w-[180px]">
+                          <select
+                            value={item.mealCode}
+                            onChange={(e) => {
+                              const updated = [...editItems];
+                              updated[idx].mealCode = e.target.value;
+                              setEditItems(updated);
+                            }}
+                            className="w-full px-2 py-1.5 border rounded-lg text-xs font-bold text-[#7A0C2E]"
+                          >
+                            {meals.map((m) => (
+                              <option key={m.code} value={m.code}>
+                                {m.code} - {m.name} ({m.distributorPrice} ج)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editItems];
+                              updated[idx].quantity = Math.max(1, updated[idx].quantity - 5);
+                              setEditItems(updated);
+                            }}
+                            className="p-1 rounded bg-slate-100 hover:bg-slate-200"
+                          >
+                            <Minus className="w-3 h-3 text-slate-600" />
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const updated = [...editItems];
+                              updated[idx].quantity = Math.max(1, parseInt(e.target.value) || 1);
+                              setEditItems(updated);
+                            }}
+                            className="w-14 text-center font-bold border rounded px-1 py-1 text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editItems];
+                              updated[idx].quantity += 5;
+                              setEditItems(updated);
+                            }}
+                            className="p-1 rounded bg-slate-100 hover:bg-slate-200"
+                          >
+                            <Plus className="w-3 h-3 text-slate-600" />
+                          </button>
+                          <span className="text-[11px] text-slate-400">بوكس</span>
+                        </div>
+
+                        <div>
+                          <select
+                            value={item.drinkOption}
+                            onChange={(e) => {
+                              const updated = [...editItems];
+                              updated[idx].drinkOption = e.target.value as DrinkModification;
+                              setEditItems(updated);
+                            }}
+                            className="px-2 py-1 border rounded-lg text-[11px] bg-slate-50 font-semibold"
+                          >
+                            <option value="standard">عصير بخيرة القياسي</option>
+                            <option value="no_juice">بدون عصير (-5 ج)</option>
+                            <option value="pepsi">استبدال ببيبسي (+10 ج)</option>
+                          </select>
+                        </div>
+
+                        {editItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditItems(editItems.filter((_, i) => i !== idx));
+                            }}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                            title="حذف هذا الصنف"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Minimum 50 Validation Banner */}
+                  {(() => {
+                    const totalCount = editItems.reduce((acc, it) => acc + Math.max(1, Number(it.quantity) || 0), 0);
+                    return (
+                      <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                        totalCount >= 50
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : 'bg-amber-50 border-amber-300 text-amber-900'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          {totalCount >= 50 ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                          )}
+                          <span className="font-bold">
+                            {totalCount >= 50
+                              ? `مجموع الوجبات: ${totalCount} وجبة (مستوفٍ للحد الأدنى 50 وجبة).`
+                              : `مجموع الوجبات: ${totalCount} وجبة. تنبيه: الحد الأدنى 50 وجبة (متبقي ${50 - totalCount} وجبة).`}
+                          </span>
+                        </div>
+                        <span className="font-mono font-bold text-xs">
+                          {totalCount} / 50
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Section 4: Status and Notes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-700 font-bold mb-1">تاريخ التسليم</label>
+                    <label className="block text-slate-700 font-bold mb-1">حالة الحجز</label>
+                    <select
+                      value={editStatus}
+                      onChange={(e) => setEditStatus(e.target.value as BookingStatus)}
+                      className="w-full px-3 py-2 border rounded-xl font-bold bg-[#FAF8F5]"
+                    >
+                      <option value="INITIAL">INITIAL (حجز مبدئي)</option>
+                      <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (قيد المراجعة)</option>
+                      <option value="CONFIRMED">CONFIRMED (مؤكد)</option>
+                      <option value="IN_PRODUCTION">IN_PRODUCTION (جاري التجهيز بالمصنع)</option>
+                      <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY (جاهز للتسليم)</option>
+                      <option value="DELIVERED">DELIVERED (تم التسليم)</option>
+                      <option value="CANCELLED">CANCELLED (ملغي)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">ملاحظات الحجز</label>
                     <input
-                      type="date"
-                      required
-                      value={editEventDate}
-                      onChange={(e) => setEditEventDate(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg"
+                      type="text"
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-xl"
+                      placeholder="أي ملاحظات خاصة بالتسليم أو العميل..."
                     />
                   </div>
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">وقت التسليم</label>
-                    <input
-                      type="time"
-                      required
-                      value={editDeliveryTime}
-                      onChange={(e) => setEditDeliveryTime(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">حالة الحجز</label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value as BookingStatus)}
-                    className="w-full px-3 py-2 border rounded-lg font-bold bg-[#FAF8F5]"
-                  >
-                    <option value="INITIAL">INITIAL (حجز مبدئي)</option>
-                    <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (قيد المراجعة)</option>
-                    <option value="CONFIRMED">CONFIRMED (مؤكد)</option>
-                    <option value="IN_PRODUCTION">IN_PRODUCTION (جاري التجهيز بالمصنع)</option>
-                    <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY (جاهز للتسليم)</option>
-                    <option value="DELIVERED">DELIVERED (تم التسليم)</option>
-                    <option value="CANCELLED">CANCELLED (ملغي)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">مكان وعنوان التسليم</label>
-                  <input
-                    type="text"
-                    required
-                    value={editDeliveryAddress}
-                    onChange={(e) => setEditDeliveryAddress(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">ملاحظات التجهيز والتغليف</label>
-                  <textarea
-                    rows={2}
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg"
-                  />
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2 border-t">
                   <button
                     type="button"
                     onClick={() => setIsEditBookingModalOpen(false)}
-                    className="px-3 py-1.5 text-slate-600"
+                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-lg transition-colors"
+                    disabled={isSavingBookingEdits}
+                    className="px-6 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-xl shadow-md transition-colors disabled:opacity-50"
                   >
-                    حفظ التعديلات والتحديث
+                    {isSavingBookingEdits ? 'جاري الحفظ وإعادة الحساب...' : 'حفظ التعديلات في قاعدة البيانات'}
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Factory WhatsApp Order Dispatch Modal */}
+        {isFactoryWhatsappModalOpen && factoryWhatsappData && (
+          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl space-y-4 text-xs max-h-[92vh] overflow-y-auto">
+              
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-emerald-50 text-emerald-700 rounded-xl">
+                    <MessageCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-emerald-950">
+                      تجهيز طلب تشغيل المصنع عبر واتساب الرسمي
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      أمر التشغيل: <strong className="font-mono text-[#7A0C2E]">{factoryWhatsappData.factoryOrder.orderNumber} (الإصدار v{factoryWhatsappData.factoryOrder.version})</strong>
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsFactoryWhatsappModalOpen(false)}
+                  className="p-1 rounded-lg hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              {whatsappModalError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{whatsappModalError}</span>
+                </div>
+              )}
+
+              {/* Status and Warning */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-50 border rounded-2xl">
+                <div>
+                  <span className="text-slate-500 text-[11px] block">حالة طلب المصنع الحالية:</span>
+                  <span className={`inline-flex items-center gap-1 font-bold text-xs mt-0.5 px-2.5 py-0.5 rounded-full ${
+                    factoryWhatsappData.factoryOrder.status === 'MANUALLY_CONFIRMED'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {factoryWhatsappData.factoryOrder.status === 'MANUALLY_CONFIRMED'
+                      ? 'تم التأكيد يدويًا (التواصل معتمد)'
+                      : 'جاهز للإرسال (قيد المراجعة اليدوية)'}
+                  </span>
+                </div>
+
+                <div className="text-left">
+                  <span className="text-slate-500 text-[11px] block">رقم واتساب المصنع:</span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <input
+                      type="text"
+                      value={customFactoryPhone}
+                      onChange={(e) => setCustomFactoryPhone(e.target.value)}
+                      className="px-2 py-1 border rounded-lg font-mono text-xs text-right w-36"
+                      placeholder="201284484868"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleOpenFactoryWhatsapp(factoryWhatsappData.factoryOrder.bookingId)}
+                      className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[10px] rounded-lg"
+                      title="تحديث الرابط بالرقم الجديد"
+                    >
+                      تحديث
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* WhatsApp Message Preview */}
+              <div className="space-y-1.5">
+                <span className="font-bold text-slate-800 block text-xs">
+                  معاينة نص الرسالة الرسمية المجهزة للمصنع (تتضمن تكلفة المصنع فقط دون هوامش ربح الموزع):
+                </span>
+                <div className="p-3 bg-[#FAF8F5] border border-[#E8DCC0] rounded-2xl font-mono text-[11px] whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto text-slate-800 select-all" dir="rtl">
+                  {factoryWhatsappData.messageText}
+                </div>
+              </div>
+
+              {/* Instructions Banner */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 space-y-1">
+                <strong>تعليمات التشغيل الإداري:</strong>
+                <p>
+                  1. الضغط على زر «فتح واتساب» يقوم بتجهيز الرسالة على رقم المصنع دون اعتبارها مرسلة تلقائياً.<br />
+                  2. بعد مراجعة الرسالة والتواصل الفعلي مع مسؤولي المصنع، اضغط زر «تأكيد الإرسال للمصنع يدويًا» لتسجيل الوقت والمشرف في سجل التدقيق.
+                </p>
+              </div>
+
+              {/* Actions Footer */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setIsFactoryWhatsappModalOpen(false)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إغلاق
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={factoryWhatsappData.whatsappUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4 text-emerald-100" />
+                    <span>فتح واتساب لإرسال الرسالة</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    disabled={isConfirmingSent}
+                    onClick={() => handleConfirmSentToFactory(factoryWhatsappData.factoryOrder.id)}
+                    className="px-5 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-xl shadow-md flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-[#DFC066]" />
+                    <span>{isConfirmingSent ? 'جاري التأكيد...' : 'تأكيد الإرسال للمصنع يدويًا'}</span>
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         )}

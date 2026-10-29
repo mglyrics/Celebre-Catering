@@ -51,13 +51,21 @@ export interface PaymentRecord {
   createdAt: string;
 }
 
+export type FactoryOrderStatus = 
+  | 'PENDING' 
+  | 'ACCEPTED' 
+  | 'PREPARING' 
+  | 'COMPLETED' 
+  | 'READY_TO_SEND' 
+  | 'MANUALLY_CONFIRMED';
+
 export interface FactoryOrder {
   id: string;
   orderNumber: string; // e.g. "FO-2026-001"
   bookingId: string;
   bookingCode: string;
   version: number; // revisions support
-  status: 'PENDING' | 'ACCEPTED' | 'PREPARING' | 'COMPLETED';
+  status: FactoryOrderStatus | string;
   eventDate: string;
   deliveryTime: string;
   deliveryLocation: string;

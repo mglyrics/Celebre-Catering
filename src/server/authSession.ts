@@ -21,7 +21,7 @@ export interface AdminSession {
 }
 
 // In-memory server-authoritative session registry (fast, non-blocking, zero-latency)
-const activeSessions = new Map<string, AdminSession>();
+export const activeSessions = new Map<string, AdminSession>();
 
 // Cleanup stale sessions every 5 minutes
 setInterval(() => {
