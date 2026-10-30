@@ -127,7 +127,7 @@ export const INITIAL_MEALS: Omit<Meal, 'id' | 'updatedAt' | 'version'>[] = [
     code: 'Sale-12',
     name: 'باتية',
     category: 'mix_box',
-    ingredients: 'قطعة جاتوة مغلفة + بانية بالذبدة نكهات مختلفة + عصير بخيرة + شوكة ومنديل',
+    ingredients: 'قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل',
     distributorPrice: 44,
     factoryPrice: 32,
     hasJuice: true,

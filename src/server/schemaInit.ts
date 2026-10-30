@@ -264,10 +264,13 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
         }).catch(() => {});
       }
     } else {
-      // Ensure Meal 12 name is updated to 'باتية' in PostgreSQL
+      // Ensure Meal 12 name and ingredients are updated to 'باتية' in PostgreSQL
       await client.meal.updateMany({
         where: { code: 'Sale-12' },
-        data: { name: 'باتية' },
+        data: { 
+          name: 'باتية',
+          ingredients: 'قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل'
+        },
       }).catch(() => {});
     }
   } catch {}

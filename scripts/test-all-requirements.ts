@@ -24,13 +24,13 @@ async function runTests() {
   } else {
     const isNameCorrect = meal12.name === 'باتية';
     const isPriceIntact = meal12.distributorPrice === 44 && meal12.factoryPrice === 32;
-    const hasIngredients = Boolean(meal12.ingredients && meal12.ingredients.includes('بانية بالذبدة'));
+    const hasIngredients = Boolean(meal12.ingredients && meal12.ingredients.includes('باتية') && !meal12.ingredients.includes('بانية'));
     
     if (isNameCorrect && isPriceIntact && hasIngredients) {
-      console.log(`✅ Passed: Meal 12 name is exactly "${meal12.name}", distributorPrice: ${meal12.distributorPrice} EGP, factoryPrice: ${meal12.factoryPrice} EGP, ingredients intact.`);
+      console.log(`✅ Passed: Meal 12 name is exactly "${meal12.name}", ingredients: "${meal12.ingredients}", distributorPrice: ${meal12.distributorPrice} EGP, factoryPrice: ${meal12.factoryPrice} EGP.`);
       passed++;
     } else {
-      console.error(`❌ Failed: Meal 12 verification mismatch. Name: "${meal12.name}", Price: ${meal12.distributorPrice}/${meal12.factoryPrice}`);
+      console.error(`❌ Failed: Meal 12 verification mismatch. Name: "${meal12.name}", Ingredients: "${meal12.ingredients}", Price: ${meal12.distributorPrice}/${meal12.factoryPrice}`);
       failed++;
     }
   }
