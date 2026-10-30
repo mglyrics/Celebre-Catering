@@ -687,11 +687,22 @@ apiRouter.put('/admin/bookings/:id', requireAuth, requireRole(['super_admin', 'a
   }
 });
 
+// Explicit Admin Confirmation Endpoint: Transitions INITIAL/PENDING to CONFIRMED with audit logging
+apiRouter.post('/admin/bookings/:id/confirm', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const confirmed = await db.confirmBooking(id, req.user?.name || req.user?.username || 'الإدارة');
+    res.json({ success: true, booking: confirmed });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'فشل تأكيد الحجز' });
+  }
+});
+
 // Generate Factory WhatsApp Message & Dispatch Package
 apiRouter.post('/admin/bookings/:id/factory-order/whatsapp', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const { factoryPhone, forceNewVersion } = req.body || {};
+    const { factoryPhone, forceNewVersion, kitchenInstructions } = req.body || {};
     const booking = await db.getBookingById(id);
     if (!booking) {
       res.status(404).json({ error: 'الحجز غير موجود' });
@@ -711,6 +722,10 @@ apiRouter.post('/admin/bookings/:id/factory-order/whatsapp', requireAuth, requir
 
     if (!factoryOrder || forceNewVersion) {
       factoryOrder = await db.createFactoryOrder(id, req.user?.name || 'الإدارة', { forceNewVersion: Boolean(forceNewVersion) });
+    }
+
+    if (kitchenInstructions) {
+      factoryOrder.packagingNotes = `${factoryOrder.packagingNotes || ''} - تعليمات المطبخ: ${kitchenInstructions}`.trim();
     }
 
     const phoneToUse = factoryPhone || CELEBRE_CONFIG.whatsappNumber;

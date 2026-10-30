@@ -1754,6 +1754,66 @@ export const db = {
     return updatedBooking;
   },
 
+  async confirmBooking(id: string, performedBy = 'الإدارة'): Promise<Booking> {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error('الحجز غير موجود');
+    }
+
+    if (booking.totalMealsCount < 50) {
+      throw new Error(`لا يمكن تأكيد حجز يقل إجمالي وجباته عن 50 وجبة (العدد الحالي: ${booking.totalMealsCount} وجبة). يرجى تعديل الكميات أولاً لتصل إلى 50 وجبة على الأقل.`);
+    }
+
+    const prevStatus = booking.status;
+    const newVersion = booking.version + 1;
+    const now = new Date().toISOString();
+
+    const updatedBooking: Booking = {
+      ...booking,
+      status: 'CONFIRMED',
+      statusNotes: `تم تأكيد واعتماد الحجز رسمياً بواسطة الإدارة (${performedBy}) في ${new Date().toLocaleString('ar-EG')}.`,
+      version: newVersion,
+      updatedAt: now,
+    };
+
+    // Update MemoryDB
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+
+    // Update PostgreSQL
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: 'CONFIRMED',
+              statusNotes: updatedBooking.statusNotes,
+              version: newVersion,
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.confirmBooking.prisma');
+      }
+    }
+
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: 'تأكيد واعتماد الحجز',
+      performedBy,
+      details: `تم تأكيد واعتماد الحجز ${booking.bookingCode} (تغيير الحالة من ${prevStatus} إلى CONFIRMED) بواسطة (${performedBy}). إجمالي الوجبات: ${booking.totalMealsCount} وجبة، القيمة: ${booking.totalDistributorPrice} ج.م.`,
+    });
+
+    return updatedBooking;
+  },
+
   async confirmFactoryOrderSent(orderId: string, performedBy = 'الإدارة'): Promise<FactoryOrder> {
     memoryDB = loadLocalDB();
     const order = memoryDB.factoryOrders.find(fo => fo.id === orderId || fo.orderNumber === orderId);
@@ -1763,6 +1823,8 @@ export const db = {
 
     const now = new Date().toISOString();
     order.status = 'MANUALLY_CONFIRMED' as any;
+    order.sentBy = performedBy;
+    order.sentAt = now;
     order.updatedAt = now;
 
     if (databaseUrl) {

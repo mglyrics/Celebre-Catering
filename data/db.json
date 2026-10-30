@@ -255,6 +255,480 @@
   ],
   "bookings": [
     {
+      "id": "bk-1793361298518-262",
+      "bookingCode": "CLB-2026-1978",
+      "securityCode": "7115",
+      "customerName": "تجربة فحص الاعتماد والتأكيد",
+      "customerPhone": "01009988776",
+      "customerWhatsapp": "01009988776",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي للشركة",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين - مبنى B2",
+      "notes": "تم إلغاء الحجز التجريبي بعد نجاح الاختبارات",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050
+        }
+      ],
+      "totalMealsCount": 55,
+      "totalDistributorPrice": 2850,
+      "totalFactoryPrice": 2100,
+      "profitMargin": 750,
+      "paidAmount": 0,
+      "remainingAmount": 2850,
+      "status": "CANCELLED",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": false,
+      "version": 4,
+      "createdAt": "2026-10-30T11:54:58.518Z",
+      "updatedAt": "2026-10-30T11:54:58.606Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793361298539-863",
+          "timestamp": "2026-10-30T11:54:58.539Z",
+          "bookingId": "bk-1793361298518-262",
+          "action": "تعديل حجز بواسطة الإدارة",
+          "performedBy": "إدارة سيليبري",
+          "details": "تم تعديل بيانات الحجز CLB-2026-1978 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+        },
+        {
+          "id": "log-1793361298522-467",
+          "timestamp": "2026-10-30T11:54:58.522Z",
+          "bookingId": "bk-1793361298518-262",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-1978 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793361269076-490",
+      "bookingCode": "CLB-2026-1922",
+      "securityCode": "8958",
+      "customerName": "تجربة فحص الاعتماد والتأكيد",
+      "customerPhone": "01009988776",
+      "customerWhatsapp": "01009988776",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي للشركة",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين - مبنى B2",
+      "notes": "تم إلغاء الحجز التجريبي بعد نجاح الاختبارات",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050
+        }
+      ],
+      "totalMealsCount": 55,
+      "totalDistributorPrice": 2850,
+      "totalFactoryPrice": 2100,
+      "profitMargin": 750,
+      "paidAmount": 0,
+      "remainingAmount": 2850,
+      "status": "CANCELLED",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": false,
+      "version": 4,
+      "createdAt": "2026-10-30T11:54:29.076Z",
+      "updatedAt": "2026-10-30T11:54:29.154Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793361269093-789",
+          "timestamp": "2026-10-30T11:54:29.093Z",
+          "bookingId": "bk-1793361269076-490",
+          "action": "تعديل حجز بواسطة الإدارة",
+          "performedBy": "إدارة سيليبري",
+          "details": "تم تعديل بيانات الحجز CLB-2026-1922 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+        },
+        {
+          "id": "log-1793361269079-997",
+          "timestamp": "2026-10-30T11:54:29.079Z",
+          "bookingId": "bk-1793361269076-490",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-1922 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793361242651-5",
+      "bookingCode": "CLB-2026-6045",
+      "securityCode": "6623",
+      "customerName": "تجربة فحص الاعتماد والتأكيد",
+      "customerPhone": "01009988776",
+      "customerWhatsapp": "01009988776",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي للشركة",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين - مبنى B2",
+      "notes": "تم إلغاء الحجز التجريبي بعد نجاح الاختبارات",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050
+        }
+      ],
+      "totalMealsCount": 55,
+      "totalDistributorPrice": 2850,
+      "totalFactoryPrice": 2100,
+      "profitMargin": 750,
+      "paidAmount": 0,
+      "remainingAmount": 2850,
+      "status": "CANCELLED",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": false,
+      "version": 4,
+      "createdAt": "2026-10-30T11:54:02.651Z",
+      "updatedAt": "2026-10-30T11:54:02.742Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793361242672-22",
+          "timestamp": "2026-10-30T11:54:02.672Z",
+          "bookingId": "bk-1793361242651-5",
+          "action": "تعديل حجز بواسطة الإدارة",
+          "performedBy": "إدارة سيليبري",
+          "details": "تم تعديل بيانات الحجز CLB-2026-6045 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+        },
+        {
+          "id": "log-1793361242654-499",
+          "timestamp": "2026-10-30T11:54:02.654Z",
+          "bookingId": "bk-1793361242651-5",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-6045 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793361219754-417",
+      "bookingCode": "CLB-2026-2591",
+      "securityCode": "1036",
+      "customerName": "تجربة فحص الاعتماد والتأكيد",
+      "customerPhone": "01009988776",
+      "customerWhatsapp": "01009988776",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي للشركة",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين - مبنى B2",
+      "notes": "تم إلغاء الحجز التجريبي بعد نجاح الاختبارات",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050
+        }
+      ],
+      "totalMealsCount": 55,
+      "totalDistributorPrice": 2850,
+      "totalFactoryPrice": 2100,
+      "profitMargin": 750,
+      "paidAmount": 0,
+      "remainingAmount": 2850,
+      "status": "CANCELLED",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": false,
+      "version": 4,
+      "createdAt": "2026-10-30T11:53:39.754Z",
+      "updatedAt": "2026-10-30T11:53:39.858Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793361219774-148",
+          "timestamp": "2026-10-30T11:53:39.774Z",
+          "bookingId": "bk-1793361219754-417",
+          "action": "تعديل حجز بواسطة الإدارة",
+          "performedBy": "إدارة سيليبري",
+          "details": "تم تعديل بيانات الحجز CLB-2026-2591 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+        },
+        {
+          "id": "log-1793361219757-771",
+          "timestamp": "2026-10-30T11:53:39.757Z",
+          "bookingId": "bk-1793361219754-417",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-2591 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793361163872-969",
+      "bookingCode": "CLB-2026-8243",
+      "securityCode": "6069",
+      "customerName": "تجربة فحص الاعتماد والتأكيد",
+      "customerPhone": "01009988776",
+      "customerWhatsapp": "01009988776",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي للشركة",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين - مبنى B2",
+      "notes": "تأكيد التسليم والتغليف الفاخر",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050
+        }
+      ],
+      "totalMealsCount": 55,
+      "totalDistributorPrice": 2850,
+      "totalFactoryPrice": 2100,
+      "profitMargin": 750,
+      "paidAmount": 0,
+      "remainingAmount": 2850,
+      "status": "IN_PRODUCTION",
+      "statusNotes": "تم إصدار أمر تشغيل المصنع رقم FO-2026-109 (الإصدار v1)",
+      "isTest": false,
+      "version": 3,
+      "createdAt": "2026-10-30T11:52:43.872Z",
+      "updatedAt": "2026-10-30T11:52:43.925Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793361163888-506",
+          "timestamp": "2026-10-30T11:52:43.888Z",
+          "bookingId": "bk-1793361163872-969",
+          "action": "تعديل حجز بواسطة الإدارة",
+          "performedBy": "إدارة سيليبري",
+          "details": "تم تعديل بيانات الحجز CLB-2026-8243 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+        },
+        {
+          "id": "log-1793361163875-347",
+          "timestamp": "2026-10-30T11:52:43.875Z",
+          "bookingId": "bk-1793361163872-969",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-8243 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793361142679-906",
+      "bookingCode": "CLB-2026-8253",
+      "securityCode": "3682",
+      "customerName": "تجربة فحص الاعتماد والتأكيد",
+      "customerPhone": "01009988776",
+      "customerWhatsapp": "01009988776",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي للشركة",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين - مبنى B2",
+      "notes": "تأكيد التسليم والتغليف الفاخر",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 54,
+          "totalDistributorPrice": 1350,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050
+        }
+      ],
+      "totalMealsCount": 55,
+      "totalDistributorPrice": 2850,
+      "totalFactoryPrice": 2100,
+      "profitMargin": 750,
+      "paidAmount": 0,
+      "remainingAmount": 2850,
+      "status": "CONFIRMED",
+      "statusNotes": "تم تأكيد واعتماد الحجز رسمياً بواسطة الإدارة (إدارة سيليبري) في ٣٠‏/١٠‏/٢٠٢٦، ١١:٥٢:٢٢ ص.",
+      "isTest": false,
+      "version": 3,
+      "createdAt": "2026-10-30T11:52:22.679Z",
+      "updatedAt": "2026-10-30T11:52:22.709Z",
+      "payments": [],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793361142701-303",
+          "timestamp": "2026-10-30T11:52:22.701Z",
+          "bookingId": "bk-1793361142679-906",
+          "action": "تعديل حجز بواسطة الإدارة",
+          "performedBy": "إدارة سيليبري",
+          "details": "تم تعديل بيانات الحجز CLB-2026-8253 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+        },
+        {
+          "id": "log-1793361142683-248",
+          "timestamp": "2026-10-30T11:52:22.683Z",
+          "bookingId": "bk-1793361142679-906",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-8253 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+        }
+      ]
+    },
+    {
       "id": "bk-1793269199956-941",
       "bookingCode": "CLB-2026-3719",
       "securityCode": "3425",
@@ -2766,6 +3240,197 @@
   ],
   "factoryOrders": [
     {
+      "id": "fo-1793361298576-487",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793361298518-262",
+      "bookingCode": "CLB-2026-1978",
+      "version": 1,
+      "status": "MANUALLY_CONFIRMED",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryLocation": "القاهرة - التجمع الخامس - شارع التسعين - مبنى B2",
+      "factoryCostTotal": 2100,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تأكيد التسليم والتغليف الفاخر",
+      "createdAt": "2026-10-30T11:54:58.576Z",
+      "updatedAt": "2026-10-30T11:54:58.593Z",
+      "sentBy": "إدارة سيليبري",
+      "sentAt": "2026-10-30T11:54:58.593Z"
+    },
+    {
+      "id": "fo-1793361269129-284",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793361269076-490",
+      "bookingCode": "CLB-2026-1922",
+      "version": 1,
+      "status": "MANUALLY_CONFIRMED",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryLocation": "القاهرة - التجمع الخامس - شارع التسعين - مبنى B2",
+      "factoryCostTotal": 2100,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تأكيد التسليم والتغليف الفاخر",
+      "createdAt": "2026-10-30T11:54:29.129Z",
+      "updatedAt": "2026-10-30T11:54:29.142Z",
+      "sentBy": "إدارة سيليبري",
+      "sentAt": "2026-10-30T11:54:29.142Z"
+    },
+    {
+      "id": "fo-1793361242711-554",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793361242651-5",
+      "bookingCode": "CLB-2026-6045",
+      "version": 1,
+      "status": "MANUALLY_CONFIRMED",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryLocation": "القاهرة - التجمع الخامس - شارع التسعين - مبنى B2",
+      "factoryCostTotal": 2100,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تأكيد التسليم والتغليف الفاخر",
+      "createdAt": "2026-10-30T11:54:02.711Z",
+      "updatedAt": "2026-10-30T11:54:02.729Z",
+      "sentBy": "إدارة سيليبري",
+      "sentAt": "2026-10-30T11:54:02.729Z"
+    },
+    {
+      "id": "fo-1793361219812-244",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793361219754-417",
+      "bookingCode": "CLB-2026-2591",
+      "version": 1,
+      "status": "MANUALLY_CONFIRMED",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryLocation": "القاهرة - التجمع الخامس - شارع التسعين - مبنى B2",
+      "factoryCostTotal": 2100,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تأكيد التسليم والتغليف الفاخر",
+      "createdAt": "2026-10-30T11:53:39.812Z",
+      "updatedAt": "2026-10-30T11:53:39.844Z"
+    },
+    {
+      "id": "fo-1793361163925-105",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793361163872-969",
+      "bookingCode": "CLB-2026-8243",
+      "version": 1,
+      "status": "READY_TO_SEND",
+      "eventDate": "2026-12-05",
+      "deliveryTime": "13:30",
+      "deliveryLocation": "القاهرة - التجمع الخامس - شارع التسعين - مبنى B2",
+      "factoryCostTotal": 2100,
+      "items": [
+        {
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "عصير بخيرة القياسي"
+        },
+        {
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "quantity": 25,
+          "drinkOption": "pepsi",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "unitFactoryPrice": 42,
+          "totalFactoryPrice": 1050,
+          "specialInstructions": "استبدال العصير بكانز بيبسي (+10 ج)"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. تأكيد التسليم والتغليف الفاخر",
+      "createdAt": "2026-10-30T11:52:43.925Z",
+      "updatedAt": "2026-10-30T11:52:43.925Z"
+    },
+    {
       "id": "fo-1793269200002-838",
       "orderNumber": "FO-2026-109",
       "bookingId": "bk-1793269199956-941",
@@ -3211,6 +3876,254 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1793361298606-879",
+      "timestamp": "2026-10-30T11:54:58.606Z",
+      "bookingId": "bk-1793361298518-262",
+      "action": "تعديل الحجز",
+      "performedBy": "الإدارة",
+      "details": "تم تحديث الحجز (الإصدار v4). تغيير الحالة من IN_PRODUCTION إلى CANCELLED"
+    },
+    {
+      "id": "log-1793361298593-109",
+      "timestamp": "2026-10-30T11:54:58.593Z",
+      "bookingId": "bk-1793361298518-262",
+      "action": "تأكيد إرسال أمر التشغيل للمصنع يدوياً",
+      "performedBy": "إدارة سيليبري",
+      "details": "قام الإداري (إدارة سيليبري) بتأكيد إرسال أمر التشغيل FO-2026-109 (الإصدار v1) إلى واتساب المصنع يدوياً في 2026-10-30T11:54:58.593Z."
+    },
+    {
+      "id": "log-1793361298576-571",
+      "timestamp": "2026-10-30T11:54:58.576Z",
+      "bookingId": "bk-1793361298518-262",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 55 وجبة وتكلفة مصنع 2100 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793361298559-243",
+      "timestamp": "2026-10-30T11:54:58.559Z",
+      "bookingId": "bk-1793361298518-262",
+      "action": "تأكيد واعتماد الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تأكيد واعتماد الحجز CLB-2026-1978 (تغيير الحالة من INITIAL إلى CONFIRMED) بواسطة (إدارة سيليبري). إجمالي الوجبات: 55 وجبة، القيمة: 2850 ج.م."
+    },
+    {
+      "id": "log-1793361298539-863",
+      "timestamp": "2026-10-30T11:54:58.539Z",
+      "bookingId": "bk-1793361298518-262",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تعديل بيانات الحجز CLB-2026-1978 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+    },
+    {
+      "id": "log-1793361298522-467",
+      "timestamp": "2026-10-30T11:54:58.522Z",
+      "bookingId": "bk-1793361298518-262",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-1978 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+    },
+    {
+      "id": "log-1793361269154-92",
+      "timestamp": "2026-10-30T11:54:29.154Z",
+      "bookingId": "bk-1793361269076-490",
+      "action": "تعديل الحجز",
+      "performedBy": "الإدارة",
+      "details": "تم تحديث الحجز (الإصدار v4). تغيير الحالة من IN_PRODUCTION إلى CANCELLED"
+    },
+    {
+      "id": "log-1793361269142-531",
+      "timestamp": "2026-10-30T11:54:29.142Z",
+      "bookingId": "bk-1793361269076-490",
+      "action": "تأكيد إرسال أمر التشغيل للمصنع يدوياً",
+      "performedBy": "إدارة سيليبري",
+      "details": "قام الإداري (إدارة سيليبري) بتأكيد إرسال أمر التشغيل FO-2026-109 (الإصدار v1) إلى واتساب المصنع يدوياً في 2026-10-30T11:54:29.142Z."
+    },
+    {
+      "id": "log-1793361269129-210",
+      "timestamp": "2026-10-30T11:54:29.129Z",
+      "bookingId": "bk-1793361269076-490",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 55 وجبة وتكلفة مصنع 2100 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793361269112-581",
+      "timestamp": "2026-10-30T11:54:29.112Z",
+      "bookingId": "bk-1793361269076-490",
+      "action": "تأكيد واعتماد الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تأكيد واعتماد الحجز CLB-2026-1922 (تغيير الحالة من INITIAL إلى CONFIRMED) بواسطة (إدارة سيليبري). إجمالي الوجبات: 55 وجبة، القيمة: 2850 ج.م."
+    },
+    {
+      "id": "log-1793361269093-789",
+      "timestamp": "2026-10-30T11:54:29.093Z",
+      "bookingId": "bk-1793361269076-490",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تعديل بيانات الحجز CLB-2026-1922 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+    },
+    {
+      "id": "log-1793361269079-997",
+      "timestamp": "2026-10-30T11:54:29.079Z",
+      "bookingId": "bk-1793361269076-490",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-1922 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+    },
+    {
+      "id": "log-1793361242742-166",
+      "timestamp": "2026-10-30T11:54:02.742Z",
+      "bookingId": "bk-1793361242651-5",
+      "action": "تعديل الحجز",
+      "performedBy": "الإدارة",
+      "details": "تم تحديث الحجز (الإصدار v4). تغيير الحالة من IN_PRODUCTION إلى CANCELLED"
+    },
+    {
+      "id": "log-1793361242729-652",
+      "timestamp": "2026-10-30T11:54:02.729Z",
+      "bookingId": "bk-1793361242651-5",
+      "action": "تأكيد إرسال أمر التشغيل للمصنع يدوياً",
+      "performedBy": "إدارة سيليبري",
+      "details": "قام الإداري (إدارة سيليبري) بتأكيد إرسال أمر التشغيل FO-2026-109 (الإصدار v1) إلى واتساب المصنع يدوياً في 2026-10-30T11:54:02.729Z."
+    },
+    {
+      "id": "log-1793361242711-230",
+      "timestamp": "2026-10-30T11:54:02.711Z",
+      "bookingId": "bk-1793361242651-5",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 55 وجبة وتكلفة مصنع 2100 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793361242693-58",
+      "timestamp": "2026-10-30T11:54:02.693Z",
+      "bookingId": "bk-1793361242651-5",
+      "action": "تأكيد واعتماد الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تأكيد واعتماد الحجز CLB-2026-6045 (تغيير الحالة من INITIAL إلى CONFIRMED) بواسطة (إدارة سيليبري). إجمالي الوجبات: 55 وجبة، القيمة: 2850 ج.م."
+    },
+    {
+      "id": "log-1793361242672-22",
+      "timestamp": "2026-10-30T11:54:02.672Z",
+      "bookingId": "bk-1793361242651-5",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تعديل بيانات الحجز CLB-2026-6045 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+    },
+    {
+      "id": "log-1793361242654-499",
+      "timestamp": "2026-10-30T11:54:02.654Z",
+      "bookingId": "bk-1793361242651-5",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-6045 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+    },
+    {
+      "id": "log-1793361219858-535",
+      "timestamp": "2026-10-30T11:53:39.858Z",
+      "bookingId": "bk-1793361219754-417",
+      "action": "تعديل الحجز",
+      "performedBy": "الإدارة",
+      "details": "تم تحديث الحجز (الإصدار v4). تغيير الحالة من IN_PRODUCTION إلى CANCELLED"
+    },
+    {
+      "id": "log-1793361219844-917",
+      "timestamp": "2026-10-30T11:53:39.844Z",
+      "bookingId": "bk-1793361219754-417",
+      "action": "تأكيد إرسال أمر التشغيل للمصنع يدوياً",
+      "performedBy": "إدارة سيليبري",
+      "details": "قام الإداري (إدارة سيليبري) بتأكيد إرسال أمر التشغيل FO-2026-109 (الإصدار v1) إلى واتساب المصنع يدوياً في 2026-10-30T11:53:39.844Z."
+    },
+    {
+      "id": "log-1793361219813-314",
+      "timestamp": "2026-10-30T11:53:39.813Z",
+      "bookingId": "bk-1793361219754-417",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 55 وجبة وتكلفة مصنع 2100 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793361219795-917",
+      "timestamp": "2026-10-30T11:53:39.795Z",
+      "bookingId": "bk-1793361219754-417",
+      "action": "تأكيد واعتماد الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تأكيد واعتماد الحجز CLB-2026-2591 (تغيير الحالة من INITIAL إلى CONFIRMED) بواسطة (إدارة سيليبري). إجمالي الوجبات: 55 وجبة، القيمة: 2850 ج.م."
+    },
+    {
+      "id": "log-1793361219774-148",
+      "timestamp": "2026-10-30T11:53:39.774Z",
+      "bookingId": "bk-1793361219754-417",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تعديل بيانات الحجز CLB-2026-2591 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+    },
+    {
+      "id": "log-1793361219757-771",
+      "timestamp": "2026-10-30T11:53:39.757Z",
+      "bookingId": "bk-1793361219754-417",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-2591 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+    },
+    {
+      "id": "log-1793361163925-596",
+      "timestamp": "2026-10-30T11:52:43.925Z",
+      "bookingId": "bk-1793361163872-969",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 55 وجبة وتكلفة مصنع 2100 ج (خالٍ تماماً من هوامش ربح الموزع)."
+    },
+    {
+      "id": "log-1793361163901-91",
+      "timestamp": "2026-10-30T11:52:43.901Z",
+      "bookingId": "bk-1793361163872-969",
+      "action": "تأكيد واعتماد الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تأكيد واعتماد الحجز CLB-2026-8243 (تغيير الحالة من INITIAL إلى CONFIRMED) بواسطة (إدارة سيليبري). إجمالي الوجبات: 55 وجبة، القيمة: 2850 ج.م."
+    },
+    {
+      "id": "log-1793361163888-506",
+      "timestamp": "2026-10-30T11:52:43.888Z",
+      "bookingId": "bk-1793361163872-969",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تعديل بيانات الحجز CLB-2026-8243 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+    },
+    {
+      "id": "log-1793361163875-347",
+      "timestamp": "2026-10-30T11:52:43.875Z",
+      "bookingId": "bk-1793361163872-969",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8243 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+    },
+    {
+      "id": "log-1793361142759-407",
+      "timestamp": "2026-10-30T11:52:22.759Z",
+      "bookingId": "bk-1793361142679-906",
+      "action": "تأكيد واعتماد الحجز",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تأكيد واعتماد الحجز CLB-2026-8253 (تغيير الحالة من INITIAL إلى CONFIRMED) بواسطة (إدارة سيليبري). إجمالي الوجبات: 55 وجبة، القيمة: 2850 ج.م."
+    },
+    {
+      "id": "log-1793361142701-303",
+      "timestamp": "2026-10-30T11:52:22.701Z",
+      "bookingId": "bk-1793361142679-906",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "إدارة سيليبري",
+      "details": "تم تعديل بيانات الحجز CLB-2026-8253 (الإصدار v2). إجمالي الوجبات: 55، إجمالي القيمة: 2850 ج."
+    },
+    {
+      "id": "log-1793361142683-248",
+      "timestamp": "2026-10-30T11:52:22.683Z",
+      "bookingId": "bk-1793361142679-906",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8253 بإجمالي 50 وجبة وقيمة 2600 جنيه."
+    },
     {
       "id": "log-1793269200050-493",
       "timestamp": "2026-10-29T10:20:00.050Z",

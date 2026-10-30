@@ -30,7 +30,10 @@ import {
   Key,
   Trash2,
   Check,
-  X
+  X,
+  Menu,
+  ChevronRight,
+  Copy
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -137,6 +140,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Selected Factory Order for printing
   const [printingFactoryOrder, setPrintingFactoryOrder] = useState<FactoryOrder | null>(null);
+
+  // Mobile Navigation Drawer & Confirmation State
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isConfirmingBookingId, setIsConfirmingBookingId] = useState<string | null>(null);
+  const [copiedBookingCode, setCopiedBookingCode] = useState<string | null>(null);
+
+  const copyBookingCode = (code: string) => {
+    navigator.clipboard?.writeText(code);
+    setCopiedBookingCode(code);
+    setTimeout(() => setCopiedBookingCode(null), 2000);
+  };
 
   // Handle 401 and server-enforced 15-minute inactivity timeout
   const handleAuthError = (status: number, data?: any): boolean => {
@@ -519,6 +533,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleOpenEditBooking = (b: Booking) => {
+    setSelectedBooking(b);
     setEditCustomerName(b.customerName || '');
     setEditCustomerPhone(b.customerPhone || '');
     setEditCustomerWhatsapp(b.customerWhatsapp || b.customerPhone || '');
@@ -541,13 +556,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsEditBookingModalOpen(true);
   };
 
-  const handleSaveBookingEdits = async (e: React.FormEvent) => {
+  const handleConfirmBooking = async (bookingId: string) => {
+    const target = bookings.find(b => b.id === bookingId) || (selectedBooking?.id === bookingId ? selectedBooking : null);
+    if (!target) return;
+
+    if (target.totalMealsCount < 50) {
+      alert(`الحد الأدنى للطلب 50 وجبة. لا يمكن تأكيد الحجز لأن إجمالي عدد الوجبات (${target.totalMealsCount} وجبة) أقل من الحد الأدنى. يرجى تعديل الكميات أولاً.`);
+      return;
+    }
+
+    setIsConfirmingBookingId(bookingId);
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/confirm`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تأكيد الحجز');
+      }
+
+      if (selectedBooking && selectedBooking.id === bookingId) {
+        setSelectedBooking(data.booking);
+      }
+      loadAllData();
+    } catch (err: any) {
+      alert(err.message || 'خطأ أثناء تأكيد الحجز');
+    } finally {
+      setIsConfirmingBookingId(null);
+    }
+  };
+
+  const handleSaveBookingEdits = async (e: React.FormEvent, confirmDirectly = false) => {
     e.preventDefault();
     if (!selectedBooking) return;
 
     const totalQty = editItems.reduce((acc, it) => acc + Math.max(1, Number(it.quantity) || 0), 0);
-    if (totalQty < 50 && (editStatus === 'CONFIRMED' || editStatus === 'IN_PRODUCTION')) {
-      setEditBookingError(`الحد الأدنى للطلب 50 وجبة. لا يمكن اعتماد الحجز أو نقله للتشغيل والكمية الحالية (${totalQty} وجبة). يرجى تعديل الكميات أولاً.`);
+    const targetStatus = confirmDirectly ? 'CONFIRMED' : editStatus;
+
+    if (totalQty < 50 && (targetStatus === 'CONFIRMED' || targetStatus === 'IN_PRODUCTION')) {
+      setEditBookingError(`الحد الأدنى للطلب 50 وجبة. لا يمكن اعتماد الحجز والكمية الإجمالية الحالية (${totalQty} وجبة). يرجى زيادة الكمية إلى 50 وجبة على الأقل.`);
       return;
     }
 
@@ -571,7 +623,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           deliveryTime: editDeliveryTime,
           deliveryGovernorate: editDeliveryGovernorate,
           deliveryAddress: editDeliveryAddress,
-          status: editStatus,
+          status: targetStatus,
           notes: editNotes,
           items: editItems,
         }),
@@ -708,47 +760,200 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-white w-full max-w-6xl rounded-3xl shadow-2xl border-2 border-[#7A0C2E]/30 flex flex-col max-h-[94vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-0 sm:p-4">
+      <div className="bg-white w-full max-w-6xl h-full sm:h-auto sm:max-h-[94vh] rounded-none sm:rounded-3xl shadow-2xl border-0 sm:border-2 border-[#7A0C2E]/30 flex flex-col overflow-hidden relative">
         
         {/* Top Navbar */}
-        <div className="bg-[#560820] text-white px-6 py-3.5 flex items-center justify-between border-b border-[#C59B27]/40">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-white p-0.5 shadow-xs">
+        <div className="bg-[#560820] text-white px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between border-b border-[#C59B27]/40 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {currentUser && (
+              <button
+                onClick={() => setIsMobileNavOpen(true)}
+                className="p-2 -mr-1 text-white hover:bg-white/10 rounded-xl md:hidden transition-colors flex items-center justify-center"
+                title="فتح قائمة الأقسام"
+                aria-label="قائمة الأقسام"
+              >
+                <Menu className="w-5 h-5 text-[#DFC066]" />
+              </button>
+            )}
+            <div className="w-8 h-8 rounded-lg bg-white p-0.5 shadow-xs shrink-0">
               <img src={CELEBRE_CONFIG.logoUrl} alt="Celebre" className="w-full h-full object-contain" />
             </div>
-            <div>
-              <h3 className="font-extrabold text-base sm:text-lg flex items-center gap-2">
-                <span>لوحة التحكم الإدارية وتشغيل المصنع</span>
-                <span className="text-xs bg-[#C59B27] text-slate-900 px-2 py-0.5 rounded-full font-bold">
-                  {currentUser ? (currentUser.role === 'factory' ? 'المصنع' : 'الإدارة العامة') : 'محمي'}
+            <div className="min-w-0">
+              <h3 className="font-extrabold text-xs sm:text-base lg:text-lg flex items-center gap-1.5 sm:gap-2 truncate">
+                <span className="truncate">لوحة تحكم CELEBRE</span>
+                <span className="text-[10px] sm:text-xs bg-[#C59B27] text-slate-900 px-2 py-0.5 rounded-full font-bold shrink-0">
+                  {currentUser ? (currentUser.role === 'factory' ? 'المصنع' : 'الإدارة') : 'محمي'}
                 </span>
               </h3>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 shrink-0">
             {currentUser && (
-              <div className="flex items-center gap-2 text-xs bg-white/10 px-3 py-1.5 rounded-xl border border-white/20">
+              <div className="flex items-center gap-1.5 text-xs bg-white/10 px-2 sm:px-3 py-1.5 rounded-xl border border-white/20">
                 <span className="text-[#DFC066] font-bold hidden sm:inline">{currentUser.name}</span>
                 <button
                   onClick={handleLogout}
-                  className="text-white hover:text-rose-300 flex items-center gap-1 sm:border-r border-white/20 sm:pr-2 sm:mr-1 transition-colors font-bold"
+                  className="text-white hover:text-rose-300 flex items-center gap-1 sm:border-r border-white/20 sm:pr-2 sm:mr-1 transition-colors font-bold text-[11px] sm:text-xs"
                   title="تسجيل الخروج من لوحة الإدارة"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>تسجيل الخروج</span>
+                  <LogOut className="w-3.5 h-3.5 text-rose-300" />
+                  <span className="hidden xs:inline">خروج</span>
                 </button>
               </div>
             )}
             <button
               onClick={onClose}
-              className="p-1 text-white/80 hover:text-white rounded-lg hover:bg-white/10"
+              className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10"
+              title="إغلاق لوحة الإدارة"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
           </div>
         </div>
+
+        {/* Mobile Navigation Drawer / Slide-Over */}
+        {isMobileNavOpen && currentUser && (
+          <div className="fixed inset-0 z-60 md:hidden bg-black/60 backdrop-blur-xs flex justify-end animate-in fade-in duration-150">
+            <div className="w-[85%] max-w-xs bg-white h-full shadow-2xl flex flex-col p-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-[#560820] text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                    C
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-[#560820]">{currentUser.name}</h4>
+                    <span className="text-[10px] text-slate-500 font-semibold">{currentUser.role === 'factory' ? 'مسؤول المصنع' : 'الإدارة العامة'}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsMobileNavOpen(false)}
+                  className="p-1.5 rounded-xl text-slate-500 hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-1.5 py-2 text-right">
+                {currentUser?.role !== 'factory' && (
+                  <>
+                    <button
+                      onClick={() => { setActiveTab('bookings'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'bookings' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ShoppingBag className={`w-4 h-4 ${activeTab === 'bookings' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                        <span>الحجوزات والطلبات</span>
+                      </div>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-mono font-bold ${activeTab === 'bookings' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                        {bookings.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveTab('overview'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'overview' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <TrendingUp className={`w-4 h-4 ${activeTab === 'overview' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                        <span>التقارير والمؤشرات المالية</span>
+                      </div>
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => { setActiveTab('factory_orders'); setIsMobileNavOpen(false); }}
+                  className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                    activeTab === 'factory_orders' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Package className={`w-4 h-4 ${activeTab === 'factory_orders' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                    <span>أوامر تشغيل المصنع</span>
+                  </div>
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-mono font-bold ${activeTab === 'factory_orders' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                    {factoryOrders.length}
+                  </span>
+                </button>
+
+                {currentUser?.role !== 'factory' && (
+                  <>
+                    <button
+                      onClick={() => { setActiveTab('menu'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'menu' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <FileText className={`w-4 h-4 ${activeTab === 'menu' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                        <span>إدارة المنيو وأسعار الوجبات (18)</span>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveTab('audit'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'audit' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Clock className={`w-4 h-4 ${activeTab === 'audit' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                        <span>سجل التدقيق والعمليات</span>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveTab('system'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'system' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Shield className={`w-4 h-4 ${activeTab === 'system' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                        <span>حالة النظام والربط</span>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveTab('password'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'password' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Key className={`w-4 h-4 ${activeTab === 'password' ? 'text-[#DFC066]' : 'text-[#7A0C2E]'}`} />
+                        <span>تغيير كلمة المرور</span>
+                      </div>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 space-y-2 shrink-0">
+                <button
+                  onClick={() => { loadAllData(); setIsMobileNavOpen(false); }}
+                  className="w-full min-h-[44px] px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingData ? 'animate-spin' : ''}`} />
+                  <span>تحديث البيانات الآن</span>
+                </button>
+                <button
+                  onClick={() => { handleLogout(); setIsMobileNavOpen(false); }}
+                  className="w-full min-h-[44px] px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-rose-200 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>تسجيل الخروج من الإدارة</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Content Body: Login OR Dashboard */}
         {!token ? (
@@ -825,8 +1030,99 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden">
             
-            {/* Dashboard Tabs Header */}
-            <div className="bg-[#FAF8F5] px-6 py-2 border-b border-[#E8DCC0] flex items-center gap-2 overflow-x-auto text-xs font-bold">
+            {/* Quick Mobile Horizontal Tabs Bar (Single thumb swipe & tap) */}
+            <div className="md:hidden flex items-center gap-1.5 p-2 bg-[#FAF8F5] border-b border-[#E8DCC0] overflow-x-auto shrink-0 text-xs font-bold shadow-2xs">
+              {currentUser?.role !== 'factory' && (
+                <>
+                  <button
+                    onClick={() => setActiveTab('bookings')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'bookings'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5 text-[#DFC066]" />
+                    <span>الحجوزات ({bookings.length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('overview')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'overview'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5 text-[#DFC066]" />
+                    <span>التقارير</span>
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={() => setActiveTab('factory_orders')}
+                className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                  activeTab === 'factory_orders'
+                    ? 'bg-[#7A0C2E] text-white shadow-xs'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5 text-[#DFC066]" />
+                <span>المصنع ({factoryOrders.length})</span>
+              </button>
+
+              {currentUser?.role !== 'factory' && (
+                <>
+                  <button
+                    onClick={() => setActiveTab('menu')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'menu'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-[#DFC066]" />
+                    <span>المنيو (18)</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('audit')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'audit'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5 text-[#DFC066]" />
+                    <span>السجل</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('password')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'password'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Key className="w-3.5 h-3.5 text-[#DFC066]" />
+                    <span>كلمة المرور</span>
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={loadAllData}
+                className="min-h-[38px] px-3 py-1.5 bg-white text-slate-600 border border-slate-200 rounded-xl whitespace-nowrap flex items-center gap-1 shrink-0 ml-auto"
+                title="تحديث البيانات"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingData ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            {/* Desktop Tabs Header */}
+            <div className="hidden md:flex bg-[#FAF8F5] px-6 py-2 border-b border-[#E8DCC0] items-center gap-2 overflow-x-auto text-xs font-bold shrink-0">
               {currentUser?.role !== 'factory' && (
                 <>
                   <button
@@ -1022,149 +1318,519 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Tab 2: BOOKINGS MANAGEMENT */}
             {activeTab === 'bookings' && (
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4">
                 
                 {/* Search & Status Filters */}
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto text-xs">
-                    {['ALL', 'INITIAL', 'PENDING_CONFIRMATION', 'CONFIRMED', 'IN_PRODUCTION', 'READY_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'].map(st => (
-                      <button
-                        key={st}
-                        onClick={() => setStatusFilter(st)}
-                        className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                          statusFilter === st
-                            ? 'bg-[#7A0C2E] text-white shadow-2xs'
-                            : 'bg-white border text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        {st === 'ALL' ? 'الكل' : st}
-                      </button>
-                    ))}
+                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 text-xs no-scrollbar">
+                    {[
+                      { key: 'ALL', label: 'الكل' },
+                      { key: 'INITIAL', label: 'مبدئي' },
+                      { key: 'PENDING_CONFIRMATION', label: 'قيد المراجعة' },
+                      { key: 'CONFIRMED', label: 'مؤكد' },
+                      { key: 'IN_PRODUCTION', label: 'بالمصنع' },
+                      { key: 'READY_FOR_DELIVERY', label: 'جاهز' },
+                      { key: 'DELIVERED', label: 'تم التسليم' },
+                      { key: 'CANCELLED', label: 'ملغي' },
+                    ].map(st => {
+                      const count = st.key === 'ALL' 
+                        ? bookings.length 
+                        : bookings.filter(b => b.status === st.key).length;
+                      return (
+                        <button
+                          key={st.key}
+                          onClick={() => setStatusFilter(st.key)}
+                          className={`min-h-[36px] px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 ${
+                            statusFilter === st.key
+                              ? 'bg-[#7A0C2E] text-white shadow-xs'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span>{st.label}</span>
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                            statusFilter === st.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  <div className="relative w-full sm:w-64">
+                  <div className="relative w-full md:w-72 shrink-0">
                     <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
                     <input
                       type="text"
-                      placeholder="بحث برقم الحجز أو العميل..."
+                      placeholder="بحث برقم الحجز أو العميل أو الهاتف..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pr-9 pl-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#7A0C2E]"
+                      className="w-full pr-9 pl-8 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none shadow-2xs"
                     />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Bookings Table */}
-                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
-                  <table className="w-full text-right text-xs">
-                    <thead className="bg-[#FAF8F5] text-slate-700 font-bold border-b border-slate-200">
-                      <tr>
-                        <th className="p-3">رقم الحجز</th>
-                        <th className="p-3">العميل والموبايل</th>
-                        <th className="p-3">المناسبة والموعد</th>
-                        <th className="p-3">المكان</th>
-                        <th className="p-3">الوجبات</th>
-                        <th className="p-3">المبلغ / المدفوع</th>
-                        <th className="p-3">الحالة</th>
-                        <th className="p-3 text-center">إجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {bookings
-                        .filter(b => {
-                          const matchesStatus = statusFilter === 'ALL' || b.status === statusFilter;
-                          const matchesSearch =
-                            b.bookingCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            b.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            b.customerPhone.includes(searchQuery);
-                          return matchesStatus && matchesSearch;
-                        })
-                        .map(b => (
-                          <tr key={b.id} className={`hover:bg-slate-50 ${b.isTest ? 'bg-purple-50/30' : ''}`}>
-                            <td className="p-3">
-                              <span className="font-mono font-bold text-[#7A0C2E] block">{b.bookingCode}</span>
-                              {b.isTest && (
-                                <span className="inline-block mt-1 bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-purple-200">
-                                  حجز تجريبي
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3">
-                              <strong className="text-slate-900 block">{b.customerName}</strong>
-                              <span className="text-slate-500 font-mono" dir="ltr">{b.customerPhone}</span>
-                            </td>
-                            <td className="p-3">
-                              <span className="block font-medium">{b.eventName}</span>
-                              <span className="text-slate-500 text-[11px]">{b.eventDate} ({b.deliveryTime})</span>
-                            </td>
-                            <td className="p-3 text-slate-600">
-                              {b.deliveryGovernorate} - {b.deliveryAddress.substring(0, 25)}...
-                            </td>
-                            <td className="p-3 font-bold text-slate-800">
-                              {b.totalMealsCount} بوكس
-                            </td>
-                            <td className="p-3">
-                              <strong className="text-[#7A0C2E] block">{b.totalDistributorPrice} ج</strong>
-                              <span className="text-[11px] text-emerald-700">مدفوع: {b.paidAmount} ج</span>
-                            </td>
-                            <td className="p-3">
-                              <select
-                                value={b.status}
-                                onChange={(e) => handleUpdateStatus(b.id, e.target.value as BookingStatus)}
-                                className="text-[11px] font-bold bg-[#FAF8F5] border border-slate-300 rounded-md px-1.5 py-1 text-slate-800 focus:ring-1 focus:ring-[#7A0C2E]"
-                              >
-                                <option value="INITIAL">INITIAL (حجز مبدئي)</option>
-                                <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (قيد المراجعة)</option>
-                                <option value="CONFIRMED">CONFIRMED (مؤكد)</option>
-                                <option value="IN_PRODUCTION">IN_PRODUCTION (بالمصنع)</option>
-                                <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY (جاهز)</option>
-                                <option value="DELIVERED">DELIVERED (تم التسليم)</option>
-                                <option value="CANCELLED">CANCELLED (ملغي)</option>
-                              </select>
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  onClick={() => setSelectedBooking(b)}
-                                  className="p-1.5 bg-[#7A0C2E]/10 hover:bg-[#7A0C2E]/20 text-[#7A0C2E] rounded-lg"
-                                  title="عرض تفاصيل الحجز وتسجيل المدفوعات"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleOpenFactoryReview(b.id)}
-                                  className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg"
-                                  title="إنشاء طلب مصنع (مراجعة واعتماد)"
-                                >
-                                  <Package className="w-4 h-4" />
-                                </button>
+                {/* BOOKINGS LIST (Cards on Mobile / Table on Desktop) */}
+                {(() => {
+                  const filtered = bookings.filter(b => {
+                    const matchesStatus = statusFilter === 'ALL' || b.status === statusFilter;
+                    const matchesSearch =
+                      b.bookingCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      b.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      b.customerPhone.includes(searchQuery) ||
+                      (b.eventName || '').toLowerCase().includes(searchQuery.toLowerCase());
+                    return matchesStatus && matchesSearch;
+                  });
 
-                                {/* STRICT: Edit and Delete buttons are ONLY shown for test bookings */}
-                                {b.isTest && (
-                                  <>
-                                    <button
-                                      onClick={() => setEditingTestBooking(b)}
-                                      className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg"
-                                      title="تعديل الحجز التجريبي"
-                                    >
-                                      <Edit className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      onClick={() => setDeletingTestBooking(b)}
-                                      className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg"
-                                      title="حذف الحجز التجريبي"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </>
-                                )}
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="p-8 sm:p-12 bg-white rounded-2xl border border-slate-200 text-center space-y-2">
+                        <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto" />
+                        <h5 className="font-bold text-slate-700 text-sm">لا توجد حجوزات مطابقة</h5>
+                        <p className="text-xs text-slate-500">جرب تغيير حالة التصفية أو مسح عبارة البحث</p>
+                      </div>
+                    );
+                  }
+
+                  const getStatusInfo = (status: string) => {
+                    switch (status) {
+                      case 'INITIAL':
+                        return { label: 'حجز مبدئي', bg: 'bg-amber-100 text-amber-900 border-amber-300', dot: 'bg-amber-500' };
+                      case 'PENDING_CONFIRMATION':
+                        return { label: 'قيد المراجعة', bg: 'bg-orange-100 text-orange-900 border-orange-300', dot: 'bg-orange-500' };
+                      case 'CONFIRMED':
+                        return { label: 'مؤكد ومُعتمد', bg: 'bg-emerald-100 text-emerald-900 border-emerald-300', dot: 'bg-emerald-600' };
+                      case 'IN_PRODUCTION':
+                        return { label: 'بالمصنع (تجهيز)', bg: 'bg-blue-100 text-blue-900 border-blue-300', dot: 'bg-blue-600' };
+                      case 'READY_FOR_DELIVERY':
+                        return { label: 'جاهز للشحن', bg: 'bg-purple-100 text-purple-900 border-purple-300', dot: 'bg-purple-600' };
+                      case 'DELIVERED':
+                        return { label: 'تم التسليم', bg: 'bg-teal-100 text-teal-900 border-teal-300', dot: 'bg-teal-600' };
+                      case 'CANCELLED':
+                        return { label: 'ملغي', bg: 'bg-rose-100 text-rose-900 border-rose-300', dot: 'bg-rose-500' };
+                      default:
+                        return { label: status, bg: 'bg-slate-100 text-slate-800 border-slate-300', dot: 'bg-slate-400' };
+                    }
+                  };
+
+                  return (
+                    <>
+                      {/* 1. Mobile Cards View (Hidden on Desktop) */}
+                      <div className="block md:hidden space-y-3.5">
+                        {filtered.map(b => {
+                          const statusInfo = getStatusInfo(b.status);
+                          const isInitialOrPending = b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION';
+                          const isConfirmed = b.status === 'CONFIRMED';
+                          const phoneForWa = (b.customerPhone || '').replace(/\D/g, '').replace(/^20/, '');
+
+                          return (
+                            <div
+                              key={b.id}
+                              className={`bg-white rounded-2xl border-2 p-4 shadow-xs space-y-3 transition-shadow ${
+                                b.isTest ? 'border-purple-300 bg-purple-50/20' : 'border-[#E8DCC0]'
+                              }`}
+                            >
+                              {/* Top Bar: Code, Badges, Copy */}
+                              <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-black text-sm text-[#7A0C2E]">
+                                    {b.bookingCode}
+                                  </span>
+                                  <button
+                                    onClick={() => copyBookingCode(b.bookingCode)}
+                                    className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100"
+                                    title="نسخ رقم الحجز"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                  </button>
+                                  {copiedBookingCode === b.bookingCode && (
+                                    <span className="text-[10px] text-emerald-600 font-bold">تم النسخ!</span>
+                                  )}
+                                  <span className="text-[10px] bg-slate-100 text-slate-600 font-mono px-1.5 py-0.5 rounded">
+                                    v{b.version}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  {b.isTest && (
+                                    <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                                      تجريبي
+                                    </span>
+                                  )}
+                                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${statusInfo.bg}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
+                                    <span>{statusInfo.label}</span>
+                                  </span>
+                                </div>
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
+
+                              {/* Customer & Phone with 1-tap call & WhatsApp */}
+                              <div className="flex items-start justify-between gap-2 bg-[#FAF8F5] p-2.5 rounded-xl border border-[#EFE5D0]">
+                                <div>
+                                  <strong className="text-slate-900 text-xs block font-bold">
+                                    {b.customerName}
+                                  </strong>
+                                  <span className="text-slate-500 font-mono text-[11px] block mt-0.5" dir="ltr">
+                                    {b.customerPhone}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <a
+                                    href={`tel:${b.customerPhone}`}
+                                    className="min-h-[38px] px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-bold text-[11px] flex items-center gap-1 shadow-2xs"
+                                    title="اتصال هاتفي"
+                                  >
+                                    <Phone className="w-3.5 h-3.5 text-blue-600" />
+                                    <span>اتصال</span>
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/20${phoneForWa}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="min-h-[38px] px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg font-bold text-[11px] flex items-center gap-1 shadow-2xs"
+                                    title="مراسلة واتساب"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>واتساب</span>
+                                  </a>
+                                </div>
+                              </div>
+
+                              {/* Delivery & Event Details */}
+                              <div className="text-xs space-y-1 text-slate-700 px-1">
+                                <div className="flex items-center gap-1.5">
+                                  <Calendar className="w-3.5 h-3.5 text-[#C59B27] shrink-0" />
+                                  <span className="font-semibold text-slate-900">{b.eventName}</span>
+                                  <span className="text-slate-500 text-[11px]">({b.eventDate} - {b.deliveryTime})</span>
+                                </div>
+                                <div className="flex items-start gap-1.5">
+                                  <MapPin className="w-3.5 h-3.5 text-[#7A0C2E] shrink-0 mt-0.5" />
+                                  <span className="text-slate-600 text-[11px] leading-snug">
+                                    {b.deliveryGovernorate} - {b.deliveryAddress}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Meals & Price Summary */}
+                              <div className="grid grid-cols-2 gap-2 bg-[#FAF8F5] p-2.5 rounded-xl border border-[#EFE5D0] text-xs">
+                                <div>
+                                  <span className="text-[10px] text-slate-500 block">عدد الوجبات:</span>
+                                  <span className="font-black text-[#560820] text-sm">
+                                    {b.totalMealsCount} بوكس
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 block truncate">
+                                    {b.items?.map(it => `${it.quantity}x ${it.mealCode}`).join(' + ')}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-500 block">إجمالي القيمة:</span>
+                                  <strong className="text-[#7A0C2E] text-sm block">
+                                    {b.totalDistributorPrice.toLocaleString()} ج.م
+                                  </strong>
+                                  <span className="text-[10px] text-emerald-700 block font-semibold">
+                                    مدفوع: {b.paidAmount} ج | متبقي: {b.remainingAmount} ج
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* TOUCH-FRIENDLY ACTION BUTTONS (Min Height >= 44px) */}
+                              <div className="space-y-2 pt-1">
+                                
+                                {/* 1. INITIAL or PENDING: Primary Confirm Button + Edit */}
+                                {isInitialOrPending && (
+                                  <div className="space-y-2">
+                                    <button
+                                      type="button"
+                                      disabled={isConfirmingBookingId === b.id}
+                                      onClick={() => handleConfirmBooking(b.id)}
+                                      className="w-full min-h-[44px] bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                                    >
+                                      <CheckCircle2 className="w-4 h-4 text-[#DFC066]" />
+                                      <span>
+                                        {isConfirmingBookingId === b.id ? 'جاري التأكيد والاعتماد...' : 'تأكيد الحجز (اعتماد رسمي)'}
+                                      </span>
+                                    </button>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditBooking(b)}
+                                        className="min-h-[44px] bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs"
+                                      >
+                                        <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
+                                        <span>تعديل الحجز</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedBooking(b)}
+                                        className="min-h-[44px] bg-[#FAF8F5] hover:bg-[#F2ECE1] text-[#7A0C2E] border border-[#E8DCC0] font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                        <span>تفاصيل ودفعات</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* 2. CONFIRMED: WhatsApp Factory Order Dispatch + Edit */}
+                                {isConfirmed && (
+                                  <div className="space-y-2">
+                                    <button
+                                      type="button"
+                                      disabled={isGeneratingWhatsapp}
+                                      onClick={() => handleOpenFactoryWhatsapp(b.id)}
+                                      className="w-full min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                                    >
+                                      <MessageCircle className="w-4 h-4 text-emerald-100" />
+                                      <span>إرسال أمر تشغيل للمصنع عبر واتساب</span>
+                                    </button>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditBooking(b)}
+                                        className="min-h-[44px] bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-2xs"
+                                      >
+                                        <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
+                                        <span>تعديل الحجز</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedBooking(b)}
+                                        className="min-h-[44px] bg-[#FAF8F5] hover:bg-[#F2ECE1] text-[#7A0C2E] border border-[#E8DCC0] font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                        <span>تفاصيل ودفعات</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* 3. IN_PRODUCTION or later: WhatsApp Dispatch + Edit + Details */}
+                                {!isInitialOrPending && !isConfirmed && (
+                                  <div className="space-y-2">
+                                    <button
+                                      type="button"
+                                      disabled={isGeneratingWhatsapp}
+                                      onClick={() => handleOpenFactoryWhatsapp(b.id)}
+                                      className="w-full min-h-[44px] bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all"
+                                    >
+                                      <MessageCircle className="w-4 h-4 text-emerald-200" />
+                                      <span>أمر المصنع عبر واتساب</span>
+                                    </button>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditBooking(b)}
+                                        className="min-h-[44px] bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
+                                      >
+                                        <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
+                                        <span>تعديل الحجز</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedBooking(b)}
+                                        className="min-h-[44px] bg-[#FAF8F5] hover:bg-[#F2ECE1] text-[#7A0C2E] border border-[#E8DCC0] font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                        <span>تفاصيل ودفعات</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Quick Status Selector for Mobile */}
+                                <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                                  <span className="text-[11px] text-slate-500 shrink-0 font-bold">تغيير الحالة:</span>
+                                  <select
+                                    value={b.status}
+                                    onChange={(e) => handleUpdateStatus(b.id, e.target.value as BookingStatus)}
+                                    className="flex-1 min-h-[40px] text-xs font-bold bg-[#FAF8F5] border border-slate-300 rounded-xl px-2.5 py-1.5 text-slate-800 focus:ring-1 focus:ring-[#7A0C2E]"
+                                  >
+                                    <option value="INITIAL">INITIAL (حجز مبدئي)</option>
+                                    <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (قيد المراجعة)</option>
+                                    <option value="CONFIRMED">CONFIRMED (مؤكد)</option>
+                                    <option value="IN_PRODUCTION">IN_PRODUCTION (بالمصنع)</option>
+                                    <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY (جاهز)</option>
+                                    <option value="DELIVERED">DELIVERED (تم التسليم)</option>
+                                    <option value="CANCELLED">CANCELLED (ملغي)</option>
+                                  </select>
+                                </div>
+
+                                {/* Test Booking Controls on Mobile */}
+                                {b.isTest && (
+                                  <div className="grid grid-cols-2 gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingTestBooking(b)}
+                                      className="min-h-[40px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 flex items-center justify-center gap-1"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                      <span>تعديل تجريبي</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingTestBooking(b)}
+                                      className="min-h-[40px] bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 flex items-center justify-center gap-1"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <span>حذف تجريبي</span>
+                                    </button>
+                                  </div>
+                                )}
+
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* 2. Desktop Table (Hidden on Mobile) */}
+                      <div className="hidden md:block bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                        <table className="w-full text-right text-xs">
+                          <thead className="bg-[#FAF8F5] text-slate-700 font-bold border-b border-slate-200">
+                            <tr>
+                              <th className="p-3">رقم الحجز</th>
+                              <th className="p-3">العميل والموبايل</th>
+                              <th className="p-3">المناسبة والموعد</th>
+                              <th className="p-3">المكان</th>
+                              <th className="p-3">الوجبات</th>
+                              <th className="p-3">المبلغ / المدفوع</th>
+                              <th className="p-3">الحالة</th>
+                              <th className="p-3 text-center">إجراءات</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {filtered.map(b => (
+                              <tr key={b.id} className={`hover:bg-slate-50 ${b.isTest ? 'bg-purple-50/30' : ''}`}>
+                                <td className="p-3">
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-mono font-bold text-[#7A0C2E] block">{b.bookingCode}</span>
+                                    <button
+                                      onClick={() => copyBookingCode(b.bookingCode)}
+                                      className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                                      title="نسخ رقم الحجز"
+                                    >
+                                      <Copy className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 font-mono">v{b.version}</span>
+                                  {b.isTest && (
+                                    <span className="inline-block mr-1 bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-purple-200">
+                                      حجز تجريبي
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3">
+                                  <strong className="text-slate-900 block">{b.customerName}</strong>
+                                  <span className="text-slate-500 font-mono text-[11px]" dir="ltr">{b.customerPhone}</span>
+                                </td>
+                                <td className="p-3">
+                                  <span className="block font-medium">{b.eventName}</span>
+                                  <span className="text-slate-500 text-[11px]">{b.eventDate} ({b.deliveryTime})</span>
+                                </td>
+                                <td className="p-3 text-slate-600">
+                                  {b.deliveryGovernorate} - {b.deliveryAddress.substring(0, 25)}...
+                                </td>
+                                <td className="p-3 font-bold text-slate-800">
+                                  {b.totalMealsCount} بوكس
+                                </td>
+                                <td className="p-3">
+                                  <strong className="text-[#7A0C2E] block">{b.totalDistributorPrice.toLocaleString()} ج</strong>
+                                  <span className="text-[11px] text-emerald-700">مدفوع: {b.paidAmount} ج</span>
+                                </td>
+                                <td className="p-3">
+                                  <select
+                                    value={b.status}
+                                    onChange={(e) => handleUpdateStatus(b.id, e.target.value as BookingStatus)}
+                                    className="text-[11px] font-bold bg-[#FAF8F5] border border-slate-300 rounded-md px-1.5 py-1 text-slate-800 focus:ring-1 focus:ring-[#7A0C2E]"
+                                  >
+                                    <option value="INITIAL">INITIAL (حجز مبدئي)</option>
+                                    <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (قيد المراجعة)</option>
+                                    <option value="CONFIRMED">CONFIRMED (مؤكد)</option>
+                                    <option value="IN_PRODUCTION">IN_PRODUCTION (بالمصنع)</option>
+                                    <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY (جاهز)</option>
+                                    <option value="DELIVERED">DELIVERED (تم التسليم)</option>
+                                    <option value="CANCELLED">CANCELLED (ملغي)</option>
+                                  </select>
+                                </td>
+                                <td className="p-3 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {(b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION') && (
+                                      <button
+                                        onClick={() => handleConfirmBooking(b.id)}
+                                        disabled={isConfirmingBookingId === b.id}
+                                        className="px-2 py-1 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-2xs"
+                                        title="تأكيد الحجز واعتماده رسمياً"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-[#DFC066]" />
+                                        <span>تأكيد</span>
+                                      </button>
+                                    )}
+
+                                    {b.status === 'CONFIRMED' && (
+                                      <button
+                                        onClick={() => handleOpenFactoryWhatsapp(b.id)}
+                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-2xs"
+                                        title="إرسال أمر تشغيل المصنع عبر واتساب"
+                                      >
+                                        <MessageCircle className="w-3.5 h-3.5" />
+                                        <span>واتساب المصنع</span>
+                                      </button>
+                                    )}
+
+                                    <button
+                                      onClick={() => handleOpenEditBooking(b)}
+                                      className="p-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg"
+                                      title="تعديل بيانات الحجز"
+                                    >
+                                      <Edit className="w-4 h-4 text-[#C59B27]" />
+                                    </button>
+
+                                    <button
+                                      onClick={() => setSelectedBooking(b)}
+                                      className="p-1.5 bg-[#7A0C2E]/10 hover:bg-[#7A0C2E]/20 text-[#7A0C2E] rounded-lg"
+                                      title="عرض تفاصيل الحجز وتسجيل المدفوعات"
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </button>
+
+                                    {b.isTest && (
+                                      <>
+                                        <button
+                                          onClick={() => setEditingTestBooking(b)}
+                                          className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg"
+                                          title="تعديل الحجز التجريبي"
+                                        >
+                                          <Edit className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          onClick={() => setDeletingTestBooking(b)}
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg"
+                                          title="حذف الحجز التجريبي"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  );
+                })()}
 
               </div>
             )}
@@ -1581,31 +2247,57 @@ APP_URL="https://celebre-eg.com"`}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {(selectedBooking.status === 'INITIAL' || selectedBooking.status === 'PENDING_CONFIRMATION') && (
+                    <button
+                      onClick={() => handleConfirmBooking(selectedBooking.id)}
+                      disabled={isConfirmingBookingId === selectedBooking.id}
+                      className="min-h-[44px] px-5 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 transition-all disabled:opacity-50"
+                      title="تأكيد واعتماد الحجز رسمياً"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-[#DFC066]" />
+                      <span>{isConfirmingBookingId === selectedBooking.id ? 'جاري الاعتماد...' : 'تأكيد الحجز (اعتماد رسمي)'}</span>
+                    </button>
+                  )}
+
+                  {selectedBooking.status === 'CONFIRMED' && (
+                    <button
+                      onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
+                      disabled={isGeneratingWhatsapp}
+                      className="min-h-[44px] px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-colors"
+                      title="إرسال أمر تشغيل للمصنع عبر واتساب"
+                    >
+                      <MessageCircle className="w-4 h-4 text-emerald-100" />
+                      <span>{isGeneratingWhatsapp ? 'جاري التجهيز...' : 'إرسال أمر تشغيل للمصنع عبر واتساب'}</span>
+                    </button>
+                  )}
+
+                  {selectedBooking.status !== 'INITIAL' && selectedBooking.status !== 'PENDING_CONFIRMATION' && selectedBooking.status !== 'CONFIRMED' && (
+                    <button
+                      onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
+                      disabled={isGeneratingWhatsapp}
+                      className="min-h-[44px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
+                      title="أمر تشغيل المصنع عبر واتساب"
+                    >
+                      <MessageCircle className="w-4 h-4 text-emerald-200" />
+                      <span>أمر المصنع عبر واتساب</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => handleOpenEditBooking(selectedBooking)}
-                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
+                    className="min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
                   >
                     <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
                     <span>تعديل بيانات وبنود الحجز</span>
                   </button>
 
                   <button
-                    onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
-                    disabled={isGeneratingWhatsapp}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 disabled:opacity-50 transition-colors"
-                    title="تجهيز رسالة واتساب الرسمية للمصنع"
-                  >
-                    <MessageCircle className="w-4 h-4 text-emerald-100" />
-                    <span>{isGeneratingWhatsapp ? 'جاري التجهيز...' : 'تجهيز طلب المصنع عبر واتساب'}</span>
-                  </button>
-
-                  <button
                     onClick={() => handleOpenFactoryReview(selectedBooking.id)}
                     disabled={isLoadingFactoryPreview}
-                    className="px-4 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+                    className="min-h-[44px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
                   >
-                    <Package className="w-4 h-4 text-[#DFC066]" />
-                    <span>{isLoadingFactoryPreview ? 'جاري التحضير...' : 'معاينة أمر المصنع'}</span>
+                    <Package className="w-4 h-4 text-slate-600" />
+                    <span>{isLoadingFactoryPreview ? 'جاري التحضير...' : 'معاينة تذكرة المصنع'}</span>
                   </button>
                 </div>
               </div>
@@ -1862,7 +2554,7 @@ APP_URL="https://celebre-eg.com"`}
                           </select>
                         </div>
 
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => {
@@ -1870,9 +2562,10 @@ APP_URL="https://celebre-eg.com"`}
                               updated[idx].quantity = Math.max(1, updated[idx].quantity - 5);
                               setEditItems(updated);
                             }}
-                            className="p-1 rounded bg-slate-100 hover:bg-slate-200"
+                            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 transition-colors"
+                            aria-label="إنقاص الكمية 5"
                           >
-                            <Minus className="w-3 h-3 text-slate-600" />
+                            <Minus className="w-4 h-4 text-slate-700" />
                           </button>
                           <input
                             type="number"
@@ -1883,7 +2576,7 @@ APP_URL="https://celebre-eg.com"`}
                               updated[idx].quantity = Math.max(1, parseInt(e.target.value) || 1);
                               setEditItems(updated);
                             }}
-                            className="w-14 text-center font-bold border rounded px-1 py-1 text-xs"
+                            className="w-16 h-10 text-center font-bold border rounded-xl px-1 text-sm bg-white"
                           />
                           <button
                             type="button"
@@ -1892,11 +2585,12 @@ APP_URL="https://celebre-eg.com"`}
                               updated[idx].quantity += 5;
                               setEditItems(updated);
                             }}
-                            className="p-1 rounded bg-slate-100 hover:bg-slate-200"
+                            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 transition-colors"
+                            aria-label="زيادة الكمية 5"
                           >
-                            <Plus className="w-3 h-3 text-slate-600" />
+                            <Plus className="w-4 h-4 text-slate-700" />
                           </button>
-                          <span className="text-[11px] text-slate-400">بوكس</span>
+                          <span className="text-[11px] font-bold text-slate-500">بوكس</span>
                         </div>
 
                         <div>
@@ -1907,7 +2601,7 @@ APP_URL="https://celebre-eg.com"`}
                               updated[idx].drinkOption = e.target.value as DrinkModification;
                               setEditItems(updated);
                             }}
-                            className="px-2 py-1 border rounded-lg text-[11px] bg-slate-50 font-semibold"
+                            className="px-2.5 py-2 border rounded-xl text-xs bg-slate-50 font-semibold"
                           >
                             <option value="standard">عصير بخيرة القياسي</option>
                             <option value="no_juice">بدون عصير (-5 ج)</option>
@@ -1921,7 +2615,7 @@ APP_URL="https://celebre-eg.com"`}
                             onClick={() => {
                               setEditItems(editItems.filter((_, i) => i !== idx));
                             }}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-rose-600 rounded-xl"
                             title="حذف هذا الصنف"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -1935,7 +2629,7 @@ APP_URL="https://celebre-eg.com"`}
                   {(() => {
                     const totalCount = editItems.reduce((acc, it) => acc + Math.max(1, Number(it.quantity) || 0), 0);
                     return (
-                      <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                      <div className={`p-3 rounded-2xl border flex items-center justify-between text-xs ${
                         totalCount >= 50
                           ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                           : 'bg-amber-50 border-amber-300 text-amber-900'
@@ -1952,7 +2646,7 @@ APP_URL="https://celebre-eg.com"`}
                               : `مجموع الوجبات: ${totalCount} وجبة. تنبيه: الحد الأدنى 50 وجبة (متبقي ${50 - totalCount} وجبة).`}
                           </span>
                         </div>
-                        <span className="font-mono font-bold text-xs">
+                        <span className="font-mono font-bold text-xs bg-white/80 px-2 py-1 rounded-lg">
                           {totalCount} / 50
                         </span>
                       </div>
@@ -1991,21 +2685,32 @@ APP_URL="https://celebre-eg.com"`}
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-2 border-t">
+                <div className="flex flex-col-reverse sm:flex-row justify-end gap-2.5 pt-3 border-t">
                   <button
                     type="button"
                     onClick={() => setIsEditBookingModalOpen(false)}
-                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                    className="min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl transition-colors"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={isSavingBookingEdits}
-                    className="px-6 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold rounded-xl shadow-md transition-colors disabled:opacity-50"
+                    className="min-h-[44px] px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow transition-colors disabled:opacity-50"
                   >
-                    {isSavingBookingEdits ? 'جاري الحفظ وإعادة الحساب...' : 'حفظ التعديلات في قاعدة البيانات'}
+                    {isSavingBookingEdits ? 'جاري الحفظ...' : 'حفظ التعديلات فقط'}
                   </button>
+                  {(selectedBooking?.status === 'INITIAL' || selectedBooking?.status === 'PENDING_CONFIRMATION') && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleSaveBookingEdits(e, true)}
+                      disabled={isSavingBookingEdits}
+                      className="min-h-[44px] px-6 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>حفظ واعتماد الحجز (تأكيد)</span>
+                    </button>
+                  )}
                 </div>
               </form>
             </div>

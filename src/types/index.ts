@@ -81,6 +81,8 @@ export interface FactoryOrder {
     specialInstructions?: string;
   }[];
   packagingNotes: string;
+  sentBy?: string;
+  sentAt?: string;
   createdAt: string;
   updatedAt: string;
 }
