@@ -613,9 +613,16 @@ apiRouter.get('/admin/bookings/:id', requireAuth, async (req: AuthenticatedReque
 apiRouter.patch('/admin/bookings/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const { status, statusNotes, ...otherUpdates } = req.body;
 
-    const updated = await db.updateBooking(id, updates, req.user?.name || 'الإدارة');
+    let updated = null;
+    if (status) {
+      updated = await db.updateBookingStatus(id, status, req.user?.name || req.user?.username || 'الإدارة', statusNotes);
+    }
+    if (Object.keys(otherUpdates).length > 0) {
+      updated = await db.updateBooking(id, otherUpdates, req.user?.name || req.user?.username || 'الإدارة');
+    }
+
     if (!updated) {
       res.status(404).json({ error: 'الحجز غير موجود' });
       return;
@@ -623,33 +630,81 @@ apiRouter.patch('/admin/bookings/:id', requireAuth, requireRole(['super_admin', 
 
     res.json({ success: true, booking: updated });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// Record payment
-apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+// Dedicated Booking Status Change Endpoint with Audit Logging
+apiRouter.post('/admin/bookings/:id/status', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, notes, receiptNumber } = req.body;
+    const { status, statusNotes } = req.body;
 
-    if (!amount || Number(amount) <= 0) {
-      res.status(400).json({ error: 'يرجى إدخال مبلغ صحيح' });
+    if (!status) {
+      res.status(400).json({ error: 'يرجى تحديد حالة الحجز الجديدة' });
       return;
     }
 
-    const payment = await db.addPayment({
+    const updated = await db.updateBookingStatus(
+      id,
+      status,
+      req.user?.name || req.user?.username || 'الإدارة',
+      statusNotes
+    );
+
+    res.json({ success: true, booking: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Record Payment with Strict Validations and Auto-Calculated Balances
+apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, method, date, notes, receiptNumber, allowOverpayment } = req.body;
+
+    if (!amount || Number(amount) <= 0) {
+      res.status(400).json({ error: 'قيمة الدفعة يجب أن تكون أكبر من الصفر' });
+      return;
+    }
+
+    const result = await db.addPayment({
       bookingId: id,
       amount: Number(amount),
       method: method || 'cash',
+      date,
       notes,
       receiptNumber,
-    }, req.user?.name || 'الإدارة');
+      allowOverpayment: Boolean(allowOverpayment),
+    }, req.user?.name || req.user?.username || 'الإدارة');
 
-    const updatedBooking = await db.getBookingById(id);
-    res.json({ success: true, payment, booking: updatedBooking });
+    res.json({ success: true, payment: result.payment, booking: result.booking });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Cancel / Reverse a Payment (Soft-cancel with audit trail, never hard deleted)
+apiRouter.post('/admin/payments/:id/cancel', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      res.status(400).json({ error: 'يرجى تقديم سبب إلغاء أو عكس الدفعة المالية لتوثيقها في سجل التدقيق' });
+      return;
+    }
+
+    const result = await db.cancelPayment(
+      id,
+      reason.trim(),
+      req.user?.name || req.user?.username || 'الإدارة'
+    );
+
+    res.json({ success: true, payment: result.payment, booking: result.booking });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });
 

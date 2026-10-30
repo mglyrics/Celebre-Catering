@@ -33,7 +33,9 @@ import {
   X,
   Menu,
   ChevronRight,
-  Copy
+  Copy,
+  RotateCcw,
+  CreditCard
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -81,8 +83,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentRecord['method']>('vodafone_cash');
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentRecord['method']>('instapay');
+  const [paymentReceiptNumber, setPaymentReceiptNumber] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
+  const [allowOverpayment, setAllowOverpayment] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  // Status Change Confirmation Modal State
+  const [statusConfirmModal, setStatusConfirmModal] = useState<{
+    booking: Booking;
+    newStatus: BookingStatus;
+  } | null>(null);
+  const [statusChangeNote, setStatusChangeNote] = useState('');
+  const [isUpdatingBookingStatus, setIsUpdatingBookingStatus] = useState(false);
+  const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
+
+  // Payment Cancellation / Reversal Modal State
+  const [cancellingPayment, setCancellingPayment] = useState<{
+    payment: PaymentRecord;
+    booking: Booking;
+  } | null>(null);
+  const [cancelPaymentReason, setCancelPaymentReason] = useState('');
+  const [isCancellingPayment, setIsCancellingPayment] = useState(false);
+  const [cancelPaymentError, setCancelPaymentError] = useState<string | null>(null);
 
   // Password Change State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -478,32 +503,137 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleUpdateStatus = async (bookingId: string, newStatus: BookingStatus) => {
+  const getBookingPaymentStatusInfo = (b: Booking): { label: string; bg: string; text: string; border: string; dot: string } => {
+    const total = Number(b.totalDistributorPrice) || 0;
+    const paid = Number(b.paidAmount) || 0;
+    const hasCancelled = (b.payments || []).some(p => p.status === 'CANCELLED' || (p.notes && p.notes.includes('[ملغاة')));
+
+    if (paid >= total && total > 0) {
+      return {
+        label: 'مدفوع بالكامل',
+        bg: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+        text: 'text-emerald-700',
+        border: 'border-emerald-300',
+        dot: 'bg-emerald-600',
+      };
+    }
+    if (paid > 0 && paid < total) {
+      return {
+        label: 'مدفوع جزئياً',
+        bg: 'bg-amber-50 text-amber-900 border-amber-300',
+        text: 'text-amber-700',
+        border: 'border-amber-300',
+        dot: 'bg-amber-500',
+      };
+    }
+    if (paid === 0 && hasCancelled) {
+      return {
+        label: 'تسوية / مسترد',
+        bg: 'bg-purple-50 text-purple-900 border-purple-300',
+        text: 'text-purple-700',
+        border: 'border-purple-300',
+        dot: 'bg-purple-600',
+      };
+    }
+    return {
+      label: 'غير مدفوع',
+      bg: 'bg-rose-50 text-rose-800 border-rose-300',
+      text: 'text-rose-700',
+      border: 'border-rose-300',
+      dot: 'bg-rose-500',
+    };
+  };
+
+  const getStatusInfo = (status: string) => {
+    switch (status) {
+      case 'INITIAL':
+        return { label: 'حجز مبدئي', bg: 'bg-amber-100 text-amber-900 border-amber-300', dot: 'bg-amber-500' };
+      case 'PENDING_CONFIRMATION':
+        return { label: 'قيد المراجعة', bg: 'bg-orange-100 text-orange-900 border-orange-300', dot: 'bg-orange-500' };
+      case 'CONFIRMED':
+        return { label: 'مؤكد ومُعتمد', bg: 'bg-emerald-100 text-emerald-900 border-emerald-300', dot: 'bg-emerald-600' };
+      case 'IN_PRODUCTION':
+        return { label: 'بالمصنع (تجهيز)', bg: 'bg-blue-100 text-blue-900 border-blue-300', dot: 'bg-blue-600' };
+      case 'READY_FOR_DELIVERY':
+        return { label: 'جاهز للشحن', bg: 'bg-purple-100 text-purple-900 border-purple-300', dot: 'bg-purple-600' };
+      case 'DELIVERED':
+        return { label: 'تم التسليم', bg: 'bg-teal-100 text-teal-900 border-teal-300', dot: 'bg-teal-600' };
+      case 'CANCELLED':
+        return { label: 'ملغي', bg: 'bg-rose-100 text-rose-900 border-rose-300', dot: 'bg-rose-500' };
+      default:
+        return { label: status, bg: 'bg-slate-100 text-slate-800 border-slate-300', dot: 'bg-slate-400' };
+    }
+  };
+
+  const handlePromptStatusChange = (booking: Booking, newStatus: BookingStatus) => {
+    if (booking.status === newStatus) return;
+    setStatusConfirmModal({ booking, newStatus });
+    setStatusChangeNote('');
+    setStatusChangeError(null);
+  };
+
+  const handleConfirmStatusChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!statusConfirmModal) return;
+
+    const { booking, newStatus } = statusConfirmModal;
+    if (newStatus === 'CONFIRMED' && booking.totalMealsCount < 50) {
+      setStatusChangeError(`الحد الأدنى للطلب 50 وجبة. إجمالي وجبات الحجز (${booking.totalMealsCount} وجبة) يقل عن الحد الأدنى، يرجى تعديل الكميات أولاً.`);
+      return;
+    }
+
+    setIsUpdatingBookingStatus(true);
+    setStatusChangeError(null);
+
     try {
-      const res = await fetch(`/api/admin/bookings/${bookingId}`, {
-        method: 'PATCH',
+      const res = await fetch(`/api/admin/bookings/${booking.id}/status`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({
+          status: newStatus,
+          statusNotes: statusChangeNote.trim() || undefined,
+        }),
       });
 
-      if (res.ok) {
-        loadAllData();
-        if (selectedBooking && selectedBooking.id === bookingId) {
-          const updated = await res.json();
-          setSelectedBooking(updated.booking);
-        }
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تغيير حالة الحجز');
       }
-    } catch (err) {
-      console.error('Error updating status:', err);
+
+      if (selectedBooking && selectedBooking.id === booking.id) {
+        setSelectedBooking(data.booking);
+      }
+      setStatusConfirmModal(null);
+      setStatusChangeNote('');
+      loadAllData();
+    } catch (err: any) {
+      setStatusChangeError(err.message || 'حدث خطأ أثناء تغيير الحالة');
+    } finally {
+      setIsUpdatingBookingStatus(false);
     }
   };
 
   const handleAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBooking || !paymentAmount) return;
+
+    const numAmount = parseFloat(paymentAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setPaymentError('قيمة الدفعة يجب أن تكون أكبر من الصفر');
+      return;
+    }
+
+    if (numAmount > selectedBooking.remainingAmount && !allowOverpayment) {
+      setPaymentError(`قيمة الدفعة (${numAmount} ج) تتجاوز المبلغ المتبقي (${selectedBooking.remainingAmount} ج). إذا كانت دفعة تسوية خاصة أو زيادة مقصودة، يرجى تفعيل خيار "سماح بمبلغ تسوية زائد".`);
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    setPaymentError(null);
 
     try {
       const res = await fetch(`/api/admin/bookings/${selectedBooking.id}/payments`, {
@@ -513,22 +643,73 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          amount: parseFloat(paymentAmount),
+          amount: numAmount,
           method: paymentMethod,
+          date: paymentDate || new Date().toISOString().split('T')[0],
           notes: paymentNotes,
+          receiptNumber: paymentReceiptNumber,
+          allowOverpayment,
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedBooking(data.booking);
-        setIsPaymentModalOpen(false);
-        setPaymentAmount('');
-        setPaymentNotes('');
-        loadAllData();
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تسجيل الدفعة');
       }
-    } catch (err) {
-      console.error('Error adding payment:', err);
+
+      setSelectedBooking(data.booking);
+      setIsPaymentModalOpen(false);
+      setPaymentAmount('');
+      setPaymentNotes('');
+      setPaymentReceiptNumber('');
+      setAllowOverpayment(false);
+      loadAllData();
+    } catch (err: any) {
+      setPaymentError(err.message || 'حدث خطأ أثناء تسجيل الدفعة');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleConfirmCancelPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellingPayment || !cancelPaymentReason.trim()) {
+      setCancelPaymentError('يرجى تحديد سبب إلغاء أو عكس الدفعة المالية');
+      return;
+    }
+
+    setIsCancellingPayment(true);
+    setCancelPaymentError(null);
+
+    try {
+      const res = await fetch(`/api/admin/payments/${cancellingPayment.payment.id}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          reason: cancelPaymentReason.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل إلغاء الدفعة');
+      }
+
+      if (selectedBooking && selectedBooking.id === data.booking.id) {
+        setSelectedBooking(data.booking);
+      }
+      setCancellingPayment(null);
+      setCancelPaymentReason('');
+      loadAllData();
+    } catch (err: any) {
+      setCancelPaymentError(err.message || 'حدث خطأ أثناء إلغاء الدفعة');
+    } finally {
+      setIsCancellingPayment(false);
     }
   };
 
@@ -1399,33 +1580,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     );
                   }
 
-                  const getStatusInfo = (status: string) => {
-                    switch (status) {
-                      case 'INITIAL':
-                        return { label: 'حجز مبدئي', bg: 'bg-amber-100 text-amber-900 border-amber-300', dot: 'bg-amber-500' };
-                      case 'PENDING_CONFIRMATION':
-                        return { label: 'قيد المراجعة', bg: 'bg-orange-100 text-orange-900 border-orange-300', dot: 'bg-orange-500' };
-                      case 'CONFIRMED':
-                        return { label: 'مؤكد ومُعتمد', bg: 'bg-emerald-100 text-emerald-900 border-emerald-300', dot: 'bg-emerald-600' };
-                      case 'IN_PRODUCTION':
-                        return { label: 'بالمصنع (تجهيز)', bg: 'bg-blue-100 text-blue-900 border-blue-300', dot: 'bg-blue-600' };
-                      case 'READY_FOR_DELIVERY':
-                        return { label: 'جاهز للشحن', bg: 'bg-purple-100 text-purple-900 border-purple-300', dot: 'bg-purple-600' };
-                      case 'DELIVERED':
-                        return { label: 'تم التسليم', bg: 'bg-teal-100 text-teal-900 border-teal-300', dot: 'bg-teal-600' };
-                      case 'CANCELLED':
-                        return { label: 'ملغي', bg: 'bg-rose-100 text-rose-900 border-rose-300', dot: 'bg-rose-500' };
-                      default:
-                        return { label: status, bg: 'bg-slate-100 text-slate-800 border-slate-300', dot: 'bg-slate-400' };
-                    }
-                  };
-
                   return (
                     <>
                       {/* 1. Mobile Cards View (Hidden on Desktop) */}
                       <div className="block md:hidden space-y-3.5">
                         {filtered.map(b => {
                           const statusInfo = getStatusInfo(b.status);
+                          const paymentStatus = getBookingPaymentStatusInfo(b);
                           const isInitialOrPending = b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION';
                           const isConfirmed = b.status === 'CONFIRMED';
                           const phoneForWa = (b.customerPhone || '').replace(/\D/g, '').replace(/^20/, '');
@@ -1458,12 +1619,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   </span>
                                 </div>
 
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5 justify-end">
                                   {b.isTest && (
                                     <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full border border-purple-200">
                                       تجريبي
                                     </span>
                                   )}
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${paymentStatus.bg}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${paymentStatus.dot}`} />
+                                    <span>{paymentStatus.label}</span>
+                                  </span>
                                   <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${statusInfo.bg}`}>
                                     <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
                                     <span>{statusInfo.label}</span>
@@ -1652,7 +1817,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   <span className="text-[11px] text-slate-500 shrink-0 font-bold">تغيير الحالة:</span>
                                   <select
                                     value={b.status}
-                                    onChange={(e) => handleUpdateStatus(b.id, e.target.value as BookingStatus)}
+                                    onChange={(e) => handlePromptStatusChange(b, e.target.value as BookingStatus)}
                                     className="flex-1 min-h-[40px] text-xs font-bold bg-[#FAF8F5] border border-slate-300 rounded-xl px-2.5 py-1.5 text-slate-800 focus:ring-1 focus:ring-[#7A0C2E]"
                                   >
                                     <option value="INITIAL">INITIAL (حجز مبدئي)</option>
@@ -1745,12 +1910,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </td>
                                 <td className="p-3">
                                   <strong className="text-[#7A0C2E] block">{b.totalDistributorPrice.toLocaleString()} ج</strong>
-                                  <span className="text-[11px] text-emerald-700">مدفوع: {b.paidAmount} ج</span>
+                                  <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
+                                    <span className="text-emerald-700">مدفوع: {b.paidAmount} ج</span>
+                                    <span className="text-slate-300">|</span>
+                                    <span className="text-rose-700">متبقي: {b.remainingAmount} ج</span>
+                                  </div>
+                                  <div className="mt-1">
+                                    {(() => {
+                                      const pInfo = getBookingPaymentStatusInfo(b);
+                                      return (
+                                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${pInfo.bg}`}>
+                                          <span className={`w-1 h-1 rounded-full ${pInfo.dot}`} />
+                                          <span>{pInfo.label}</span>
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
                                 </td>
                                 <td className="p-3">
                                   <select
                                     value={b.status}
-                                    onChange={(e) => handleUpdateStatus(b.id, e.target.value as BookingStatus)}
+                                    onChange={(e) => handlePromptStatusChange(b, e.target.value as BookingStatus)}
                                     className="text-[11px] font-bold bg-[#FAF8F5] border border-slate-300 rounded-md px-1.5 py-1 text-slate-800 focus:ring-1 focus:ring-[#7A0C2E]"
                                   >
                                     <option value="INITIAL">INITIAL (حجز مبدئي)</option>
@@ -2149,71 +2329,279 @@ APP_URL="https://celebre-eg.com"`}
         {/* Selected Booking Modal */}
         {selectedBooking && (
           <div className="fixed inset-0 z-60 bg-black/60 flex items-center justify-center p-3">
-            <div className="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
-              <div className="flex items-center justify-between border-b pb-3">
-                <div>
-                  <span className="font-mono font-bold text-[#7A0C2E] text-lg">{selectedBooking.bookingCode}</span>
-                  <span className="text-xs text-slate-500 mr-2">(v{selectedBooking.version})</span>
-                </div>
-                <button onClick={() => setSelectedBooking(null)} className="p-1 rounded-lg hover:bg-slate-100">
-                  <X className="w-5 h-5 text-slate-500" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-xs bg-[#FAF8F5] p-3 rounded-xl border">
-                <div>العميل: <strong>{selectedBooking.customerName}</strong></div>
-                <div>الموبايل: <strong dir="ltr">{selectedBooking.customerPhone}</strong></div>
-                <div>المناسبة: <strong>{selectedBooking.eventName}</strong></div>
-                <div>الموعد: <strong>{selectedBooking.eventDate} ({selectedBooking.deliveryTime})</strong></div>
-                <div className="col-span-2">العنوان: <span>{selectedBooking.deliveryGovernorate} - {selectedBooking.deliveryAddress}</span></div>
-              </div>
-
-              {/* Financial & Payments Box */}
-              <div className="p-3 bg-white rounded-xl border space-y-2 text-xs">
-                <div className="flex justify-between items-center font-bold">
-                  <span>إجمالي سعر الموزع: <span className="text-[#7A0C2E]">{selectedBooking.totalDistributorPrice} ج</span></span>
-                  <span>المدفوع: <span className="text-emerald-700">{selectedBooking.paidAmount} ج</span></span>
-                  <span>المتبقي: <span className="text-rose-700">{selectedBooking.remainingAmount} ج</span></span>
-                </div>
-
-                <button
-                  onClick={() => setIsPaymentModalOpen(true)}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors"
-                >
-                  + تسجيل دفعة مالية جديدة
-                </button>
-
-                {selectedBooking.payments && selectedBooking.payments.length > 0 && (
-                  <div className="space-y-1 pt-2 border-t">
-                    <span className="font-bold text-slate-700 block">سجل المدفوعات:</span>
-                    {selectedBooking.payments.map(p => (
-                      <div key={p.id} className="flex justify-between text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded">
-                        <span>{p.date} - {p.method} {p.notes ? `(${p.notes})` : ''}</span>
-                        <strong className="text-emerald-700">{p.amount} ج</strong>
-                      </div>
-                    ))}
+            <div className="bg-white w-full max-w-3xl rounded-3xl p-5 sm:p-7 shadow-2xl max-h-[92vh] overflow-y-auto space-y-5 text-right" dir="rtl">
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-2.5 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-2xl">
+                    <CreditCard className="w-6 h-6" />
                   </div>
-                )}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-black text-[#7A0C2E] text-xl tracking-tight">{selectedBooking.bookingCode}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">v{selectedBooking.version}</span>
+                      {selectedBooking.isTest && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold border border-amber-300">
+                          حجز تجريبي
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">تفاصيل الحجز وإدارة الحالة والتحصيلات المالية</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Status Dropdown inside modal header */}
+                  <div className="flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+                    <span className="text-xs font-bold text-slate-600 px-1">الحالة:</span>
+                    <select
+                      value={selectedBooking.status}
+                      onChange={(e) => handlePromptStatusChange(selectedBooking, e.target.value as BookingStatus)}
+                      className={`text-xs font-black rounded-xl px-2.5 py-1.5 border focus:outline-none transition-colors cursor-pointer ${
+                        getStatusInfo(selectedBooking.status).bg
+                      }`}
+                    >
+                      <option value="INITIAL">حجز مبدئي</option>
+                      <option value="PENDING_CONFIRMATION">قيد المراجعة</option>
+                      <option value="CONFIRMED">مؤكد ومعتمد</option>
+                      <option value="IN_PRODUCTION">بالمصنع قيد التجهيز</option>
+                      <option value="READY_FOR_DELIVERY">جاهز للتسليم</option>
+                      <option value="DELIVERED">تم التسليم النهائي</option>
+                      <option value="CANCELLED">ملغي</option>
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedBooking(null)}
+                    className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Customer & Event Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs bg-[#FAF8F5] p-4 rounded-2xl border border-slate-200">
+                <div className="space-y-0.5">
+                  <span className="text-slate-500 block">اسم العميل:</span>
+                  <strong className="text-slate-900 text-sm font-black">{selectedBooking.customerName}</strong>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-slate-500 block">رقم الهاتف:</span>
+                  <strong className="text-slate-900 font-mono text-sm" dir="ltr">{selectedBooking.customerPhone}</strong>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-slate-500 block">المناسبة وموعد التسليم:</span>
+                  <strong className="text-slate-900">{selectedBooking.eventName}</strong>
+                  <p className="text-[11px] text-slate-600 font-semibold">{selectedBooking.eventDate} ({selectedBooking.deliveryTime})</p>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-slate-500 block">عنوان التوصيل:</span>
+                  <span className="text-slate-800 font-semibold">{selectedBooking.deliveryGovernorate} - {selectedBooking.deliveryAddress}</span>
+                </div>
+              </div>
+
+              {/* SECTION: Financials and Payments (المدفوعات والتحصيلات) */}
+              <div className="p-4 sm:p-5 bg-white rounded-2xl border-2 border-[#7A0C2E]/15 shadow-sm space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-slate-900 text-sm sm:text-base">المدفوعات والتحصيلات المالية</span>
+                    {(() => {
+                      const payInfo = getBookingPaymentStatusInfo(selectedBooking);
+                      return (
+                        <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${payInfo.bg}`}>
+                          {payInfo.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setPaymentAmount('');
+                      setPaymentNotes('');
+                      setPaymentReceiptNumber('');
+                      setAllowOverpayment(false);
+                      setPaymentError(null);
+                      setIsPaymentModalOpen(true);
+                    }}
+                    className="min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>تسجيل دفعة مالية جديدة</span>
+                  </button>
+                </div>
+
+                {/* 4 Financial Metric Cards */}
+                {(() => {
+                  const total = selectedBooking.totalDistributorPrice || 0;
+                  const paid = selectedBooking.paidAmount || 0;
+                  const remaining = selectedBooking.remainingAmount ?? (total - paid);
+                  const pct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                          <span className="text-[11px] font-semibold text-slate-500 block mb-1">إجمالي الحجز (الموزع)</span>
+                          <span className="text-sm sm:text-base font-black text-[#7A0C2E] font-mono">
+                            {total.toLocaleString('ar-EG')} ج
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+                          <span className="text-[11px] font-semibold text-emerald-800 block mb-1">المسدّد فعلياً</span>
+                          <span className="text-sm sm:text-base font-black text-emerald-700 font-mono">
+                            {paid.toLocaleString('ar-EG')} ج
+                          </span>
+                        </div>
+
+                        <div className={`p-3 rounded-xl border ${remaining > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                          <span className={`text-[11px] font-semibold block mb-1 ${remaining > 0 ? 'text-rose-800' : 'text-slate-500'}`}>
+                            المتبقي على العميل
+                          </span>
+                          <span className={`text-sm sm:text-base font-black font-mono ${remaining > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
+                            {remaining.toLocaleString('ar-EG')} ج
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[11px] font-semibold text-amber-900">نسبة السداد</span>
+                            <span className="text-xs font-black text-amber-900 font-mono">{pct}%</span>
+                          </div>
+                          <div className="w-full bg-amber-200/70 h-2 rounded-full overflow-hidden">
+                            <div
+                              className="bg-[#DFC066] h-full rounded-full transition-all duration-300"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Payments History List */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-700">سجل المدفوعات والعمليات:</span>
+                    <span className="text-[11px] text-slate-400">
+                      ({selectedBooking.payments?.filter(p => p.status !== 'CANCELLED').length || 0} دفعة معتمدة)
+                    </span>
+                  </div>
+
+                  {(!selectedBooking.payments || selectedBooking.payments.length === 0) ? (
+                    <div className="p-4 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-center text-xs text-slate-500">
+                      لم يتم تسجيل أي دفعات مالية لهذا الحجز حتى الآن. يمكنك تسجيل دفعة مبدئية أو تحصيل جزئي بالضغط على «تسجيل دفعة مالية جديدة».
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {selectedBooking.payments.map((p) => {
+                        const isCancelled = p.status === 'CANCELLED';
+                        const methodArabic: Record<string, string> = {
+                          instapay: 'إنستاباي (InstaPay)',
+                          vodafone_cash: 'فودافون كاش (Vodafone Cash)',
+                          cash: 'نقداً (كاش)',
+                          bank_transfer: 'تحويل بنكي',
+                          other: 'طريقة دفع أخرى'
+                        };
+
+                        return (
+                          <div
+                            key={p.id}
+                            className={`p-3 rounded-xl border text-xs transition-all ${
+                              isCancelled
+                                ? 'bg-slate-100/70 border-slate-300 opacity-60'
+                                : 'bg-emerald-50/40 border-emerald-200'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`font-mono font-black text-sm ${isCancelled ? 'line-through text-slate-500' : 'text-emerald-800'}`}>
+                                  {p.amount.toLocaleString('ar-EG')} ج
+                                </span>
+                                <span className="text-slate-600 font-semibold">
+                                  ({methodArabic[p.method] || p.method})
+                                </span>
+                                {isCancelled ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                                    ملغاة / مستردة
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                    معتمدة
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-slate-500 font-mono">{p.date}</span>
+                                {!isCancelled && (
+                                  <button
+                                    onClick={() => {
+                                      setCancellingPayment({ payment: p, booking: selectedBooking });
+                                      setCancelPaymentReason('');
+                                      setCancelPaymentError(null);
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="إلغاء وعكس الدفعة"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                    <span>إلغاء وعكس</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
+                              {p.receiptNumber && (
+                                <span>رقم الإيصال/المرجع: <strong className="font-mono text-slate-800">{p.receiptNumber}</strong></span>
+                              )}
+                              {p.recordedBy && (
+                                <span>المسؤول: <strong className="text-slate-800">{p.recordedBy}</strong></span>
+                              )}
+                              {p.notes && !isCancelled && (
+                                <span className="text-slate-500">ملاحظات: {p.notes}</span>
+                              )}
+                            </div>
+
+                            {isCancelled && (
+                              <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-[11px] text-rose-700 bg-rose-50/50 p-1.5 rounded">
+                                <strong>سبب الإلغاء:</strong> {p.cancelReason || p.notes || 'إلغاء إداري'}
+                                {p.cancelledBy && <span className="mr-2 text-slate-500">| بواسطة: {p.cancelledBy}</span>}
+                                {p.cancelledAt && <span className="mr-2 text-slate-500">| في: {new Date(p.cancelledAt).toLocaleString('ar-EG')}</span>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Items List */}
               <div className="space-y-2 text-xs">
-                <span className="font-bold text-slate-700">الوجبات المطلوبة:</span>
-                {selectedBooking.items.map((it, idx) => (
-                  <div key={idx} className="p-2 bg-[#FAF8F5] rounded-lg border flex justify-between items-center">
-                    <div>
-                      <strong className="text-[#7A0C2E]">{it.mealCode}</strong> ({it.quantity} وجبة) - {it.drinkOption}
-                      <p className="text-[11px] text-slate-600">{it.ingredients}</p>
+                <span className="font-bold text-slate-700">الوجبات المطلوبة ({selectedBooking.items.reduce((s, it) => s + it.quantity, 0)} وجبة):</span>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {selectedBooking.items.map((it, idx) => (
+                    <div key={idx} className="p-2.5 bg-[#FAF8F5] rounded-xl border border-slate-200 flex justify-between items-center">
+                      <div>
+                        <strong className="text-[#7A0C2E] text-sm">{it.mealCode}</strong> ({it.quantity} وجبة) - {it.drinkOption}
+                        <p className="text-[11px] text-slate-600 mt-0.5">{it.ingredients}</p>
+                      </div>
+                      <div className="text-left font-bold">
+                        <div className="text-slate-900 font-mono">{it.totalDistributorPrice?.toLocaleString('ar-EG')} ج</div>
+                        <div className="text-slate-400 text-[10px] font-mono">مصنع: {it.totalFactoryPrice?.toLocaleString('ar-EG') || 0} ج</div>
+                      </div>
                     </div>
-                    <div className="text-left font-bold">
-                      <div>موزع: {it.totalDistributorPrice} ج</div>
-                      <div className="text-slate-400 text-[10px]">مصنع: {it.totalFactoryPrice || 0} ج</div>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              {/* Modal Footer Actions */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
                 <div className="flex items-center gap-2">
                   {selectedBooking.isTest && (
                     <>
@@ -2259,36 +2647,22 @@ APP_URL="https://celebre-eg.com"`}
                     </button>
                   )}
 
-                  {selectedBooking.status === 'CONFIRMED' && (
-                    <button
-                      onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
-                      disabled={isGeneratingWhatsapp}
-                      className="min-h-[44px] px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-colors"
-                      title="إرسال أمر تشغيل للمصنع عبر واتساب"
-                    >
-                      <MessageCircle className="w-4 h-4 text-emerald-100" />
-                      <span>{isGeneratingWhatsapp ? 'جاري التجهيز...' : 'إرسال أمر تشغيل للمصنع عبر واتساب'}</span>
-                    </button>
-                  )}
-
-                  {selectedBooking.status !== 'INITIAL' && selectedBooking.status !== 'PENDING_CONFIRMATION' && selectedBooking.status !== 'CONFIRMED' && (
-                    <button
-                      onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
-                      disabled={isGeneratingWhatsapp}
-                      className="min-h-[44px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
-                      title="أمر تشغيل المصنع عبر واتساب"
-                    >
-                      <MessageCircle className="w-4 h-4 text-emerald-200" />
-                      <span>أمر المصنع عبر واتساب</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleOpenFactoryWhatsapp(selectedBooking.id)}
+                    disabled={isGeneratingWhatsapp}
+                    className="min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50 transition-colors"
+                    title="أمر تشغيل المصنع عبر واتساب"
+                  >
+                    <MessageCircle className="w-4 h-4 text-emerald-100" />
+                    <span>أمر تشغيل المصنع (واتساب)</span>
+                  </button>
 
                   <button
                     onClick={() => handleOpenEditBooking(selectedBooking)}
                     className="min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs"
                   >
                     <Edit className="w-3.5 h-3.5 text-[#C59B27]" />
-                    <span>تعديل بيانات وبنود الحجز</span>
+                    <span>تعديل بيانات الحجز</span>
                   </button>
 
                   <button
@@ -2308,63 +2682,375 @@ APP_URL="https://celebre-eg.com"`}
         {/* Add Payment Modal */}
         {isPaymentModalOpen && selectedBooking && (
           <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
-            <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4">
-              <h4 className="font-bold text-sm text-[#7A0C2E]">تسجيل دفعة للحجز {selectedBooking.bookingCode}</h4>
-              <form onSubmit={handleAddPayment} className="space-y-3 text-xs">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right" dir="rtl">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+                    <Plus className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-[#7A0C2E]">تسجيل دفعة مالية جديدة</h4>
+                    <p className="text-[11px] text-slate-500 font-mono">الحجز: {selectedBooking.bookingCode}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Financial Quick Glance */}
+              {(() => {
+                const total = selectedBooking.totalDistributorPrice || 0;
+                const paid = selectedBooking.paidAmount || 0;
+                const rem = selectedBooking.remainingAmount ?? (total - paid);
+                return (
+                  <div className="p-3 bg-[#FAF8F5] rounded-xl border border-slate-200 text-xs flex justify-between items-center">
+                    <div>
+                      <span className="text-slate-500 block">إجمالي الحجز:</span>
+                      <strong className="text-slate-800 font-mono">{total.toLocaleString('ar-EG')} ج</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">المسدد سابقاً:</span>
+                      <strong className="text-emerald-700 font-mono">{paid.toLocaleString('ar-EG')} ج</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">المتبقي حالياً:</span>
+                      <strong className="text-rose-700 font-mono">{rem.toLocaleString('ar-EG')} ج</strong>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {paymentError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{paymentError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAddPayment} className="space-y-3.5 text-xs">
                 <div>
-                  <label className="block text-slate-700 mb-1">المبلغ المحصل (جنيه)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-700 font-bold">المبلغ المحصّل (جنيه مصري) *</label>
+                    {selectedBooking.remainingAmount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentAmount(String(selectedBooking.remainingAmount))}
+                        className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer"
+                      >
+                        سداد المتبقي بالكامل ({selectedBooking.remainingAmount} ج)
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="number"
                     required
                     min={1}
+                    step="any"
                     value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="مثال: 2000"
+                    onChange={(e) => {
+                      setPaymentAmount(e.target.value);
+                      setPaymentError(null);
+                    }}
+                    className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm font-mono font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    placeholder="مثال: 5000"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">طريقة السداد *</label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    >
+                      <option value="instapay">إنستاباي (InstaPay)</option>
+                      <option value="vodafone_cash">فودافون كاش (Vodafone Cash)</option>
+                      <option value="cash">نقداً (كاش)</option>
+                      <option value="bank_transfer">تحويل بنكي</option>
+                      <option value="other">طريقة أخرى</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">تاريخ التحصيل *</label>
+                    <input
+                      type="date"
+                      required
+                      value={paymentDate}
+                      onChange={(e) => setPaymentDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">رقم الإيصال أو المرجع البنكي / المحفظة</label>
+                  <input
+                    type="text"
+                    value={paymentReceiptNumber}
+                    onChange={(e) => setPaymentReceiptNumber(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs"
+                    placeholder="رقم مرجع التحويل أو إيصال السداد..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 mb-1">طريقة الدفع</label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value as any)}
-                    className="w-full px-3 py-2 border rounded-lg"
-                  >
-                    <option value="vodafone_cash">فودافون كاش (Vodafone Cash)</option>
-                    <option value="instapay">إنستاباي (InstaPay)</option>
-                    <option value="cash">نقداً (كاش)</option>
-                    <option value="bank_transfer">تحويل بنكي</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 mb-1">ملاحظات أو رقم الإيصال</label>
+                  <label className="block text-slate-700 font-bold mb-1">ملاحظات التحصيل (اختياري)</label>
                   <input
                     type="text"
                     value={paymentNotes}
                     onChange={(e) => setPaymentNotes(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="رقم العملية..."
+                    className="w-full px-3 py-2 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs"
+                    placeholder="عربون مبدئي، دفعة ثانية، تسوية ختامية..."
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-2">
+                {/* Overpayment override alert & checkbox */}
+                {(() => {
+                  const rem = selectedBooking.remainingAmount ?? 0;
+                  const entered = parseFloat(paymentAmount) || 0;
+                  if (entered > rem && rem >= 0) {
+                    return (
+                      <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 space-y-2">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>تنبيه: المبلغ المدخل ({entered} ج) يتجاوز المتبقي ({rem} ج)</span>
+                        </div>
+                        <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={allowOverpayment}
+                            onChange={(e) => setAllowOverpayment(e.target.checked)}
+                            className="mt-0.5 rounded text-amber-600 focus:ring-amber-500"
+                          />
+                          <span>أؤكد بصفتي مسؤول الإدارة الموافقة على تسجيل دفعة أكبر من المتبقي الإجمالي كاستثناء إداري.</span>
+                        </label>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                <div className="p-2.5 bg-slate-50 rounded-xl text-[11px] text-slate-500">
+                  <strong>ملاحظة هامة:</strong> تسجيل الدفعة سيحدّث المبالغ المسددة والمتبقية فوراً ويوثق العملية في سجل التدقيق (Audit Log)، ولن يقوم بتغيير حالة الحجز التشغيلية تلقائياً.
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t">
                   <button
                     type="button"
                     onClick={() => setIsPaymentModalOpen(false)}
-                    className="px-3 py-1.5 text-slate-600"
+                    className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-bold"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-emerald-600 text-white font-bold rounded-lg"
+                    disabled={isSubmittingPayment}
+                    className="min-h-[44px] px-6 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-black rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                   >
-                    حفظ الدفعة
+                    {isSubmittingPayment ? (
+                      <span>جاري التسجيل...</span>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>تأكيد تسجيل الدفعة</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Status Change Confirmation Modal */}
+        {statusConfirmModal && (
+          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right" dir="rtl">
+              <div className="flex items-center gap-3 border-b pb-3">
+                <div className="p-2.5 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-2xl">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-black text-base text-slate-900">تأكيد تغيير حالة الحجز</h4>
+                  <p className="text-xs text-slate-500 font-mono">الحجز: {statusConfirmModal.booking.bookingCode}</p>
+                </div>
+              </div>
+
+              {statusChangeError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{statusChangeError}</span>
+                </div>
+              )}
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">الحالة السابقة:</span>
+                  <span className={`px-2.5 py-0.5 rounded-full font-bold border ${getStatusInfo(statusConfirmModal.booking.status).bg}`}>
+                    {getStatusInfo(statusConfirmModal.booking.status).label}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-900 font-bold">الحالة الجديدة المطلوبة:</span>
+                  <span className={`px-2.5 py-0.5 rounded-full font-black border ${getStatusInfo(statusConfirmModal.newStatus).bg}`}>
+                    {getStatusInfo(statusConfirmModal.newStatus).label}
+                  </span>
+                </div>
+              </div>
+
+              {statusConfirmModal.newStatus === 'DELIVERED' && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 space-y-1">
+                  <strong>تأكيد التسليم النهائي:</strong>
+                  <p>تأكيد أن الطلب تم تسليمه للعميل بالكامل في موقعه واستلامه بنجاح.</p>
+                </div>
+              )}
+
+              {statusConfirmModal.newStatus === 'CANCELLED' && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 space-y-1">
+                  <strong>تنبيه إلغاء الحجز:</strong>
+                  <p>سيتم تعليم الحجز كملغي وإيقاف أي إجراءات تشغيل مصنع مرتبطة به.</p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سبب أو ملاحظة تغيير الحالة (توثق في سجل الرقابة):</label>
+                <input
+                  type="text"
+                  value={statusChangeNote}
+                  onChange={(e) => setStatusChangeNote(e.target.value)}
+                  placeholder="ملاحظات إدارية اختيارية..."
+                  className="w-full px-3 py-2 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatusConfirmModal(null);
+                    setStatusChangeError(null);
+                  }}
+                  className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-bold text-xs"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isUpdatingBookingStatus}
+                  onClick={handleConfirmStatusChange}
+                  className="min-h-[44px] px-6 py-2 bg-[#7A0C2E] hover:bg-[#560820] active:bg-[#400618] text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isUpdatingBookingStatus ? (
+                    <span>جاري التحديث والحفظ...</span>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-[#DFC066]" />
+                      <span>تأكيد تغيير الحالة وحفظها</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Cancellation Modal */}
+        {cancellingPayment && selectedBooking && (
+          <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right" dir="rtl">
+              <div className="flex items-center gap-3 border-b pb-3">
+                <div className="p-2.5 bg-rose-100 text-rose-700 rounded-2xl">
+                  <RotateCcw className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-black text-base text-slate-900">إلغاء وعكس دفعة مالية</h4>
+                  <p className="text-xs text-slate-500 font-mono">الحجز: {selectedBooking.bookingCode}</p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-rose-50/60 rounded-2xl border border-rose-200 text-xs space-y-2">
+                <div className="flex justify-between font-bold">
+                  <span className="text-slate-600">مبلغ الدفعة:</span>
+                  <span className="text-rose-700 font-mono text-sm font-black">{cancellingPayment.payment.amount.toLocaleString('ar-EG')} ج</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">تاريخ التحصيل:</span>
+                  <span className="font-mono text-slate-800">{cancellingPayment.payment.date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">طريقة السداد:</span>
+                  <span className="text-slate-800">{cancellingPayment.payment.method}</span>
+                </div>
+                {cancellingPayment.payment.receiptNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">رقم الإيصال/المرجع:</span>
+                    <span className="font-mono text-slate-800">{cancellingPayment.payment.receiptNumber}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 space-y-1">
+                <strong>أثر الإلغاء المالي والرقابي:</strong>
+                <p>
+                  سيتم إلغاء هذه الدفعة وإعادة إضافة المبلغ ({cancellingPayment.payment.amount} ج) فوراً إلى رصيد المتبقي على العميل. لن يتم حذف السجل نهائياً بل تعليمه كدفعة ملغاة لحفظ الشفافية في سجل الرقابة (Audit Log).
+                </p>
+              </div>
+
+              {cancelPaymentError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{cancelPaymentError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سبب إلغاء وعكس الدفعة (إلزامي) *:</label>
+                <input
+                  type="text"
+                  required
+                  value={cancelPaymentReason}
+                  onChange={(e) => {
+                    setCancelPaymentReason(e.target.value);
+                    setCancelPaymentError(null);
+                  }}
+                  placeholder="مثال: خطأ في إدخال المبلغ، تحويل مسترد للعميل..."
+                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancellingPayment(null);
+                    setCancelPaymentError(null);
+                  }}
+                  className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-bold text-xs"
+                >
+                  تراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isCancellingPayment}
+                  onClick={handleConfirmCancelPayment}
+                  className="min-h-[44px] px-6 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isCancellingPayment ? (
+                    <span>جاري عكس الدفعة...</span>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-4 h-4" />
+                      <span>تأكيد إلغاء وعكس الدفعة</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

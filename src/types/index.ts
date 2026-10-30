@@ -40,6 +40,14 @@ export type BookingStatus =
   | 'DELIVERED' // تم التسليم
   | 'CANCELLED'; // ملغي
 
+export type BookingPaymentStatus = 
+  | 'UNPAID' // غير مدفوع
+  | 'PARTIALLY_PAID' // مدفوع جزئياً
+  | 'FULLY_PAID' // مدفوع بالكامل
+  | 'REFUNDED_OR_SETTLED'; // تسوية / مسترد
+
+export type PaymentStatus = 'VALID' | 'CANCELLED';
+
 export interface PaymentRecord {
   id: string;
   bookingId: string;
@@ -48,6 +56,11 @@ export interface PaymentRecord {
   date: string;
   notes?: string;
   receiptNumber?: string;
+  recordedBy?: string;
+  status?: PaymentStatus;
+  cancelledBy?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
   createdAt: string;
 }
 

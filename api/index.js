@@ -934,6 +934,7 @@ var db = {
                 date: p.date,
                 notes: p.notes || "",
                 receiptNumber: p.receiptNumber || "",
+                status: p.notes && p.notes.includes("[\u0645\u0644\u063A\u0627\u0629") ? "CANCELLED" : "VALID",
                 createdAt: p.createdAt.toISOString()
               })),
               factoryOrders: b.factoryOrders.map((fo) => {
@@ -1062,6 +1063,7 @@ var db = {
                 date: p.date,
                 notes: p.notes || "",
                 receiptNumber: p.receiptNumber || "",
+                status: p.notes && p.notes.includes("[\u0645\u0644\u063A\u0627\u0629") ? "CANCELLED" : "VALID",
                 createdAt: p.createdAt.toISOString()
               })),
               factoryOrders: b2.factoryOrders.map((fo) => {
@@ -1269,38 +1271,199 @@ var db = {
     return updated;
   },
   async addPayment(data, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    if (!data.amount || isNaN(Number(data.amount)) || Number(data.amount) <= 0) {
+      throw new Error("\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631");
+    }
     memoryDB = loadLocalDB();
-    const booking = memoryDB.bookings.find((b) => b.id === data.bookingId);
+    const booking = memoryDB.bookings.find((b) => b.id === data.bookingId || b.bookingCode === data.bookingId);
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
+    const activePayments = memoryDB.payments.filter((p) => p.bookingId === booking.id && p.status !== "CANCELLED");
+    const currentPaid = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+    const currentRemaining = Math.max(0, booking.totalDistributorPrice - currentPaid);
+    if (Number(data.amount) > currentRemaining && !data.allowOverpayment) {
+      throw new Error(`\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 (${data.amount} \u062C) \u062A\u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u0645\u0628\u0644\u063A \u0627\u0644\u0645\u062A\u0628\u0642\u064A \u0639\u0644\u0649 \u0627\u0644\u0639\u0645\u064A\u0644 (${currentRemaining} \u062C). \u0625\u0630\u0627 \u0643\u0627\u0646\u062A \u062F\u0641\u0639\u0629 \u062A\u0633\u0648\u064A\u0629 \u062E\u0627\u0635\u0629 \u0623\u0648 \u0632\u064A\u0627\u062F\u0629 \u0645\u0642\u0635\u0648\u062F\u0629\u060C \u064A\u0631\u062C\u0649 \u062A\u0641\u0639\u064A\u0644 \u062E\u064A\u0627\u0631 "\u0633\u0645\u0627\u062D \u0628\u0645\u0628\u0644\u063A \u062A\u0633\u0648\u064A\u0629 \u0632\u0627\u0626\u062F".`);
+    }
     const payment = {
-      id: `pay-${Date.now()}`,
-      bookingId: data.bookingId,
-      amount: data.amount,
+      id: `pay-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
+      bookingId: booking.id,
+      amount: Number(data.amount),
       method: data.method,
-      date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      date: data.date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
       notes: data.notes || "",
       receiptNumber: data.receiptNumber || "",
+      recordedBy: performedBy,
+      status: "VALID",
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     memoryDB.payments.unshift(payment);
-    booking.paidAmount += data.amount;
-    booking.remainingAmount = Math.max(0, booking.totalDistributorPrice - booking.paidAmount);
+    const newPaidAmount = currentPaid + payment.amount;
+    booking.paidAmount = newPaidAmount;
+    booking.remainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
     booking.version += 1;
     booking.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    if (booking.status === "INITIAL" || booking.status === "PENDING_CONFIRMATION") {
-      booking.status = "CONFIRMED";
-      booking.statusNotes = `\u062A\u0645 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632 \u0628\u0639\u062F \u0627\u0633\u062A\u0644\u0627\u0645 \u062F\u0641\u0639\u0629 \u0628\u0642\u064A\u0645\u0629 ${data.amount} \u062C\u0646\u064A\u0647`;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.payment.create({
+            data: {
+              id: payment.id,
+              bookingId: booking.id,
+              amount: payment.amount,
+              method: payment.method,
+              date: payment.date,
+              notes: `[\u0633\u062C\u0644\u062A \u0628\u0648\u0627\u0633\u0637\u0629: ${performedBy}] ${payment.notes || ""}`.trim(),
+              receiptNumber: payment.receiptNumber || null
+            }
+          });
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              paidAmount: booking.paidAmount,
+              remainingAmount: booking.remainingAmount,
+              version: booking.version,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.addPayment.prisma");
+      }
     }
-    this.addAuditLog({
+    await this.addAuditLog({
       bookingId: booking.id,
       action: "\u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
       performedBy,
-      details: `\u062A\u0645 \u062A\u062D\u0635\u064A\u0644 \u0645\u0628\u0644\u063A ${data.amount} \u062C (${data.method}). \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${booking.remainingAmount} \u062C.`
+      details: `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0628\u0642\u064A\u0645\u0629 ${payment.amount} \u062C.\u0645 \u0628\u0637\u0631\u064A\u0642\u0629 (${payment.method}) \u0644\u0644\u062D\u062C\u0632 ${booking.bookingCode}. \u0627\u0644\u0645\u0633\u062F\u062F: ${booking.paidAmount} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${booking.remainingAmount} \u062C. \u0645\u0631\u062C\u0639: ${payment.receiptNumber || "\u0644\u0627 \u064A\u0648\u062C\u062F"}.`
     });
     saveLocalDB(memoryDB);
-    return payment;
+    return { payment, booking };
+  },
+  async cancelPayment(paymentId, reason, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    if (!reason || !reason.trim()) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0633\u0628\u0628 \u0625\u0644\u063A\u0627\u0621 \u0623\u0648 \u0639\u0643\u0633 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0644\u062A\u0648\u062B\u064A\u0642\u0647\u0627 \u0641\u064A \u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642");
+    }
+    memoryDB = loadLocalDB();
+    const payment = memoryDB.payments.find((p) => p.id === paymentId);
+    if (!payment) {
+      throw new Error("\u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
+    }
+    if (payment.status === "CANCELLED") {
+      throw new Error("\u0647\u0630\u0647 \u0627\u0644\u062F\u0641\u0639\u0629 \u0645\u0644\u063A\u0627\u0629 \u0628\u0627\u0644\u0641\u0639\u0644 \u0645\u0633\u0628\u0642\u0627\u064B");
+    }
+    const booking = memoryDB.bookings.find((b) => b.id === payment.bookingId);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0647\u0630\u0647 \u0627\u0644\u062F\u0641\u0639\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    payment.status = "CANCELLED";
+    payment.cancelledBy = performedBy;
+    payment.cancelledAt = now;
+    payment.cancelReason = reason.trim();
+    payment.notes = `${payment.notes || ""} [\u0645\u0644\u063A\u0627\u0629 \u0628\u0648\u0627\u0633\u0637\u0629 ${performedBy} \u0641\u064A ${(/* @__PURE__ */ new Date()).toLocaleString("ar-EG")} - \u0633\u0628\u0628: ${reason.trim()}]`.trim();
+    const validPayments = memoryDB.payments.filter((p) => p.bookingId === booking.id && p.status !== "CANCELLED");
+    const newPaidAmount = validPayments.reduce((acc, p) => acc + Number(p.amount), 0);
+    booking.paidAmount = newPaidAmount;
+    booking.remainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
+    booking.version += 1;
+    booking.updatedAt = now;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.payment.update({
+            where: { id: payment.id },
+            data: {
+              notes: payment.notes
+            }
+          });
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              paidAmount: booking.paidAmount,
+              remainingAmount: booking.remainingAmount,
+              version: booking.version,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.cancelPayment.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: "\u0625\u0644\u063A\u0627\u0621 \u0648\u0639\u0643\u0633 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
+      performedBy,
+      details: `\u062A\u0645 \u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062F\u0641\u0639\u0629 \u0628\u0642\u064A\u0645\u0629 ${payment.amount} \u062C.\u0645 \u0644\u0644\u062D\u062C\u0632 ${booking.bookingCode}. \u0627\u0644\u0633\u0628\u0628: ${reason.trim()}. \u0627\u0644\u0631\u0635\u064A\u062F \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${booking.paidAmount} \u062C\u060C \u0648\u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${booking.remainingAmount} \u062C.`
+    });
+    saveLocalDB(memoryDB);
+    return { success: true, payment, booking };
+  },
+  async updateBookingStatus(id, newStatus, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", statusNotes) {
+    const allowedStatuses = [
+      "INITIAL",
+      "PENDING_CONFIRMATION",
+      "CONFIRMED",
+      "IN_PRODUCTION",
+      "READY_FOR_DELIVERY",
+      "DELIVERED",
+      "CANCELLED"
+    ];
+    if (!allowedStatuses.includes(newStatus)) {
+      throw new Error(`\u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629: ${newStatus}`);
+    }
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    if (newStatus === "CONFIRMED" && booking.totalMealsCount < 50) {
+      throw new Error(`\u0627\u0644\u062D\u062F \u0627\u0644\u0623\u062F\u0646\u0649 \u0644\u0644\u0637\u0644\u0628 50 \u0648\u062C\u0628\u0629. \u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0623\u0643\u064A\u062F \u062D\u062C\u0632 \u064A\u0642\u0644 \u0625\u062C\u0645\u0627\u0644\u064A \u0648\u062C\u0628\u0627\u062A\u0647 \u0639\u0646 50 \u0648\u062C\u0628\u0629 (\u0627\u0644\u0639\u062F\u062F \u0627\u0644\u062D\u0627\u0644\u064A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629).`);
+    }
+    const prevStatus = booking.status;
+    const newVersion = booking.version + 1;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const noteText = statusNotes && statusNotes.trim() ? statusNotes.trim() : `\u062A\u0645 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u062D\u0627\u0644\u0629 \u0645\u0646 (${prevStatus}) \u0625\u0644\u0649 (${newStatus}) \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}) \u0641\u064A ${(/* @__PURE__ */ new Date()).toLocaleString("ar-EG")}.`;
+    const updatedBooking = {
+      ...booking,
+      status: newStatus,
+      statusNotes: noteText,
+      version: newVersion,
+      updatedAt: now
+    };
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: newStatus,
+              statusNotes: noteText,
+              version: newVersion,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.updateBookingStatus.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: "\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632",
+      performedBy,
+      details: `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632 ${booking.bookingCode} \u0645\u0646 (${prevStatus}) \u0625\u0644\u0649 (${newStatus}). \u0645\u0644\u0627\u062D\u0638\u0627\u062A: ${noteText}.`
+    });
+    return updatedBooking;
   },
   async getFactoryOrderPreview(bookingId) {
     const booking = await this.getBookingById(bookingId);
@@ -1939,6 +2102,56 @@ var db = {
     });
     return updatedBooking;
   },
+  async confirmBooking(id, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const booking = await this.getBookingById(id);
+    if (!booking) {
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    if (booking.totalMealsCount < 50) {
+      throw new Error(`\u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0623\u0643\u064A\u062F \u062D\u062C\u0632 \u064A\u0642\u0644 \u0625\u062C\u0645\u0627\u0644\u064A \u0648\u062C\u0628\u0627\u062A\u0647 \u0639\u0646 50 \u0648\u062C\u0628\u0629 (\u0627\u0644\u0639\u062F\u062F \u0627\u0644\u062D\u0627\u0644\u064A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629). \u064A\u0631\u062C\u0649 \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0643\u0645\u064A\u0627\u062A \u0623\u0648\u0644\u0627\u064B \u0644\u062A\u0635\u0644 \u0625\u0644\u0649 50 \u0648\u062C\u0628\u0629 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644.`);
+    }
+    const prevStatus = booking.status;
+    const newVersion = booking.version + 1;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const updatedBooking = {
+      ...booking,
+      status: "CONFIRMED",
+      statusNotes: `\u062A\u0645 \u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632 \u0631\u0633\u0645\u064A\u0627\u064B \u0628\u0648\u0627\u0633\u0637\u0629 \u0627\u0644\u0625\u062F\u0627\u0631\u0629 (${performedBy}) \u0641\u064A ${(/* @__PURE__ */ new Date()).toLocaleString("ar-EG")}.`,
+      version: newVersion,
+      updatedAt: now
+    };
+    memoryDB = loadLocalDB();
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memIdx !== -1) {
+      memoryDB.bookings[memIdx] = updatedBooking;
+      saveLocalDB(memoryDB);
+    }
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: "CONFIRMED",
+              statusNotes: updatedBooking.statusNotes,
+              version: newVersion,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.confirmBooking.prisma");
+      }
+    }
+    await this.addAuditLog({
+      bookingId: booking.id,
+      action: "\u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632",
+      performedBy,
+      details: `\u062A\u0645 \u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632 ${booking.bookingCode} (\u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u062D\u0627\u0644\u0629 \u0645\u0646 ${prevStatus} \u0625\u0644\u0649 CONFIRMED) \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0648\u062C\u0628\u0627\u062A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629\u060C \u0627\u0644\u0642\u064A\u0645\u0629: ${booking.totalDistributorPrice} \u062C.\u0645.`
+    });
+    return updatedBooking;
+  },
   async confirmFactoryOrderSent(orderId, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
     memoryDB = loadLocalDB();
     const order = memoryDB.factoryOrders.find((fo) => fo.id === orderId || fo.orderNumber === orderId);
@@ -1947,6 +2160,8 @@ var db = {
     }
     const now = (/* @__PURE__ */ new Date()).toISOString();
     order.status = "MANUALLY_CONFIRMED";
+    order.sentBy = performedBy;
+    order.sentAt = now;
     order.updatedAt = now;
     if (databaseUrl) {
       try {
@@ -3657,36 +3872,80 @@ apiRouter.get("/admin/bookings/:id", requireAuth, async (req, res) => {
 apiRouter.patch("/admin/bookings/:id", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
-    const updated = await db.updateBooking(id, updates, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    const { status, statusNotes, ...otherUpdates } = req.body;
+    let updated = null;
+    if (status) {
+      updated = await db.updateBookingStatus(id, status, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", statusNotes);
+    }
+    if (Object.keys(otherUpdates).length > 0) {
+      updated = await db.updateBooking(id, otherUpdates, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    }
     if (!updated) {
       res.status(404).json({ error: "\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
       return;
     }
     res.json({ success: true, booking: updated });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/bookings/:id/status", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, statusNotes } = req.body;
+    if (!status) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062C\u062F\u064A\u062F\u0629" });
+      return;
+    }
+    const updated = await db.updateBookingStatus(
+      id,
+      status,
+      req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629",
+      statusNotes
+    );
+    res.json({ success: true, booking: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 apiRouter.post("/admin/bookings/:id/payments", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, notes, receiptNumber } = req.body;
+    const { amount, method, date, notes, receiptNumber, allowOverpayment } = req.body;
     if (!amount || Number(amount) <= 0) {
-      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0645\u0628\u0644\u063A \u0635\u062D\u064A\u062D" });
+      res.status(400).json({ error: "\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631" });
       return;
     }
-    const payment = await db.addPayment({
+    const result = await db.addPayment({
       bookingId: id,
       amount: Number(amount),
       method: method || "cash",
+      date,
       notes,
-      receiptNumber
-    }, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
-    const updatedBooking = await db.getBookingById(id);
-    res.json({ success: true, payment, booking: updatedBooking });
+      receiptNumber,
+      allowOverpayment: Boolean(allowOverpayment)
+    }, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, payment: result.payment, booking: result.booking });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/payments/:id/cancel", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u0642\u062F\u064A\u0645 \u0633\u0628\u0628 \u0625\u0644\u063A\u0627\u0621 \u0623\u0648 \u0639\u0643\u0633 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0644\u062A\u0648\u062B\u064A\u0642\u0647\u0627 \u0641\u064A \u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642" });
+      return;
+    }
+    const result = await db.cancelPayment(
+      id,
+      reason.trim(),
+      req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629"
+    );
+    res.json({ success: true, payment: result.payment, booking: result.booking });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 apiRouter.get("/admin/bookings/:id/factory-preview", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -3717,10 +3976,19 @@ apiRouter.put("/admin/bookings/:id", requireAuth, requireRole(["super_admin", "a
     res.status(400).json({ error: err.message });
   }
 });
+apiRouter.post("/admin/bookings/:id/confirm", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const confirmed = await db.confirmBooking(id, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, booking: confirmed });
+  } catch (err) {
+    res.status(400).json({ error: err.message || "\u0641\u0634\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632" });
+  }
+});
 apiRouter.post("/admin/bookings/:id/factory-order/whatsapp", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const { factoryPhone, forceNewVersion } = req.body || {};
+    const { factoryPhone, forceNewVersion, kitchenInstructions } = req.body || {};
     const booking = await db.getBookingById(id);
     if (!booking) {
       res.status(404).json({ error: "\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
@@ -3735,6 +4003,9 @@ apiRouter.post("/admin/bookings/:id/factory-order/whatsapp", requireAuth, requir
     let factoryOrder = booking.factoryOrders && booking.factoryOrders.length > 0 ? booking.factoryOrders[booking.factoryOrders.length - 1] : null;
     if (!factoryOrder || forceNewVersion) {
       factoryOrder = await db.createFactoryOrder(id, req.user?.name || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", { forceNewVersion: Boolean(forceNewVersion) });
+    }
+    if (kitchenInstructions) {
+      factoryOrder.packagingNotes = `${factoryOrder.packagingNotes || ""} - \u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u0645\u0637\u0628\u062E: ${kitchenInstructions}`.trim();
     }
     const phoneToUse = factoryPhone || CELEBRE_CONFIG.whatsappNumber;
     const { messageText, whatsappUrl } = buildFactoryWhatsAppMessage(factoryOrder, booking, phoneToUse);
