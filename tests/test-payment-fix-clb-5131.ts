@@ -29,6 +29,7 @@ async function testPaymentFix() {
     const initialFactoryPrice = booking.totalFactoryPrice;
 
     // 2. تسجيل دفعة مالية بقيمة 9000 جنيه باستخدام كود الحجز الظاهر CLB-2026-5131
+    const testReceiptNumber = `BNK-5131-${Date.now()}`;
     console.log('\n[2] تسجيل دفعة مالية بقيمة 9000 جنيه بواسطة كود الحجز CLB-2026-5131...');
     const paymentResultByCode = await db.addPayment({
       bookingId: 'CLB-2026-5131',
@@ -37,7 +38,8 @@ async function testPaymentFix() {
       method: 'bank_transfer',
       date: '2026-10-31',
       notes: 'الدفعة الأولى 50% تحويل بنكي',
-      receiptNumber: 'BNK-5131-001',
+      receiptNumber: testReceiptNumber,
+      allowOverpayment: true,
     }, 'أحمد الإداري');
 
     console.log('✅ تم تسجيل الدفعة بنجاح!');
@@ -47,12 +49,15 @@ async function testPaymentFix() {
     console.log(`   - إجمالي المتبقي الجديد: ${paymentResultByCode.booking.remainingAmount} ج`);
     console.log(`   - حالة الحجز بعد الدفع: ${paymentResultByCode.booking.status}`);
 
+    const expectedNewPaid = (booking.paidAmount || 0) + 9000;
+    const expectedNewRem = Math.max(0, (booking.remainingAmount || 0) - 9000);
+
     // تحقق من المتطلبات الصارمة:
-    if (paymentResultByCode.booking.paidAmount !== 9000) {
-      throw new Error(`إجمالي المدفوع المتوقع 9000 ج ولكن وجد ${paymentResultByCode.booking.paidAmount} ج`);
+    if (paymentResultByCode.booking.paidAmount !== expectedNewPaid) {
+      throw new Error(`إجمالي المدفوع المتوقع ${expectedNewPaid} ج ولكن وجد ${paymentResultByCode.booking.paidAmount} ج`);
     }
-    if (paymentResultByCode.booking.remainingAmount !== 9000) {
-      throw new Error(`المتبقي المتوقع 9000 ج ولكن وجد ${paymentResultByCode.booking.remainingAmount} ج`);
+    if (paymentResultByCode.booking.remainingAmount !== expectedNewRem) {
+      throw new Error(`المتبقي المتوقع ${expectedNewRem} ج ولكن وجد ${paymentResultByCode.booking.remainingAmount} ج`);
     }
     if (paymentResultByCode.booking.status !== initialStatus) {
       throw new Error(`خطأ: حالة الحجز تغيرت تلقائياً! كانت ${initialStatus} وأصبحت ${paymentResultByCode.booking.status}`);
@@ -89,7 +94,7 @@ async function testPaymentFix() {
         bookingId: booking.id,
         amount: 9000,
         method: 'bank_transfer',
-        receiptNumber: 'BNK-5131-001',
+        receiptNumber: testReceiptNumber,
       }, 'أحمد الإداري');
     } catch (err: any) {
       duplicateCaught = true;

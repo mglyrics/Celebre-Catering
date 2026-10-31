@@ -477,6 +477,13 @@ var prisma = new Proxy({}, {
 });
 
 // src/server/db.ts
+var FACTORY_PEPSI_ACCOUNTING = {
+  juiceCostDeduction: 5,
+  cartonCostDeduction: 1,
+  pepsiCostAddition: 10,
+  netAdjustment: 4
+  // -5 - 1 + 10 = +4 EGP
+};
 var IS_SERVERLESS = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT
 );
@@ -682,6 +689,7 @@ var db = {
               distributorPrice: updates.distributorPrice !== void 0 ? updates.distributorPrice : void 0,
               factoryPrice: updates.factoryPrice !== void 0 ? updates.factoryPrice : void 0,
               ingredients: updates.ingredients !== void 0 ? updates.ingredients : void 0,
+              hasJuice: updates.hasJuice !== void 0 ? updates.hasJuice : void 0,
               isActive: updates.isActive !== void 0 ? updates.isActive : void 0,
               version: { increment: 1 },
               updatedAt: /* @__PURE__ */ new Date()
@@ -715,16 +723,19 @@ var db = {
       totalMealsCount += quantity;
       const baseDistributorPrice = meal.distributorPrice;
       const baseFactoryPrice = meal.factoryPrice || 0;
-      let drinkDelta = 0;
+      let distributorDrinkDelta = 0;
+      let factoryDrinkDelta = 0;
       if (meal.hasJuice) {
         if (item.drinkOption === "no_juice") {
-          drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
         } else if (item.drinkOption === "pepsi") {
-          drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+          distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
         }
       }
-      const unitDistributorPrice = Math.max(0, baseDistributorPrice + drinkDelta);
-      const unitFactoryPrice = Math.max(0, baseFactoryPrice + drinkDelta);
+      const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
+      const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
       const itemTotalDistributor = unitDistributorPrice * quantity;
       const itemTotalFactory = unitFactoryPrice * quantity;
       totalDistributorPrice += itemTotalDistributor;
@@ -741,6 +752,7 @@ var db = {
         unitDistributorPrice,
         totalDistributorPrice: itemTotalDistributor,
         baseFactoryPrice,
+        factoryDrinkAdjustment: factoryDrinkDelta,
         unitFactoryPrice,
         totalFactoryPrice: itemTotalFactory
       };
@@ -1603,13 +1615,28 @@ var db = {
     const previewItems = booking.items.map((item) => {
       const meal = mealsMap.get(item.mealCode);
       const baseFactPrice = meal?.factoryPrice ?? item.baseFactoryPrice ?? 0;
-      let drinkDelta = 0;
-      if (item.drinkOption === "no_juice") {
-        drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
-      } else if (item.drinkOption === "pepsi") {
-        drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+      const hasJuice = meal ? meal.hasJuice : true;
+      let factoryDrinkDelta = 0;
+      let drinkLabel = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+      let specialInstructions = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+      if (hasJuice) {
+        if (item.drinkOption === "pepsi") {
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
+          drinkLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
+          specialInstructions = `\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A (+${FACTORY_PEPSI_ACCOUNTING.netAdjustment} \u062C \u0645\u0635\u0646\u0639: -5 \u0639\u0635\u064A\u0631 -1 \u0643\u0631\u062A\u0648\u0646\u0629 +10 \u0643\u0627\u0646\u0632)`;
+        } else if (item.drinkOption === "no_juice") {
+          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          drinkLabel = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
+          specialInstructions = `\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (-${CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount} \u062C \u0645\u0635\u0646\u0639\u060C \u0644\u0627 \u064A\u0636\u0627\u0641 \u0633\u0639\u0631 \u0627\u0644\u0628\u064A\u0628\u0633\u064A)`;
+        } else {
+          drinkLabel = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+          specialInstructions = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+        }
+      } else {
+        drinkLabel = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (\u0623\u0635\u0644\u064A\u0629)";
+        specialInstructions = "\u0648\u062C\u0628\u0629 \u0623\u0635\u0644\u064A\u0629 \u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (\u0644\u0627 \u062A\u062A\u0623\u062B\u0631 \u0628\u0627\u0644\u0645\u0639\u0627\u062F\u0644\u0629)";
       }
-      const unitFactPrice = Math.max(0, baseFactPrice + drinkDelta);
+      const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta);
       const totalFactItemPrice = unitFactPrice * item.quantity;
       totalFactoryCost += totalFactItemPrice;
       return {
@@ -1617,10 +1644,13 @@ var db = {
         mealName: meal?.name || item.mealName,
         quantity: item.quantity,
         drinkOption: item.drinkOption,
+        drinkLabel,
         ingredients: meal?.ingredients || item.ingredients,
+        baseFactoryPrice: baseFactPrice,
+        factoryDrinkAdjustment: factoryDrinkDelta,
         unitFactoryPrice: unitFactPrice,
         totalFactoryPrice: totalFactItemPrice,
-        specialInstructions: item.drinkOption === "no_juice" ? "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (-5 \u062C)" : item.drinkOption === "pepsi" ? "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A (+10 \u062C)" : "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A"
+        specialInstructions
       };
     });
     const existingOrders = (booking.factoryOrders || []).concat(
@@ -1718,11 +1748,16 @@ var db = {
       memBooking.statusNotes = `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0631\u0642\u0645 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`;
       memBooking.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
+    const pepsiAdjustedItems = preview.items.filter(
+      (it) => it.drinkOption === "pepsi" && (it.factoryDrinkAdjustment ?? 0) === FACTORY_PEPSI_ACCOUNTING.netAdjustment
+    );
+    const pepsiQty = pepsiAdjustedItems.reduce((acc, it) => acc + it.quantity, 0);
+    const pepsiAuditNote = pepsiQty > 0 ? ` [\u062A\u0645 \u062A\u0637\u0628\u064A\u0642 \u0645\u0639\u0627\u062F\u0644\u0629 \u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0627\u0644\u0628\u064A\u0628\u0633\u064A \u0644\u0644\u0645\u0635\u0646\u0639: -5 \u062C \u0639\u0635\u064A\u0631 -1 \u062C \u0643\u0631\u062A\u0648\u0646\u0629 +10 \u062C \u0643\u0627\u0646\u0632 = +4 \u062C \u0639\u0644\u0649 ${pepsiQty} \u0648\u062C\u0628\u0629]` : "";
     this.addAuditLog({
       bookingId: booking.id,
       action: "\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639",
       performedBy,
-      details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 ${preview.totalFactoryCost} \u062C (\u062E\u0627\u0644\u064D \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).`
+      details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 ${preview.totalFactoryCost} \u062C (\u062E\u0627\u0644\u064D \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).${pepsiAuditNote}`
     });
     saveLocalDB(memoryDB);
     return factoryOrder;
@@ -2101,16 +2136,19 @@ var db = {
         totalMealsCount += quantity;
         const baseDistributorPrice = meal.distributorPrice;
         const baseFactoryPrice = meal.factoryPrice || 0;
-        let drinkDelta = 0;
+        let distributorDrinkDelta = 0;
+        let factoryDrinkDelta = 0;
         if (meal.hasJuice) {
           if (item.drinkOption === "no_juice") {
-            drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+            distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+            factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
           } else if (item.drinkOption === "pepsi") {
-            drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+            distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+            factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
           }
         }
-        const unitDistributorPrice = Math.max(0, baseDistributorPrice + drinkDelta);
-        const unitFactoryPrice = Math.max(0, baseFactoryPrice + drinkDelta);
+        const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
+        const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
         const itemTotalDistributor = unitDistributorPrice * quantity;
         const itemTotalFactory = unitFactoryPrice * quantity;
         totalDistributorPrice += itemTotalDistributor;
@@ -2127,6 +2165,7 @@ var db = {
           unitDistributorPrice,
           totalDistributorPrice: itemTotalDistributor,
           baseFactoryPrice,
+          factoryDrinkAdjustment: factoryDrinkDelta,
           unitFactoryPrice,
           totalFactoryPrice: itemTotalFactory
         };
@@ -2315,10 +2354,20 @@ var db = {
 };
 function buildFactoryWhatsAppMessage(factoryOrder, booking, factoryPhone) {
   const itemsText = factoryOrder.items.map((it) => {
+    let drinkText = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+    if (it.drinkOption === "pepsi") {
+      drinkText = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
+    } else if (it.drinkOption === "no_juice") {
+      drinkText = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
+    } else if (it.drinkLabel) {
+      drinkText = it.drinkLabel;
+    }
     return [
-      `\u2022 *\u0643\u0648\u062F:* ${it.mealCode} | *\u0627\u0633\u0645 \u0627\u0644\u0648\u062C\u0628\u0629:* ${it.mealName}`,
-      `  - *\u0627\u0644\u0643\u0645\u064A\u0629:* ${it.quantity} \u0628\u0648\u0643\u0633 | ${it.specialInstructions || it.drinkOption}`,
-      `  - *\u0633\u0639\u0631 \u0627\u0644\u0645\u0635\u0646\u0639:* ${it.unitFactoryPrice ?? 0} \u062C | *\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0645\u0635\u0646\u0639:* ${it.totalFactoryPrice ?? 0} \u062C`,
+      `\u2022 *\u0627\u0644\u0648\u062C\u0628\u0629:* ${it.mealName} (${it.mealCode})`,
+      `  - *\u062E\u064A\u0627\u0631 \u0627\u0644\u0645\u0634\u0631\u0648\u0628:* ${drinkText}`,
+      `  - *\u0627\u0644\u0643\u0645\u064A\u0629:* ${it.quantity} \u0628\u0648\u0643\u0633`,
+      `  - *\u0633\u0639\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0639\u062F\u0651\u0644 \u0644\u0644\u0628\u0648\u0643\u0633:* ${it.unitFactoryPrice ?? 0} \u062C.\u0645`,
+      `  - *\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0635\u0646\u0641 \u0644\u0644\u0645\u0635\u0646\u0639:* ${it.totalFactoryPrice ?? 0} \u062C.\u0645`,
       `  - *\u0627\u0644\u0645\u0643\u0648\u0646\u0627\u062A:* ${it.ingredients}`
     ].join("\n");
   }).join("\n\n");
@@ -2332,14 +2381,14 @@ function buildFactoryWhatsAppMessage(factoryOrder, booking, factoryPhone) {
     `*\u0645\u0643\u0627\u0646 \u0627\u0644\u062A\u0633\u0644\u064A\u0645:* ${factoryOrder.deliveryLocation}`,
     `*\u0627\u0644\u0639\u0645\u064A\u0644 / \u0627\u0644\u0645\u0633\u062A\u0644\u0645:* ${booking.customerName} (${booking.customerPhone})`,
     `-----------------------------------------`,
-    `*\u0628\u064A\u0627\u0646 \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0648\u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628:*`,
+    `*\u0628\u064A\u0627\u0646 \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0648\u062A\u0643\u0644\u0641\u0629 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0644\u0644\u0645\u0635\u0646\u0639:*`,
     itemsText,
     `-----------------------------------------`,
     `*\u0625\u062C\u0645\u0627\u0644\u064A \u0639\u062F\u062F \u0627\u0644\u0628\u0648\u0643\u0633\u0627\u062A:* ${booking.totalMealsCount} \u0628\u0648\u0643\u0633`,
-    `*\u0625\u062C\u0645\u0627\u0644\u064A \u062A\u0643\u0644\u0641\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629:* ${totalCost.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`,
+    `*\u0625\u062C\u0645\u0627\u0644\u064A \u062A\u0643\u0644\u0641\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0628\u0639\u062F \u0627\u0644\u062A\u0639\u062F\u064A\u0644:* ${totalCost.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`,
     `*\u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u062A\u0639\u0628\u0626\u0629 \u0648\u0627\u0644\u062A\u063A\u0644\u064A\u0641:* ${factoryOrder.packagingNotes}`,
     `-----------------------------------------`,
-    `*\u062A\u0646\u0628\u064A\u0647 \u062A\u0634\u063A\u064A\u0644\u064A:* \u0647\u0630\u0647 \u0648\u062B\u064A\u0642\u0629 \u062A\u0634\u063A\u064A\u0644 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 \u0631\u0633\u0645\u064A\u0629 \u0635\u0627\u062F\u0631\u0629 \u0645\u0646 \u0625\u062F\u0627\u0631\u0629 \u0633\u064A\u0644\u064A\u0628\u0631\u064A (\u062E\u0627\u0644\u064A\u0629 \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).`
+    `*\u062A\u0646\u0628\u064A\u0647 \u062A\u0634\u063A\u064A\u0644\u064A:* \u0647\u0630\u0647 \u0648\u062B\u064A\u0642\u0629 \u062A\u0634\u063A\u064A\u0644 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 \u0631\u0633\u0645\u064A\u0629 \u0635\u0627\u062F\u0631\u0629 \u0645\u0646 \u0625\u062F\u0627\u0631\u0629 \u0633\u064A\u0644\u064A\u0628\u0631\u064A (\u062A\u062A\u0636\u0645\u0646 \u0623\u0633\u0639\u0627\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0639\u062F\u0651\u0644\u0629 \u0641\u0642\u0637 \u0648\u062E\u0627\u0644\u064A\u0629 \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0623\u0633\u0639\u0627\u0631 \u0648\u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).`
   ];
   const messageText = lines.join("\n");
   const cleanPhone = (factoryPhone || "").replace(/\D/g, "");

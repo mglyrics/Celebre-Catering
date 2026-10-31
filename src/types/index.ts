@@ -27,6 +27,7 @@ export interface BookingMealItem {
   unitDistributorPrice: number; // final price after drink modification
   totalDistributorPrice: number;
   baseFactoryPrice?: number;
+  factoryDrinkAdjustment?: number;
   unitFactoryPrice?: number;
   totalFactoryPrice?: number;
 }
@@ -88,7 +89,10 @@ export interface FactoryOrder {
     mealName: string;
     quantity: number;
     drinkOption: DrinkModification;
+    drinkLabel?: string;
     ingredients: string;
+    baseFactoryPrice?: number;
+    factoryDrinkAdjustment?: number;
     unitFactoryPrice?: number;
     totalFactoryPrice?: number;
     specialInstructions?: string;

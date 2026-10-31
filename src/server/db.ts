@@ -5,6 +5,23 @@ import bcrypt from 'bcryptjs';
 import { Meal, Booking, BookingStatus, PaymentRecord, FactoryOrder, AuditLog, AdminUser, DrinkModification } from '../types';
 import { INITIAL_MEALS, CELEBRE_CONFIG } from '../data/defaultMeals';
 
+/**
+ * Independent Accounting Rule for Factory Order:
+ * Juice-to-Pepsi Replacement Formula (Factory Only):
+ * 1. Deduct 5 EGP (juice cost)
+ * 2. Deduct 1 EGP (carton box cost)
+ * 3. Add 10 EGP (pepsi can cost)
+ * Net Factory Price = Factory Base Price - 5 - 1 + 10 = Factory Base Price + 4 EGP
+ * Strictly applies ONLY to Factory Orders / WhatsApp tickets when meal originally has juice.
+ * Customer and distributor prices remain strictly untouched.
+ */
+export const FACTORY_PEPSI_ACCOUNTING = {
+  juiceCostDeduction: 5,
+  cartonCostDeduction: 1,
+  pepsiCostAddition: 10,
+  netAdjustment: 4, // -5 - 1 + 10 = +4 EGP
+};
+
 const IS_SERVERLESS = Boolean(
   process.env.VERCEL || 
   process.env.AWS_LAMBDA_FUNCTION_NAME || 
@@ -283,6 +300,7 @@ export const db = {
               distributorPrice: updates.distributorPrice !== undefined ? updates.distributorPrice : undefined,
               factoryPrice: updates.factoryPrice !== undefined ? updates.factoryPrice : undefined,
               ingredients: updates.ingredients !== undefined ? updates.ingredients : undefined,
+              hasJuice: updates.hasJuice !== undefined ? updates.hasJuice : undefined,
               isActive: updates.isActive !== undefined ? updates.isActive : undefined,
               version: { increment: 1 },
               updatedAt: new Date(),
@@ -343,18 +361,24 @@ export const db = {
       const baseDistributorPrice = meal.distributorPrice;
       const baseFactoryPrice = meal.factoryPrice || 0;
 
-      // Drink adjustment
-      let drinkDelta = 0;
+      // Customer / Distributor drink adjustment (must remain unchanged!)
+      let distributorDrinkDelta = 0;
+      // Independent Factory drink adjustment
+      let factoryDrinkDelta = 0;
+
       if (meal.hasJuice) {
         if (item.drinkOption === 'no_juice') {
-          drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
+          distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
+          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
         } else if (item.drinkOption === 'pepsi') {
-          drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10
+          distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10 for customer
+          // Independent Factory Pepsi Formula: -5 (juice) -1 (carton) +10 (can) = +4 EGP
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP
         }
       }
 
-      const unitDistributorPrice = Math.max(0, baseDistributorPrice + drinkDelta);
-      const unitFactoryPrice = Math.max(0, baseFactoryPrice + drinkDelta);
+      const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
+      const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
 
       const itemTotalDistributor = unitDistributorPrice * quantity;
       const itemTotalFactory = unitFactoryPrice * quantity;
@@ -374,6 +398,7 @@ export const db = {
         unitDistributorPrice,
         totalDistributorPrice: itemTotalDistributor,
         baseFactoryPrice,
+        factoryDrinkAdjustment: factoryDrinkDelta,
         unitFactoryPrice,
         totalFactoryPrice: itemTotalFactory,
       };
@@ -1362,13 +1387,35 @@ export const db = {
     const previewItems = booking.items.map(item => {
       const meal = mealsMap.get(item.mealCode);
       const baseFactPrice = meal?.factoryPrice ?? item.baseFactoryPrice ?? 0;
-      let drinkDelta = 0;
-      if (item.drinkOption === 'no_juice') {
-        drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
-      } else if (item.drinkOption === 'pepsi') {
-        drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+      const hasJuice = meal ? meal.hasJuice : true;
+
+      // Independent Factory Pricing Formula:
+      // When customer replaced juice with Pepsi AND meal originally has juice:
+      // Factory Pepsi Price = Factory Base Price - 5 (juice) - 1 (carton) + 10 (can) = Factory Base Price + 4 EGP
+      let factoryDrinkDelta = 0;
+      let drinkLabel = 'عصير بخيرة القياسي';
+      let specialInstructions = 'عصير بخيرة القياسي';
+
+      if (hasJuice) {
+        if (item.drinkOption === 'pepsi') {
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP
+          drinkLabel = 'استبدال العصير بكانز بيبسي';
+          specialInstructions = `استبدال العصير بكانز بيبسي (+${FACTORY_PEPSI_ACCOUNTING.netAdjustment} ج مصنع: -5 عصير -1 كرتونة +10 كانز)`;
+        } else if (item.drinkOption === 'no_juice') {
+          // If customer removed juice without replacement: do NOT add pepsi price
+          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 EGP
+          drinkLabel = 'بدون عصير';
+          specialInstructions = `بدون عصير (-${CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount} ج مصنع، لا يضاف سعر البيبسي)`;
+        } else {
+          drinkLabel = 'عصير بخيرة القياسي';
+          specialInstructions = 'عصير بخيرة القياسي';
+        }
+      } else {
+        drinkLabel = 'بدون عصير (أصلية)';
+        specialInstructions = 'وجبة أصلية بدون عصير (لا تتأثر بالمعادلة)';
       }
-      const unitFactPrice = Math.max(0, baseFactPrice + drinkDelta);
+
+      const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta);
       const totalFactItemPrice = unitFactPrice * item.quantity;
       totalFactoryCost += totalFactItemPrice;
 
@@ -1377,14 +1424,13 @@ export const db = {
         mealName: meal?.name || item.mealName,
         quantity: item.quantity,
         drinkOption: item.drinkOption,
+        drinkLabel,
         ingredients: meal?.ingredients || item.ingredients,
+        baseFactoryPrice: baseFactPrice,
+        factoryDrinkAdjustment: factoryDrinkDelta,
         unitFactoryPrice: unitFactPrice,
         totalFactoryPrice: totalFactItemPrice,
-        specialInstructions: item.drinkOption === 'no_juice' 
-          ? 'بدون عصير (-5 ج)' 
-          : item.drinkOption === 'pepsi' 
-          ? 'استبدال العصير بكانز بيبسي (+10 ج)' 
-          : 'عصير بخيرة القياسي',
+        specialInstructions,
       };
     });
 
@@ -1500,11 +1546,19 @@ export const db = {
       memBooking.updatedAt = new Date().toISOString();
     }
 
+    const pepsiAdjustedItems = preview.items.filter(
+      it => it.drinkOption === 'pepsi' && (it.factoryDrinkAdjustment ?? 0) === FACTORY_PEPSI_ACCOUNTING.netAdjustment
+    );
+    const pepsiQty = pepsiAdjustedItems.reduce((acc, it) => acc + it.quantity, 0);
+    const pepsiAuditNote = pepsiQty > 0
+      ? ` [تم تطبيق معادلة استبدال العصير بالبيبسي للمصنع: -5 ج عصير -1 ج كرتونة +10 ج كانز = +4 ج على ${pepsiQty} وجبة]`
+      : '';
+
     this.addAuditLog({
       bookingId: booking.id,
       action: 'إصدار أمر تشغيل المصنع',
       performedBy,
-      details: `تم إصدار أمر تشغيل المصنع ${orderNumber} (الإصدار v${version}) بإجمالي ${booking.totalMealsCount} وجبة وتكلفة مصنع ${preview.totalFactoryCost} ج (خالٍ تماماً من هوامش ربح الموزع).`,
+      details: `تم إصدار أمر تشغيل المصنع ${orderNumber} (الإصدار v${version}) بإجمالي ${booking.totalMealsCount} وجبة وتكلفة مصنع ${preview.totalFactoryCost} ج (خالٍ تماماً من هوامش ربح الموزع).${pepsiAuditNote}`,
     });
 
     saveLocalDB(memoryDB);
@@ -1963,17 +2017,21 @@ export const db = {
         const baseDistributorPrice = meal.distributorPrice;
         const baseFactoryPrice = meal.factoryPrice || 0;
 
-        let drinkDelta = 0;
+        let distributorDrinkDelta = 0;
+        let factoryDrinkDelta = 0;
+
         if (meal.hasJuice) {
           if (item.drinkOption === 'no_juice') {
-            drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+            distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+            factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
           } else if (item.drinkOption === 'pepsi') {
-            drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+            distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10 for customer
+            factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 for factory
           }
         }
 
-        const unitDistributorPrice = Math.max(0, baseDistributorPrice + drinkDelta);
-        const unitFactoryPrice = Math.max(0, baseFactoryPrice + drinkDelta);
+        const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
+        const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
         const itemTotalDistributor = unitDistributorPrice * quantity;
         const itemTotalFactory = unitFactoryPrice * quantity;
 
@@ -1992,6 +2050,7 @@ export const db = {
           unitDistributorPrice,
           totalDistributorPrice: itemTotalDistributor,
           baseFactoryPrice,
+          factoryDrinkAdjustment: factoryDrinkDelta,
           unitFactoryPrice,
           totalFactoryPrice: itemTotalFactory,
         };
@@ -2206,10 +2265,21 @@ export const db = {
 
 export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking: Booking, factoryPhone?: string): { messageText: string; whatsappUrl: string } {
   const itemsText = factoryOrder.items.map((it) => {
+    let drinkText = 'عصير بخيرة القياسي';
+    if (it.drinkOption === 'pepsi') {
+      drinkText = 'استبدال العصير بكانز بيبسي';
+    } else if (it.drinkOption === 'no_juice') {
+      drinkText = 'بدون عصير';
+    } else if (it.drinkLabel) {
+      drinkText = it.drinkLabel;
+    }
+
     return [
-      `• *كود:* ${it.mealCode} | *اسم الوجبة:* ${it.mealName}`,
-      `  - *الكمية:* ${it.quantity} بوكس | ${it.specialInstructions || it.drinkOption}`,
-      `  - *سعر المصنع:* ${it.unitFactoryPrice ?? 0} ج | *إجمالي المصنع:* ${it.totalFactoryPrice ?? 0} ج`,
+      `• *الوجبة:* ${it.mealName} (${it.mealCode})`,
+      `  - *خيار المشروب:* ${drinkText}`,
+      `  - *الكمية:* ${it.quantity} بوكس`,
+      `  - *سعر المصنع المعدّل للبوكس:* ${it.unitFactoryPrice ?? 0} ج.م`,
+      `  - *إجمالي الصنف للمصنع:* ${it.totalFactoryPrice ?? 0} ج.م`,
       `  - *المكونات:* ${it.ingredients}`
     ].join('\n');
   }).join('\n\n');
@@ -2225,14 +2295,14 @@ export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking:
     `*مكان التسليم:* ${factoryOrder.deliveryLocation}`,
     `*العميل / المستلم:* ${booking.customerName} (${booking.customerPhone})`,
     `-----------------------------------------`,
-    `*بيان الوجبات والتشغيل المطلوب:*`,
+    `*بيان الوجبات وتكلفة التشغيل للمصنع:*`,
     itemsText,
     `-----------------------------------------`,
     `*إجمالي عدد البوكسات:* ${booking.totalMealsCount} بوكس`,
-    `*إجمالي تكلفة المصنع المعتمدة:* ${totalCost.toLocaleString('ar-EG')} جنيه مصري`,
+    `*إجمالي تكلفة أمر المصنع بعد التعديل:* ${totalCost.toLocaleString('ar-EG')} جنيه مصري`,
     `*تعليمات التعبئة والتغليف:* ${factoryOrder.packagingNotes}`,
     `-----------------------------------------`,
-    `*تنبيه تشغيلي:* هذه وثيقة تشغيل وتكلفة مصنع رسمية صادرة من إدارة سيليبري (خالية من هوامش ربح الموزع).`
+    `*تنبيه تشغيلي:* هذه وثيقة تشغيل وتكلفة مصنع رسمية صادرة من إدارة سيليبري (تتضمن أسعار المصنع المعدّلة فقط وخالية تماماً من أسعار وهوامش ربح الموزع).`
   ];
 
   const messageText = lines.join('\n');
