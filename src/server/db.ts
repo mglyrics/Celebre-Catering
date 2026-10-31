@@ -959,89 +959,155 @@ export const db = {
     notes?: string;
     receiptNumber?: string;
     allowOverpayment?: boolean;
+    bookingCode?: string;
   }, performedBy = 'الإدارة'): Promise<{ payment: PaymentRecord; booking: Booking }> {
-    if (!data.amount || isNaN(Number(data.amount)) || Number(data.amount) <= 0) {
+    const numAmount = Number(data.amount);
+    if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
       throw new Error('قيمة الدفعة يجب أن تكون أكبر من الصفر');
     }
 
-    memoryDB = loadLocalDB();
-    const booking = memoryDB.bookings.find(b => b.id === data.bookingId || b.bookingCode === data.bookingId);
-    if (!booking) {
-      throw new Error('الحجز غير موجود');
+    const cleanId = (data.bookingId || data.bookingCode || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد معرّف الحجز أو كود الحجز لتسجيل الدفعة');
     }
 
-    // Active valid payments
-    const activePayments = memoryDB.payments.filter(p => p.bookingId === booking.id && p.status !== 'CANCELLED');
-    const currentPaid = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+    // 1. Authoritative lookup: Search in PostgreSQL first, then memoryDB
+    const booking = await this.getBookingById(cleanId);
+    if (!booking) {
+      throw new Error(`الحجز غير موجود (المعرّف المطلوب: "${cleanId}"). يرجى التأكد من صحة رقم أو كود الحجز.`);
+    }
+
+    // 2. Calculate active valid payments
+    const validPayments = (booking.payments || []).filter(p => p.status !== 'CANCELLED');
+    const currentPaid = validPayments.reduce((acc, p) => acc + Number(p.amount), 0);
     const currentRemaining = Math.max(0, booking.totalDistributorPrice - currentPaid);
 
-    if (Number(data.amount) > currentRemaining && !data.allowOverpayment) {
-      throw new Error(`قيمة الدفعة (${data.amount} ج) تتجاوز المبلغ المتبقي على العميل (${currentRemaining} ج). إذا كانت دفعة تسوية خاصة أو زيادة مقصودة، يرجى تفعيل خيار "سماح بمبلغ تسوية زائد".`);
+    // 3. Validation: prevent overpayment without administrative override
+    if (numAmount > currentRemaining && !data.allowOverpayment) {
+      throw new Error(`قيمة الدفعة (${numAmount.toLocaleString('ar-EG')} ج) تتجاوز المبلغ المتبقي على العميل (${currentRemaining.toLocaleString('ar-EG')} ج). إذا كانت دفعة تسوية خاصة أو زيادة مقصودة، يرجى تفعيل خيار "سماح بمبلغ تسوية زائد".`);
     }
 
+    // 4. Duplicate prevention (idempotency check by receipt number if provided)
+    const cleanReceipt = (data.receiptNumber || '').trim();
+    if (cleanReceipt) {
+      const duplicateReceipt = validPayments.find(p => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
+      if (duplicateReceipt) {
+        throw new Error(`يوجد بالفعل دفعة مسجلة بنفس رقم الإيصال / المرجع (${cleanReceipt}) بقيمة ${duplicateReceipt.amount} ج لهذا الحجز.`);
+      }
+    }
+
+    const paymentId = `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const paymentDate = data.date || new Date().toISOString().split('T')[0];
+    const paymentNotes = (data.notes || '').trim();
+    const newPaidAmount = currentPaid + numAmount;
+    const newRemainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
+    const now = new Date().toISOString();
+    const auditLogId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const auditDetails = `تم تسجيل دفعة بقيمة ${numAmount} ج.م بطريقة (${data.method}) للحجز ${booking.bookingCode}. المسدد الجديد: ${newPaidAmount} ج، المتبقي: ${newRemainingAmount} ج. مرجع: ${cleanReceipt || 'لا يوجد'}.`;
+
     const payment: PaymentRecord = {
-      id: `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      bookingId: booking.id,
-      amount: Number(data.amount),
+      id: paymentId,
+      bookingId: booking.id, // Primary key of Booking
+      amount: numAmount,
       method: data.method,
-      date: data.date || new Date().toISOString().split('T')[0],
-      notes: data.notes || '',
-      receiptNumber: data.receiptNumber || '',
+      date: paymentDate,
+      notes: paymentNotes,
+      receiptNumber: cleanReceipt,
       recordedBy: performedBy,
       status: 'VALID',
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     };
 
-    memoryDB.payments.unshift(payment);
-
-    // Update booking totals without automatically changing booking status
-    const newPaidAmount = currentPaid + payment.amount;
-    booking.paidAmount = newPaidAmount;
-    booking.remainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
-    booking.version += 1;
-    booking.updatedAt = new Date().toISOString();
-
-    // Persist to PostgreSQL if configured
+    // 5. Execute atomic transaction in PostgreSQL if databaseUrl is configured
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
-          await client.payment.create({
-            data: {
-              id: payment.id,
-              bookingId: booking.id,
-              amount: payment.amount,
-              method: payment.method,
-              date: payment.date,
-              notes: `[سجلت بواسطة: ${performedBy}] ${payment.notes || ''}`.trim(),
-              receiptNumber: payment.receiptNumber || null,
-            },
-          });
+          await client.$transaction(async (tx) => {
+            // A. Create Payment row - explicitly bound to booking.id primary key
+            await tx.payment.create({
+              data: {
+                id: payment.id,
+                bookingId: booking.id, // Foreign key referencing bookings(id)
+                amount: payment.amount,
+                method: payment.method,
+                date: payment.date,
+                notes: `[سجلت بواسطة: ${performedBy}] ${payment.notes}`.trim(),
+                receiptNumber: payment.receiptNumber || null,
+              },
+            });
 
-          await client.booking.update({
-            where: { id: booking.id },
-            data: {
-              paidAmount: booking.paidAmount,
-              remainingAmount: booking.remainingAmount,
-              version: booking.version,
-              updatedAt: new Date(),
-            },
+            // B. Update Booking row - only financial balances (status and prices stay strictly intact)
+            await tx.booking.update({
+              where: { id: booking.id },
+              data: {
+                paidAmount: newPaidAmount,
+                remainingAmount: newRemainingAmount,
+                version: { increment: 1 },
+                updatedAt: new Date(),
+              },
+            });
+
+            // C. Create AuditLog row
+            await tx.auditLog.create({
+              data: {
+                id: auditLogId,
+                bookingId: booking.id,
+                action: 'تسجيل دفعة مالية',
+                performedBy,
+                details: auditDetails,
+              },
+            });
           });
         }
       } catch (err: any) {
         logServerError(err, 'db.addPayment.prisma');
+        throw new Error(`فشل حفظ الدفعة في قاعدة البيانات: ${err?.message || 'خطأ في الاتصال بقاعدة البيانات'}`);
       }
     }
 
-    await this.addAuditLog({
+    // 6. Update local memoryDB cache (for fallback / local development)
+    memoryDB = loadLocalDB();
+    memoryDB.payments.unshift(payment);
+
+    const memBookingIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memBookingIdx !== -1) {
+      memoryDB.bookings[memBookingIdx].paidAmount = newPaidAmount;
+      memoryDB.bookings[memBookingIdx].remainingAmount = newRemainingAmount;
+      memoryDB.bookings[memBookingIdx].version += 1;
+      memoryDB.bookings[memBookingIdx].updatedAt = now;
+    } else {
+      memoryDB.bookings.unshift({
+        ...booking,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+        version: booking.version + 1,
+        updatedAt: now,
+      });
+    }
+
+    memoryDB.auditLogs.unshift({
+      id: auditLogId,
       bookingId: booking.id,
       action: 'تسجيل دفعة مالية',
       performedBy,
-      details: `تم تسجيل دفعة بقيمة ${payment.amount} ج.م بطريقة (${payment.method}) للحجز ${booking.bookingCode}. المسدد: ${booking.paidAmount} ج، المتبقي: ${booking.remainingAmount} ج. مرجع: ${payment.receiptNumber || 'لا يوجد'}.`,
+      details: auditDetails,
+      timestamp: now,
     });
 
     saveLocalDB(memoryDB);
-    return { payment, booking };
+
+    // 7. Return latest booking state
+    const refreshedBooking = await this.getBookingById(booking.id);
+    return {
+      payment,
+      booking: refreshedBooking || {
+        ...booking,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+        version: booking.version + 1,
+      },
+    };
   },
 
   async cancelPayment(
@@ -1053,72 +1119,152 @@ export const db = {
       throw new Error('يرجى تحديد سبب إلغاء أو عكس الدفعة المالية لتوثيقها في سجل التدقيق');
     }
 
-    memoryDB = loadLocalDB();
-    const payment = memoryDB.payments.find(p => p.id === paymentId);
-    if (!payment) {
-      throw new Error('الدفعة المالية غير موجودة');
+    const cleanPaymentId = (paymentId || '').trim();
+    if (!cleanPaymentId) {
+      throw new Error('معرف الدفعة المالية مطلوب');
     }
 
-    if (payment.status === 'CANCELLED') {
-      throw new Error('هذه الدفعة ملغاة بالفعل مسبقاً');
-    }
+    let payment: PaymentRecord | null = null;
 
-    const booking = memoryDB.bookings.find(b => b.id === payment.bookingId);
-    if (!booking) {
-      throw new Error('الحجز المرتبط بهذه الدفعة غير موجود');
-    }
-
-    const now = new Date().toISOString();
-    payment.status = 'CANCELLED';
-    payment.cancelledBy = performedBy;
-    payment.cancelledAt = now;
-    payment.cancelReason = reason.trim();
-    payment.notes = `${payment.notes || ''} [ملغاة بواسطة ${performedBy} في ${new Date().toLocaleString('ar-EG')} - سبب: ${reason.trim()}]`.trim();
-
-    // Recalculate booking paid & remaining based on valid payments
-    const validPayments = memoryDB.payments.filter(p => p.bookingId === booking.id && p.status !== 'CANCELLED');
-    const newPaidAmount = validPayments.reduce((acc, p) => acc + Number(p.amount), 0);
-    booking.paidAmount = newPaidAmount;
-    booking.remainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
-    booking.version += 1;
-    booking.updatedAt = now;
-
-    // Persist reversal to PostgreSQL
+    // 1. Check PostgreSQL first
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
-          await client.payment.update({
-            where: { id: payment.id },
-            data: {
-              notes: payment.notes,
-            },
+          const dbPayment = await client.payment.findUnique({
+            where: { id: cleanPaymentId },
           });
+          if (dbPayment) {
+            payment = {
+              id: dbPayment.id,
+              bookingId: dbPayment.bookingId,
+              amount: dbPayment.amount,
+              method: dbPayment.method as any,
+              date: dbPayment.date,
+              notes: dbPayment.notes || '',
+              receiptNumber: dbPayment.receiptNumber || '',
+              status: (dbPayment.notes && dbPayment.notes.includes('[ملغاة')) ? 'CANCELLED' : 'VALID',
+              createdAt: dbPayment.createdAt.toISOString(),
+            };
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.cancelPayment.findPayment.prisma');
+      }
+    }
 
-          await client.booking.update({
-            where: { id: booking.id },
-            data: {
-              paidAmount: booking.paidAmount,
-              remainingAmount: booking.remainingAmount,
-              version: booking.version,
-              updatedAt: new Date(),
-            },
+    // 2. Check memoryDB if not found in PostgreSQL
+    if (!payment) {
+      memoryDB = loadLocalDB();
+      const p = memoryDB.payments.find(item => item.id === cleanPaymentId);
+      if (p) payment = p;
+    }
+
+    if (!payment) {
+      throw new Error(`الدفعة المالية غير موجودة (المعرّف: ${cleanPaymentId})`);
+    }
+
+    if (payment.status === 'CANCELLED' || (payment.notes && payment.notes.includes('[ملغاة'))) {
+      throw new Error('هذه الدفعة ملغاة بالفعل مسبقاً');
+    }
+
+    const booking = await this.getBookingById(payment.bookingId);
+    if (!booking) {
+      throw new Error(`الحجز المرتبط بهذه الدفعة غير موجود (معرّف الحجز: ${payment.bookingId})`);
+    }
+
+    const now = new Date().toISOString();
+    const updatedNotes = `${payment.notes || ''} [ملغاة بواسطة ${performedBy} في ${new Date().toLocaleString('ar-EG')} - سبب: ${reason.trim()}]`.trim();
+    const auditLogId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    // Recalculate balances excluding this cancelled payment
+    const remainingPayments = (booking.payments || []).filter(p => p.id !== payment!.id && p.status !== 'CANCELLED');
+    const newPaidAmount = remainingPayments.reduce((acc, p) => acc + Number(p.amount), 0);
+    const newRemainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
+    const cancelDetails = `تم إلغاء الدفعة بقيمة ${payment.amount} ج.م للحجز ${booking.bookingCode}. السبب: ${reason.trim()}. الرصيد المسدد الجديد: ${newPaidAmount} ج، والمتبقي: ${newRemainingAmount} ج.`;
+
+    // 3. Atomic transaction in PostgreSQL
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.payment.update({
+              where: { id: payment!.id },
+              data: { notes: updatedNotes },
+            });
+
+            await tx.booking.update({
+              where: { id: booking.id },
+              data: {
+                paidAmount: newPaidAmount,
+                remainingAmount: newRemainingAmount,
+                version: { increment: 1 },
+                updatedAt: new Date(),
+              },
+            });
+
+            await tx.auditLog.create({
+              data: {
+                id: auditLogId,
+                bookingId: booking.id,
+                action: 'إلغاء وعكس دفعة مالية',
+                performedBy,
+                details: cancelDetails,
+              },
+            });
           });
         }
       } catch (err: any) {
         logServerError(err, 'db.cancelPayment.prisma');
+        throw new Error(`فشل إلغاء وعكس الدفعة في قاعدة البيانات: ${err?.message || 'خطأ في الاتصال بقاعدة البيانات'}`);
       }
     }
 
-    await this.addAuditLog({
+    // 4. Update memoryDB
+    memoryDB = loadLocalDB();
+    const memPayment = memoryDB.payments.find(p => p.id === payment!.id);
+    if (memPayment) {
+      memPayment.status = 'CANCELLED';
+      memPayment.cancelledBy = performedBy;
+      memPayment.cancelledAt = now;
+      memPayment.cancelReason = reason.trim();
+      memPayment.notes = updatedNotes;
+    }
+    const memBooking = memoryDB.bookings.find(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    if (memBooking) {
+      memBooking.paidAmount = newPaidAmount;
+      memBooking.remainingAmount = newRemainingAmount;
+      memBooking.version += 1;
+      memBooking.updatedAt = now;
+    }
+    memoryDB.auditLogs.unshift({
+      id: auditLogId,
       bookingId: booking.id,
       action: 'إلغاء وعكس دفعة مالية',
       performedBy,
-      details: `تم إلغاء الدفعة بقيمة ${payment.amount} ج.م للحجز ${booking.bookingCode}. السبب: ${reason.trim()}. الرصيد المسدد الجديد: ${booking.paidAmount} ج، والمتبقي: ${booking.remainingAmount} ج.`,
+      details: cancelDetails,
+      timestamp: now,
     });
-
     saveLocalDB(memoryDB);
-    return { success: true, payment, booking };
+
+    const freshBooking = await this.getBookingById(booking.id);
+    return {
+      success: true,
+      payment: {
+        ...payment,
+        status: 'CANCELLED',
+        cancelledBy: performedBy,
+        cancelledAt: now,
+        cancelReason: reason.trim(),
+        notes: updatedNotes,
+      },
+      booking: freshBooking || {
+        ...booking,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+      },
+    };
   },
 
   async updateBookingStatus(

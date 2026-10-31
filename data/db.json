@@ -255,6 +255,269 @@
   ],
   "bookings": [
     {
+      "id": "bk-1793443272042-245",
+      "bookingCode": "CLB-2026-1959",
+      "securityCode": "8389",
+      "customerName": "تجربة سداد وحالات الحجز",
+      "customerPhone": "01099864798",
+      "customerWhatsapp": "01099864798",
+      "preferredContact": "whatsapp",
+      "eventName": "حفل اختبار مالي ورسمي",
+      "eventDate": "2026-11-20",
+      "deliveryTime": "02:00 PM",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "التجمع الخامس - شارع التسعين",
+      "notes": "حجز تجريبي لاختبار دورة المدفوعات وتحديث الحالات",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 30,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 1500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1050
+        },
+        {
+          "mealId": "meal-12",
+          "mealCode": "Sale-12",
+          "mealName": "باتية",
+          "ingredients": "قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 20,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 44,
+          "unitDistributorPrice": 44,
+          "totalDistributorPrice": 880,
+          "baseFactoryPrice": 32,
+          "unitFactoryPrice": 32,
+          "totalFactoryPrice": 640
+        }
+      ],
+      "totalMealsCount": 50,
+      "totalDistributorPrice": 2380,
+      "totalFactoryPrice": 1690,
+      "profitMargin": 690,
+      "paidAmount": 1380,
+      "remainingAmount": 1000,
+      "status": "DELIVERED",
+      "statusNotes": "تم تسليم الطلب للعميل في موقع المناسبة واستلامه كاملاً",
+      "isTest": true,
+      "version": 10,
+      "createdAt": "2026-10-31T10:41:12.041Z",
+      "updatedAt": "2026-10-31T10:41:12.230Z",
+      "payments": [
+        {
+          "id": "pay-1793443272160-360",
+          "bookingId": "bk-1793443272042-245",
+          "amount": 880,
+          "method": "bank_transfer",
+          "date": "2026-10-31",
+          "notes": "تسوية ختامية للحساب",
+          "receiptNumber": "CIB-778899",
+          "recordedBy": "أحمد الإداري",
+          "status": "VALID",
+          "createdAt": "2026-10-31T10:41:12.160Z"
+        },
+        {
+          "id": "pay-1793443272143-857",
+          "bookingId": "bk-1793443272042-245",
+          "amount": 1000,
+          "method": "cash",
+          "date": "2026-10-31",
+          "notes": "دفعة ثانية نقداً في المقر [ملغاة بواسطة أحمد الإداري في ٣١‏/١٠‏/٢٠٢٦، ١٠:٤١:١٢ ص - سبب: تم إدخال إيصال السداد مرتين عن طريق الخطأ ويتم عكس العملية]",
+          "receiptNumber": "RCPT-0044",
+          "recordedBy": "أحمد الإداري",
+          "status": "CANCELLED",
+          "createdAt": "2026-10-31T10:41:12.143Z",
+          "cancelledBy": "أحمد الإداري",
+          "cancelledAt": "2026-10-31T10:41:12.178Z",
+          "cancelReason": "تم إدخال إيصال السداد مرتين عن طريق الخطأ ويتم عكس العملية"
+        },
+        {
+          "id": "pay-1793443272093-190",
+          "bookingId": "bk-1793443272042-245",
+          "amount": 500,
+          "method": "instapay",
+          "date": "2026-11-01",
+          "notes": "عربون حجز مبدئي",
+          "receiptNumber": "INSTA-998877",
+          "recordedBy": "أحمد الإداري",
+          "status": "VALID",
+          "createdAt": "2026-10-31T10:41:12.093Z"
+        }
+      ],
+      "factoryOrders": [],
+      "auditLogs": [
+        {
+          "id": "log-1793443272221-82",
+          "timestamp": "2026-10-31T10:41:12.221Z",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تغيير حالة الحجز",
+          "performedBy": "مسؤول التجهيز",
+          "details": "قام الإداري (مسؤول التجهيز) بتغيير حالة الحجز CLB-2026-1959 من (IN_PRODUCTION) إلى (READY_FOR_DELIVERY). ملاحظات: تم تجهيز الوجبات وتغليفها."
+        },
+        {
+          "id": "log-1793443272205-340",
+          "timestamp": "2026-10-31T10:41:12.205Z",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تغيير حالة الحجز",
+          "performedBy": "مسؤول المصنع",
+          "details": "قام الإداري (مسؤول المصنع) بتغيير حالة الحجز CLB-2026-1959 من (CONFIRMED) إلى (IN_PRODUCTION). ملاحظات: بدء خط تجهيز البوكسات."
+        },
+        {
+          "id": "log-1793443272184-876",
+          "bookingId": "bk-1793443272042-245",
+          "action": "إلغاء وعكس دفعة مالية",
+          "performedBy": "أحمد الإداري",
+          "details": "تم إلغاء الدفعة بقيمة 1000 ج.م للحجز CLB-2026-1959. السبب: تم إدخال إيصال السداد مرتين عن طريق الخطأ ويتم عكس العملية. الرصيد المسدد الجديد: 1380 ج، والمتبقي: 1000 ج.",
+          "timestamp": "2026-10-31T10:41:12.178Z"
+        },
+        {
+          "id": "log-1793443272160-977",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تسجيل دفعة مالية",
+          "performedBy": "أحمد الإداري",
+          "details": "تم تسجيل دفعة بقيمة 880 ج.م بطريقة (bank_transfer) للحجز CLB-2026-1959. المسدد الجديد: 2380 ج، المتبقي: 0 ج. مرجع: CIB-778899.",
+          "timestamp": "2026-10-31T10:41:12.160Z"
+        },
+        {
+          "id": "log-1793443272143-290",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تسجيل دفعة مالية",
+          "performedBy": "أحمد الإداري",
+          "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (cash) للحجز CLB-2026-1959. المسدد الجديد: 1500 ج، المتبقي: 880 ج. مرجع: RCPT-0044.",
+          "timestamp": "2026-10-31T10:41:12.143Z"
+        },
+        {
+          "id": "log-1793443272093-815",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تسجيل دفعة مالية",
+          "performedBy": "أحمد الإداري",
+          "details": "تم تسجيل دفعة بقيمة 500 ج.م بطريقة (instapay) للحجز CLB-2026-1959. المسدد الجديد: 500 ج، المتبقي: 1880 ج. مرجع: INSTA-998877.",
+          "timestamp": "2026-10-31T10:41:12.093Z"
+        },
+        {
+          "id": "log-1793443272080-202",
+          "timestamp": "2026-10-31T10:41:12.080Z",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تغيير حالة الحجز",
+          "performedBy": "أحمد الإداري",
+          "details": "قام الإداري (أحمد الإداري) بتغيير حالة الحجز CLB-2026-1959 من (PENDING_CONFIRMATION) إلى (CONFIRMED). ملاحظات: تأكيد الحجز بعد التواصل مع العميل."
+        },
+        {
+          "id": "log-1793443272067-542",
+          "timestamp": "2026-10-31T10:41:12.067Z",
+          "bookingId": "bk-1793443272042-245",
+          "action": "تغيير حالة الحجز",
+          "performedBy": "أحمد الإداري",
+          "details": "قام الإداري (أحمد الإداري) بتغيير حالة الحجز CLB-2026-1959 من (INITIAL) إلى (PENDING_CONFIRMATION). ملاحظات: مراجعة بيانات العميل."
+        },
+        {
+          "id": "log-1793443272045-8",
+          "timestamp": "2026-10-31T10:41:12.045Z",
+          "bookingId": "bk-1793443272042-245",
+          "action": "إنشاء حجز مبدئي",
+          "performedBy": "العميل (الموقع الإلكتروني)",
+          "details": "تم إنشاء الحجز رقم CLB-2026-1959 بإجمالي 50 وجبة وقيمة 2380 جنيه."
+        }
+      ]
+    },
+    {
+      "id": "bk-1793443262196-720",
+      "bookingCode": "CLB-2026-4365",
+      "securityCode": "7476",
+      "customerName": "تجربة سداد حجز آخر",
+      "customerPhone": "01028338678",
+      "customerWhatsapp": "01028338678",
+      "preferredContact": "phone",
+      "eventName": "حفل اختبار عام",
+      "eventDate": "2026-12-01",
+      "deliveryTime": "15:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الدقي - شارع مصدق",
+      "notes": "حجز للتحقق من عدم وجود مشكلة عامة",
+      "items": [
+        {
+          "mealId": "meal-1",
+          "mealCode": "Sale-01",
+          "mealName": "ميكس بوكس 01 - جاتوه وجبنة رومي ولانشون",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش بتي بان جبنة رومي + سندوتش بتي بان لانشون كوردن بيف + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 50,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 50,
+          "unitDistributorPrice": 50,
+          "totalDistributorPrice": 2500,
+          "baseFactoryPrice": 35,
+          "unitFactoryPrice": 35,
+          "totalFactoryPrice": 1750
+        }
+      ],
+      "totalMealsCount": 50,
+      "totalDistributorPrice": 2500,
+      "totalFactoryPrice": 1750,
+      "profitMargin": 750,
+      "paidAmount": 1000,
+      "remainingAmount": 1500,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "isTest": false,
+      "version": 2,
+      "createdAt": "2026-10-31T10:41:02.196Z",
+      "updatedAt": "2026-10-31T10:41:02.206Z"
+    },
+    {
+      "id": "bk-1793362871199-5131",
+      "bookingCode": "CLB-2026-5131",
+      "securityCode": "5131",
+      "customerName": "حجز شركة الشروق (CLB-2026-5131)",
+      "customerPhone": "01005131513",
+      "customerWhatsapp": "01005131513",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي واستقبال ضيوف",
+      "eventDate": "2026-11-25",
+      "deliveryTime": "14:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "قاعة المؤتمرات - التجمع الخامس",
+      "notes": "حجز بقيمة 18000 جنيه",
+      "items": [
+        {
+          "mealId": "meal-3",
+          "mealCode": "Sale-03",
+          "mealName": "ميكس بوكس 03 - جاتوه وجبنة رومي وتركي مدخن",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط جبنة رومي + سندوتش فرنساوي وسط تركي مدخن + عصير بخيرة + شوكة ومنديل",
+          "quantity": 300,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 60,
+          "unitDistributorPrice": 60,
+          "totalDistributorPrice": 18000,
+          "baseFactoryPrice": 41,
+          "unitFactoryPrice": 41,
+          "totalFactoryPrice": 12300
+        }
+      ],
+      "totalMealsCount": 300,
+      "totalDistributorPrice": 18000,
+      "totalFactoryPrice": 12300,
+      "profitMargin": 5700,
+      "paidAmount": 9000,
+      "remainingAmount": 9000,
+      "status": "CONFIRMED",
+      "statusNotes": "حجز مؤكد ومعتمد",
+      "isTest": false,
+      "version": 2,
+      "createdAt": "2026-10-31T03:00:00.000Z",
+      "updatedAt": "2026-10-31T10:41:02.164Z"
+    },
+    {
       "id": "bk-1793362871199-240",
       "bookingCode": "CLB-2026-6225",
       "securityCode": "9936",
@@ -3686,6 +3949,69 @@
   ],
   "payments": [
     {
+      "id": "pay-1793443272160-360",
+      "bookingId": "bk-1793443272042-245",
+      "amount": 880,
+      "method": "bank_transfer",
+      "date": "2026-10-31",
+      "notes": "تسوية ختامية للحساب",
+      "receiptNumber": "CIB-778899",
+      "recordedBy": "أحمد الإداري",
+      "status": "VALID",
+      "createdAt": "2026-10-31T10:41:12.160Z"
+    },
+    {
+      "id": "pay-1793443272143-857",
+      "bookingId": "bk-1793443272042-245",
+      "amount": 1000,
+      "method": "cash",
+      "date": "2026-10-31",
+      "notes": "دفعة ثانية نقداً في المقر [ملغاة بواسطة أحمد الإداري في ٣١‏/١٠‏/٢٠٢٦، ١٠:٤١:١٢ ص - سبب: تم إدخال إيصال السداد مرتين عن طريق الخطأ ويتم عكس العملية]",
+      "receiptNumber": "RCPT-0044",
+      "recordedBy": "أحمد الإداري",
+      "status": "CANCELLED",
+      "createdAt": "2026-10-31T10:41:12.143Z",
+      "cancelledBy": "أحمد الإداري",
+      "cancelledAt": "2026-10-31T10:41:12.178Z",
+      "cancelReason": "تم إدخال إيصال السداد مرتين عن طريق الخطأ ويتم عكس العملية"
+    },
+    {
+      "id": "pay-1793443272093-190",
+      "bookingId": "bk-1793443272042-245",
+      "amount": 500,
+      "method": "instapay",
+      "date": "2026-11-01",
+      "notes": "عربون حجز مبدئي",
+      "receiptNumber": "INSTA-998877",
+      "recordedBy": "أحمد الإداري",
+      "status": "VALID",
+      "createdAt": "2026-10-31T10:41:12.093Z"
+    },
+    {
+      "id": "pay-1793443262206-259",
+      "bookingId": "bk-1793443262196-720",
+      "amount": 1000,
+      "method": "instapay",
+      "date": "2026-10-31",
+      "notes": "عربون حجز إضافي",
+      "receiptNumber": "INSTA-OTHER-01",
+      "recordedBy": "أحمد الإداري",
+      "status": "VALID",
+      "createdAt": "2026-10-31T10:41:02.206Z"
+    },
+    {
+      "id": "pay-1793443262164-670",
+      "bookingId": "bk-1793362871199-5131",
+      "amount": 9000,
+      "method": "bank_transfer",
+      "date": "2026-10-31",
+      "notes": "الدفعة الأولى 50% تحويل بنكي",
+      "receiptNumber": "BNK-5131-001",
+      "recordedBy": "أحمد الإداري",
+      "status": "VALID",
+      "createdAt": "2026-10-31T10:41:02.164Z"
+    },
+    {
       "id": "pay-1793362864891-448",
       "bookingId": "bk-1793362864828-469",
       "amount": 880,
@@ -4481,6 +4807,110 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1793443272237-740",
+      "timestamp": "2026-10-31T10:41:12.237Z",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تغيير حالة الحجز",
+      "performedBy": "مندوب التسليم",
+      "details": "قام الإداري (مندوب التسليم) بتغيير حالة الحجز CLB-2026-1959 من (READY_FOR_DELIVERY) إلى (DELIVERED). ملاحظات: تم تسليم الطلب للعميل في موقع المناسبة واستلامه كاملاً."
+    },
+    {
+      "id": "log-1793443272221-82",
+      "timestamp": "2026-10-31T10:41:12.221Z",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تغيير حالة الحجز",
+      "performedBy": "مسؤول التجهيز",
+      "details": "قام الإداري (مسؤول التجهيز) بتغيير حالة الحجز CLB-2026-1959 من (IN_PRODUCTION) إلى (READY_FOR_DELIVERY). ملاحظات: تم تجهيز الوجبات وتغليفها."
+    },
+    {
+      "id": "log-1793443272205-340",
+      "timestamp": "2026-10-31T10:41:12.205Z",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تغيير حالة الحجز",
+      "performedBy": "مسؤول المصنع",
+      "details": "قام الإداري (مسؤول المصنع) بتغيير حالة الحجز CLB-2026-1959 من (CONFIRMED) إلى (IN_PRODUCTION). ملاحظات: بدء خط تجهيز البوكسات."
+    },
+    {
+      "id": "log-1793443272184-876",
+      "bookingId": "bk-1793443272042-245",
+      "action": "إلغاء وعكس دفعة مالية",
+      "performedBy": "أحمد الإداري",
+      "details": "تم إلغاء الدفعة بقيمة 1000 ج.م للحجز CLB-2026-1959. السبب: تم إدخال إيصال السداد مرتين عن طريق الخطأ ويتم عكس العملية. الرصيد المسدد الجديد: 1380 ج، والمتبقي: 1000 ج.",
+      "timestamp": "2026-10-31T10:41:12.178Z"
+    },
+    {
+      "id": "log-1793443272160-977",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "أحمد الإداري",
+      "details": "تم تسجيل دفعة بقيمة 880 ج.م بطريقة (bank_transfer) للحجز CLB-2026-1959. المسدد الجديد: 2380 ج، المتبقي: 0 ج. مرجع: CIB-778899.",
+      "timestamp": "2026-10-31T10:41:12.160Z"
+    },
+    {
+      "id": "log-1793443272143-290",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "أحمد الإداري",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (cash) للحجز CLB-2026-1959. المسدد الجديد: 1500 ج، المتبقي: 880 ج. مرجع: RCPT-0044.",
+      "timestamp": "2026-10-31T10:41:12.143Z"
+    },
+    {
+      "id": "log-1793443272093-815",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "أحمد الإداري",
+      "details": "تم تسجيل دفعة بقيمة 500 ج.م بطريقة (instapay) للحجز CLB-2026-1959. المسدد الجديد: 500 ج، المتبقي: 1880 ج. مرجع: INSTA-998877.",
+      "timestamp": "2026-10-31T10:41:12.093Z"
+    },
+    {
+      "id": "log-1793443272080-202",
+      "timestamp": "2026-10-31T10:41:12.080Z",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تغيير حالة الحجز",
+      "performedBy": "أحمد الإداري",
+      "details": "قام الإداري (أحمد الإداري) بتغيير حالة الحجز CLB-2026-1959 من (PENDING_CONFIRMATION) إلى (CONFIRMED). ملاحظات: تأكيد الحجز بعد التواصل مع العميل."
+    },
+    {
+      "id": "log-1793443272067-542",
+      "timestamp": "2026-10-31T10:41:12.067Z",
+      "bookingId": "bk-1793443272042-245",
+      "action": "تغيير حالة الحجز",
+      "performedBy": "أحمد الإداري",
+      "details": "قام الإداري (أحمد الإداري) بتغيير حالة الحجز CLB-2026-1959 من (INITIAL) إلى (PENDING_CONFIRMATION). ملاحظات: مراجعة بيانات العميل."
+    },
+    {
+      "id": "log-1793443272045-8",
+      "timestamp": "2026-10-31T10:41:12.045Z",
+      "bookingId": "bk-1793443272042-245",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-1959 بإجمالي 50 وجبة وقيمة 2380 جنيه."
+    },
+    {
+      "id": "log-1793443262206-602",
+      "bookingId": "bk-1793443262196-720",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "أحمد الإداري",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (instapay) للحجز CLB-2026-4365. المسدد الجديد: 1000 ج، المتبقي: 1500 ج. مرجع: INSTA-OTHER-01.",
+      "timestamp": "2026-10-31T10:41:02.206Z"
+    },
+    {
+      "id": "log-1793443262198-571",
+      "timestamp": "2026-10-31T10:41:02.198Z",
+      "bookingId": "bk-1793443262196-720",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4365 بإجمالي 50 وجبة وقيمة 2500 جنيه."
+    },
+    {
+      "id": "log-1793443262165-165",
+      "bookingId": "bk-1793362871199-5131",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "أحمد الإداري",
+      "details": "تم تسجيل دفعة بقيمة 9000 ج.م بطريقة (bank_transfer) للحجز CLB-2026-5131. المسدد الجديد: 9000 ج، المتبقي: 9000 ج. مرجع: BNK-5131-001.",
+      "timestamp": "2026-10-31T10:41:02.164Z"
+    },
     {
       "id": "log-1793362871363-133",
       "timestamp": "2026-10-30T12:21:11.363Z",

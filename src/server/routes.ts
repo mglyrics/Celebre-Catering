@@ -662,7 +662,13 @@ apiRouter.post('/admin/bookings/:id/status', requireAuth, requireRole(['super_ad
 apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, date, notes, receiptNumber, allowOverpayment } = req.body;
+    const { amount, method, date, notes, receiptNumber, allowOverpayment, bookingId, bookingCode } = req.body || {};
+
+    const targetId = (id || bookingId || bookingCode || '').trim();
+    if (!targetId || targetId === 'undefined' || targetId === 'null') {
+      res.status(400).json({ error: 'يرجى تقديم معرّف أو كود الحجز لتسجيل الدفعة' });
+      return;
+    }
 
     if (!amount || Number(amount) <= 0) {
       res.status(400).json({ error: 'قيمة الدفعة يجب أن تكون أكبر من الصفر' });
@@ -670,7 +676,8 @@ apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_
     }
 
     const result = await db.addPayment({
-      bookingId: id,
+      bookingId: targetId,
+      bookingCode,
       amount: Number(amount),
       method: method || 'cash',
       date,

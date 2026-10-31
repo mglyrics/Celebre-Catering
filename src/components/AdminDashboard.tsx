@@ -636,13 +636,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPaymentError(null);
 
     try {
-      const res = await fetch(`/api/admin/bookings/${selectedBooking.id}/payments`, {
+      const targetIdentifier = selectedBooking.id || selectedBooking.bookingCode;
+      const res = await fetch(`/api/admin/bookings/${encodeURIComponent(targetIdentifier)}/payments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          bookingId: selectedBooking.id,
+          bookingCode: selectedBooking.bookingCode,
           amount: numAmount,
           method: paymentMethod,
           date: paymentDate || new Date().toISOString().split('T')[0],
