@@ -119,6 +119,7 @@ model FactoryOrder {
 model AuditLog {
   id          String   @id @default(uuid())
   bookingId   String?
+  bookingCode String   // e.g. "CLB-2026-5131" or "SYSTEM"
   booking     Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   action      String
   performedBy String

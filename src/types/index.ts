@@ -107,6 +107,7 @@ export interface FactoryOrder {
 export interface AuditLog {
   id: string;
   bookingId: string;
+  bookingCode: string;
   action: string;
   performedBy: string;
   details: string;

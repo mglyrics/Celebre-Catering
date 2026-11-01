@@ -314,6 +314,7 @@ export const db = {
 
     this.addAuditLog({
       bookingId: '',
+      bookingCode: updated.code || 'MENU_UPDATE',
       action: 'تحديث وجبة في المنيو',
       performedBy,
       details: `تم تحديث الوجبة ${updated.code} (${updated.name}). موزع: ${updated.distributorPrice} ج، مصنع: ${updated.factoryPrice} ج.`,
@@ -519,6 +520,7 @@ export const db = {
 
     this.addAuditLog({
       bookingId: newBooking.id,
+      bookingCode: newBooking.bookingCode,
       action: 'إنشاء حجز مبدئي',
       performedBy: 'العميل (الموقع الإلكتروني)',
       details: `تم إنشاء الحجز رقم ${bookingCode} بإجمالي ${totalMealsCount} وجبة وقيمة ${totalDistributorPrice} جنيه.`,
@@ -636,6 +638,7 @@ export const db = {
               auditLogs: b.auditLogs.map(al => ({
                 id: al.id,
                 bookingId: al.bookingId || '',
+                bookingCode: al.bookingCode || b.bookingCode || '',
                 action: al.action,
                 performedBy: al.performedBy,
                 details: al.details,
@@ -773,6 +776,7 @@ export const db = {
               auditLogs: b.auditLogs.map(al => ({
                 id: al.id,
                 bookingId: al.bookingId || '',
+                bookingCode: al.bookingCode || b.bookingCode || '',
                 action: al.action,
                 performedBy: al.performedBy,
                 details: al.details,
@@ -967,6 +971,7 @@ export const db = {
 
     this.addAuditLog({
       bookingId: updated.id,
+      bookingCode: updated.bookingCode,
       action: 'تعديل الحجز',
       performedBy,
       details: auditDetail,
@@ -1043,6 +1048,11 @@ export const db = {
       createdAt: now,
     };
 
+    const authoritativeBookingCode = (booking.bookingCode || '').trim();
+    if (!authoritativeBookingCode) {
+      throw new Error(`تعذر العثور على كود الحجز المعتمد (bookingCode) للحجز ${booking.id} لتوثيق سجل التدقيق`);
+    }
+
     // 5. Execute atomic transaction in PostgreSQL if databaseUrl is configured
     if (databaseUrl) {
       try {
@@ -1073,11 +1083,12 @@ export const db = {
               },
             });
 
-            // C. Create AuditLog row
+            // C. Create AuditLog row with authoritative bookingCode
             await tx.auditLog.create({
               data: {
                 id: auditLogId,
                 bookingId: booking.id,
+                bookingCode: authoritativeBookingCode,
                 action: 'تسجيل دفعة مالية',
                 performedBy,
                 details: auditDetails,
@@ -1114,6 +1125,7 @@ export const db = {
     memoryDB.auditLogs.unshift({
       id: auditLogId,
       bookingId: booking.id,
+      bookingCode: authoritativeBookingCode,
       action: 'تسجيل دفعة مالية',
       performedBy,
       details: auditDetails,
@@ -1233,6 +1245,7 @@ export const db = {
               data: {
                 id: auditLogId,
                 bookingId: booking.id,
+                bookingCode: booking.bookingCode,
                 action: 'إلغاء وعكس دفعة مالية',
                 performedBy,
                 details: cancelDetails,
@@ -1266,6 +1279,7 @@ export const db = {
     memoryDB.auditLogs.unshift({
       id: auditLogId,
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: 'إلغاء وعكس دفعة مالية',
       performedBy,
       details: cancelDetails,
@@ -1366,6 +1380,7 @@ export const db = {
 
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: 'تغيير حالة الحجز',
       performedBy,
       details: `قام الإداري (${performedBy}) بتغيير حالة الحجز ${booking.bookingCode} من (${prevStatus}) إلى (${newStatus}). ملاحظات: ${noteText}.`,
@@ -1556,6 +1571,7 @@ export const db = {
 
     this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: 'إصدار أمر تشغيل المصنع',
       performedBy,
       details: `تم إصدار أمر تشغيل المصنع ${orderNumber} (الإصدار v${version}) بإجمالي ${booking.totalMealsCount} وجبة وتكلفة مصنع ${preview.totalFactoryCost} ج (خالٍ تماماً من هوامش ربح الموزع).${pepsiAuditNote}`,
@@ -1644,6 +1660,7 @@ export const db = {
 
     this.addAuditLog({
       bookingId: fo.bookingId,
+      bookingCode: fo.bookingCode || (booking ? booking.bookingCode : 'FACTORY_ORDER'),
       action: 'تحديث حالة أمر المصنع',
       performedBy,
       details: `تم تحديث حالة أمر المصنع ${fo.orderNumber} إلى ${status}`,
@@ -1653,12 +1670,28 @@ export const db = {
     return fo;
   },
 
-  async addAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'>): Promise<AuditLog> {
+  async addAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'> & { bookingCode?: string }): Promise<AuditLog> {
+    let bCode = (log.bookingCode || '').trim();
+    if (!bCode && log.bookingId) {
+      const b = await this.getBookingById(log.bookingId);
+      if (b && b.bookingCode) {
+        bCode = b.bookingCode.trim();
+      }
+    }
+    if (!bCode) {
+      bCode = 'SYSTEM';
+    }
+
     const newLog: AuditLog = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      bookingId: log.bookingId || '',
+      bookingCode: bCode,
+      action: log.action,
+      performedBy: log.performedBy,
+      details: log.details,
       timestamp: new Date().toISOString(),
-      ...log,
     };
+
     if (!memoryDB || !Array.isArray(memoryDB.auditLogs)) {
       memoryDB = loadLocalDB();
     }
@@ -1673,6 +1706,7 @@ export const db = {
             data: {
               id: newLog.id,
               bookingId: newLog.bookingId || null,
+              bookingCode: newLog.bookingCode,
               action: newLog.action,
               performedBy: newLog.performedBy,
               details: newLog.details,
@@ -1693,8 +1727,11 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
+          const whereClause = bookingId 
+            ? { OR: [{ bookingId }, { bookingCode: bookingId }] } 
+            : undefined;
           const logs = await client.auditLog.findMany({
-            where: bookingId ? { bookingId } : undefined,
+            where: whereClause,
             orderBy: { timestamp: 'desc' },
             take: 50,
           });
@@ -1702,6 +1739,7 @@ export const db = {
             return logs.map(l => ({
               id: l.id,
               bookingId: l.bookingId || '',
+              bookingCode: l.bookingCode || '',
               action: l.action,
               performedBy: l.performedBy,
               details: l.details,
@@ -1716,7 +1754,7 @@ export const db = {
 
     memoryDB = loadLocalDB();
     if (bookingId) {
-      return memoryDB.auditLogs.filter(l => l.bookingId === bookingId);
+      return memoryDB.auditLogs.filter(l => l.bookingId === bookingId || l.bookingCode === bookingId);
     }
     return memoryDB.auditLogs.slice(0, 50);
   },
@@ -1840,6 +1878,7 @@ export const db = {
     // 3. Log audit event
     await this.addAuditLog({
       bookingId: '',
+      bookingCode: 'ADMIN_AUTH',
       action: 'تغيير كلمة مرور الإداري',
       performedBy,
       details: `تم تغيير كلمة المرور للمستخدم (${username}) بنجاح، وتشفيرها عبر bcrypt وإلغاء جميع الجلسات القديمة فوراً.`,
@@ -1903,6 +1942,7 @@ export const db = {
 
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: 'تعديل حجز تجريبي',
       performedBy,
       details: `تم تعديل بيانات الحجز التجريبي ${booking.bookingCode} (الإصدار v${updatedBooking.version}).`,
@@ -1951,6 +1991,7 @@ export const db = {
 
     await this.addAuditLog({
       bookingId: '',
+      bookingCode,
       action: 'حذف حجز تجريبي',
       performedBy,
       details: `تم حذف الحجز التجريبي رقم ${bookingCode} بكافة بنوده التجريبية بعد التأكيد الصريح.`,
@@ -2156,6 +2197,7 @@ export const db = {
 
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: 'تعديل حجز بواسطة الإدارة',
       performedBy,
       details: `تم تعديل بيانات الحجز ${booking.bookingCode} (الإصدار v${updatedBooking.version}). إجمالي الوجبات: ${totalMealsCount}، إجمالي القيمة: ${totalDistributorPrice} ج.`,
@@ -2216,6 +2258,7 @@ export const db = {
 
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: 'تأكيد واعتماد الحجز',
       performedBy,
       details: `تم تأكيد واعتماد الحجز ${booking.bookingCode} (تغيير الحالة من ${prevStatus} إلى CONFIRMED) بواسطة (${performedBy}). إجمالي الوجبات: ${booking.totalMealsCount} وجبة، القيمة: ${booking.totalDistributorPrice} ج.م.`,
@@ -2253,6 +2296,7 @@ export const db = {
 
     await this.addAuditLog({
       bookingId: order.bookingId,
+      bookingCode: order.bookingCode || 'FACTORY_ORDER',
       action: 'تأكيد إرسال أمر التشغيل للمصنع يدوياً',
       performedBy,
       details: `قام الإداري (${performedBy}) بتأكيد إرسال أمر التشغيل ${order.orderNumber} (الإصدار v${order.version}) إلى واتساب المصنع يدوياً في ${now}.`,

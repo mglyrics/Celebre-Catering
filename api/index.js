@@ -702,6 +702,7 @@ var db = {
     }
     this.addAuditLog({
       bookingId: "",
+      bookingCode: updated.code || "MENU_UPDATE",
       action: "\u062A\u062D\u062F\u064A\u062B \u0648\u062C\u0628\u0629 \u0641\u064A \u0627\u0644\u0645\u0646\u064A\u0648",
       performedBy,
       details: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0648\u062C\u0628\u0629 ${updated.code} (${updated.name}). \u0645\u0648\u0632\u0639: ${updated.distributorPrice} \u062C\u060C \u0645\u0635\u0646\u0639: ${updated.factoryPrice} \u062C.`
@@ -861,6 +862,7 @@ var db = {
     }
     this.addAuditLog({
       bookingId: newBooking.id,
+      bookingCode: newBooking.bookingCode,
       action: "\u0625\u0646\u0634\u0627\u0621 \u062D\u062C\u0632 \u0645\u0628\u062F\u0626\u064A",
       performedBy: "\u0627\u0644\u0639\u0645\u064A\u0644 (\u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A)",
       details: `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u062C\u0632 \u0631\u0642\u0645 ${bookingCode} \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u0642\u064A\u0645\u0629 ${totalDistributorPrice} \u062C\u0646\u064A\u0647.`
@@ -975,6 +977,7 @@ var db = {
               auditLogs: b.auditLogs.map((al) => ({
                 id: al.id,
                 bookingId: al.bookingId || "",
+                bookingCode: al.bookingCode || b.bookingCode || "",
                 action: al.action,
                 performedBy: al.performedBy,
                 details: al.details,
@@ -1104,6 +1107,7 @@ var db = {
               auditLogs: b2.auditLogs.map((al) => ({
                 id: al.id,
                 bookingId: al.bookingId || "",
+                bookingCode: al.bookingCode || b2.bookingCode || "",
                 action: al.action,
                 performedBy: al.performedBy,
                 details: al.details,
@@ -1275,6 +1279,7 @@ var db = {
     }
     this.addAuditLog({
       bookingId: updated.id,
+      bookingCode: updated.bookingCode,
       action: "\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u062D\u062C\u0632",
       performedBy,
       details: auditDetail
@@ -1329,6 +1334,10 @@ var db = {
       status: "VALID",
       createdAt: now
     };
+    const authoritativeBookingCode = (booking.bookingCode || "").trim();
+    if (!authoritativeBookingCode) {
+      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0639\u062A\u0645\u062F (bookingCode) \u0644\u0644\u062D\u062C\u0632 ${booking.id} \u0644\u062A\u0648\u062B\u064A\u0642 \u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642`);
+    }
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
@@ -1359,6 +1368,7 @@ var db = {
               data: {
                 id: auditLogId,
                 bookingId: booking.id,
+                bookingCode: authoritativeBookingCode,
                 action: "\u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
                 performedBy,
                 details: auditDetails
@@ -1391,6 +1401,7 @@ var db = {
     memoryDB.auditLogs.unshift({
       id: auditLogId,
       bookingId: booking.id,
+      bookingCode: authoritativeBookingCode,
       action: "\u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
       performedBy,
       details: auditDetails,
@@ -1486,6 +1497,7 @@ var db = {
               data: {
                 id: auditLogId,
                 bookingId: booking.id,
+                bookingCode: booking.bookingCode,
                 action: "\u0625\u0644\u063A\u0627\u0621 \u0648\u0639\u0643\u0633 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
                 performedBy,
                 details: cancelDetails
@@ -1517,6 +1529,7 @@ var db = {
     memoryDB.auditLogs.unshift({
       id: auditLogId,
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: "\u0625\u0644\u063A\u0627\u0621 \u0648\u0639\u0643\u0633 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
       performedBy,
       details: cancelDetails,
@@ -1598,6 +1611,7 @@ var db = {
     }
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: "\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632",
       performedBy,
       details: `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632 ${booking.bookingCode} \u0645\u0646 (${prevStatus}) \u0625\u0644\u0649 (${newStatus}). \u0645\u0644\u0627\u062D\u0638\u0627\u062A: ${noteText}.`
@@ -1755,6 +1769,7 @@ var db = {
     const pepsiAuditNote = pepsiQty > 0 ? ` [\u062A\u0645 \u062A\u0637\u0628\u064A\u0642 \u0645\u0639\u0627\u062F\u0644\u0629 \u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0627\u0644\u0628\u064A\u0628\u0633\u064A \u0644\u0644\u0645\u0635\u0646\u0639: -5 \u062C \u0639\u0635\u064A\u0631 -1 \u062C \u0643\u0631\u062A\u0648\u0646\u0629 +10 \u062C \u0643\u0627\u0646\u0632 = +4 \u062C \u0639\u0644\u0649 ${pepsiQty} \u0648\u062C\u0628\u0629]` : "";
     this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: "\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639",
       performedBy,
       details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 ${preview.totalFactoryCost} \u062C (\u062E\u0627\u0644\u064D \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).${pepsiAuditNote}`
@@ -1836,6 +1851,7 @@ var db = {
     }
     this.addAuditLog({
       bookingId: fo.bookingId,
+      bookingCode: fo.bookingCode || (booking ? booking.bookingCode : "FACTORY_ORDER"),
       action: "\u062A\u062D\u062F\u064A\u062B \u062D\u0627\u0644\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639",
       performedBy,
       details: `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u062D\u0627\u0644\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 ${fo.orderNumber} \u0625\u0644\u0649 ${status}`
@@ -1844,10 +1860,24 @@ var db = {
     return fo;
   },
   async addAuditLog(log) {
+    let bCode = (log.bookingCode || "").trim();
+    if (!bCode && log.bookingId) {
+      const b = await this.getBookingById(log.bookingId);
+      if (b && b.bookingCode) {
+        bCode = b.bookingCode.trim();
+      }
+    }
+    if (!bCode) {
+      bCode = "SYSTEM";
+    }
     const newLog = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      ...log
+      bookingId: log.bookingId || "",
+      bookingCode: bCode,
+      action: log.action,
+      performedBy: log.performedBy,
+      details: log.details,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
     };
     if (!memoryDB || !Array.isArray(memoryDB.auditLogs)) {
       memoryDB = loadLocalDB();
@@ -1862,6 +1892,7 @@ var db = {
             data: {
               id: newLog.id,
               bookingId: newLog.bookingId || null,
+              bookingCode: newLog.bookingCode,
               action: newLog.action,
               performedBy: newLog.performedBy,
               details: newLog.details
@@ -1879,8 +1910,9 @@ var db = {
       try {
         const client = getPrismaClient();
         if (client) {
+          const whereClause = bookingId ? { OR: [{ bookingId }, { bookingCode: bookingId }] } : void 0;
           const logs = await client.auditLog.findMany({
-            where: bookingId ? { bookingId } : void 0,
+            where: whereClause,
             orderBy: { timestamp: "desc" },
             take: 50
           });
@@ -1888,6 +1920,7 @@ var db = {
             return logs.map((l) => ({
               id: l.id,
               bookingId: l.bookingId || "",
+              bookingCode: l.bookingCode || "",
               action: l.action,
               performedBy: l.performedBy,
               details: l.details,
@@ -1901,7 +1934,7 @@ var db = {
     }
     memoryDB = loadLocalDB();
     if (bookingId) {
-      return memoryDB.auditLogs.filter((l) => l.bookingId === bookingId);
+      return memoryDB.auditLogs.filter((l) => l.bookingId === bookingId || l.bookingCode === bookingId);
     }
     return memoryDB.auditLogs.slice(0, 50);
   },
@@ -2008,6 +2041,7 @@ var db = {
     }
     await this.addAuditLog({
       bookingId: "",
+      bookingCode: "ADMIN_AUTH",
       action: "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u0625\u062F\u0627\u0631\u064A",
       performedBy,
       details: `\u062A\u0645 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0644\u0644\u0645\u0633\u062A\u062E\u062F\u0645 (${username}) \u0628\u0646\u062C\u0627\u062D\u060C \u0648\u062A\u0634\u0641\u064A\u0631\u0647\u0627 \u0639\u0628\u0631 bcrypt \u0648\u0625\u0644\u063A\u0627\u0621 \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0642\u062F\u064A\u0645\u0629 \u0641\u0648\u0631\u0627\u064B.`
@@ -2063,6 +2097,7 @@ var db = {
     }
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: "\u062A\u0639\u062F\u064A\u0644 \u062D\u062C\u0632 \u062A\u062C\u0631\u064A\u0628\u064A",
       performedBy,
       details: `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A ${booking.bookingCode} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${updatedBooking.version}).`
@@ -2101,6 +2136,7 @@ var db = {
     saveLocalDB(memoryDB);
     await this.addAuditLog({
       bookingId: "",
+      bookingCode,
       action: "\u062D\u0630\u0641 \u062D\u062C\u0632 \u062A\u062C\u0631\u064A\u0628\u064A",
       performedBy,
       details: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A \u0631\u0642\u0645 ${bookingCode} \u0628\u0643\u0627\u0641\u0629 \u0628\u0646\u0648\u062F\u0647 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0628\u0639\u062F \u0627\u0644\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0635\u0631\u064A\u062D.`
@@ -2262,6 +2298,7 @@ var db = {
     }
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: "\u062A\u0639\u062F\u064A\u0644 \u062D\u062C\u0632 \u0628\u0648\u0627\u0633\u0637\u0629 \u0627\u0644\u0625\u062F\u0627\u0631\u0629",
       performedBy,
       details: `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062D\u062C\u0632 ${booking.bookingCode} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${updatedBooking.version}). \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0648\u062C\u0628\u0627\u062A: ${totalMealsCount}\u060C \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0642\u064A\u0645\u0629: ${totalDistributorPrice} \u062C.`
@@ -2312,6 +2349,7 @@ var db = {
     }
     await this.addAuditLog({
       bookingId: booking.id,
+      bookingCode: booking.bookingCode,
       action: "\u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632",
       performedBy,
       details: `\u062A\u0645 \u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632 ${booking.bookingCode} (\u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u062D\u0627\u0644\u0629 \u0645\u0646 ${prevStatus} \u0625\u0644\u0649 CONFIRMED) \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0648\u062C\u0628\u0627\u062A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629\u060C \u0627\u0644\u0642\u064A\u0645\u0629: ${booking.totalDistributorPrice} \u062C.\u0645.`
@@ -2344,6 +2382,7 @@ var db = {
     }
     await this.addAuditLog({
       bookingId: order.bookingId,
+      bookingCode: order.bookingCode || "FACTORY_ORDER",
       action: "\u062A\u0623\u0643\u064A\u062F \u0625\u0631\u0633\u0627\u0644 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0644\u0644\u0645\u0635\u0646\u0639 \u064A\u062F\u0648\u064A\u0627\u064B",
       performedBy,
       details: `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062A\u0623\u0643\u064A\u062F \u0625\u0631\u0633\u0627\u0644 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${order.version}) \u0625\u0644\u0649 \u0648\u0627\u062A\u0633\u0627\u0628 \u0627\u0644\u0645\u0635\u0646\u0639 \u064A\u062F\u0648\u064A\u0627\u064B \u0641\u064A ${now}.`
