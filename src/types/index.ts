@@ -73,6 +73,28 @@ export type FactoryOrderStatus =
   | 'READY_TO_SEND' 
   | 'MANUALLY_CONFIRMED';
 
+export type FactoryPaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'FULLY_PAID' | 'OVERPAID';
+
+export interface FactoryPayment {
+  id: string;
+  factoryOrderId: string;
+  factoryOrderNumber: string;
+  bookingId: string;
+  bookingCode: string;
+  amount: number;
+  method: 'instapay' | 'bank_transfer' | 'cash' | 'vodafone_cash' | 'other' | string;
+  date: string;
+  notes?: string;
+  receiptNumber?: string;
+  recordedBy: string;
+  status: 'VALID' | 'CANCELLED';
+  cancelledBy?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface FactoryOrder {
   id: string;
   orderNumber: string; // e.g. "FO-2026-001"
@@ -84,6 +106,10 @@ export interface FactoryOrder {
   deliveryTime: string;
   deliveryLocation: string;
   factoryCostTotal?: number; // total at factory prices
+  paidToFactoryAmount?: number; // total paid to factory
+  remainingToFactoryAmount?: number; // remaining owed to factory
+  paymentStatus?: FactoryPaymentStatus;
+  payments?: FactoryPayment[];
   items: {
     mealCode: string;
     mealName: string;

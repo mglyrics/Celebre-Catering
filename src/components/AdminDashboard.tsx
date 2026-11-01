@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Meal, Booking, FactoryOrder, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification } from '../types';
+import { Meal, Booking, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import {
   Lock,
@@ -124,6 +124,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [forceNewVersion, setForceNewVersion] = useState(false);
   const [isSubmittingFactoryOrder, setIsSubmittingFactoryOrder] = useState(false);
   const [factoryOrderError, setFactoryOrderError] = useState<string | null>(null);
+
+  // Factory Order Payments Modal State
+  const [selectedFactoryOrderForPayments, setSelectedFactoryOrderForPayments] = useState<FactoryOrder | null>(null);
+  const [factoryPaymentAmount, setFactoryPaymentAmount] = useState('');
+  const [factoryPaymentDate, setFactoryPaymentDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [factoryPaymentMethod, setFactoryPaymentMethod] = useState<'instapay' | 'bank_transfer' | 'cash' | 'vodafone_cash' | 'other'>('instapay');
+  const [factoryPaymentReceipt, setFactoryPaymentReceipt] = useState('');
+  const [factoryPaymentNotes, setFactoryPaymentNotes] = useState('');
+  const [editingFactoryPayment, setEditingFactoryPayment] = useState<FactoryPayment | null>(null);
+  const [isSubmittingFactoryPayment, setIsSubmittingFactoryPayment] = useState(false);
+  const [factoryPaymentError, setFactoryPaymentError] = useState<string | null>(null);
+
+  // Factory Payment Deletion Confirmation
+  const [deletingFactoryPayment, setDeletingFactoryPayment] = useState<{
+    payment: FactoryPayment;
+    order: FactoryOrder;
+  } | null>(null);
+  const [deleteFactoryPaymentReason, setDeleteFactoryPaymentReason] = useState('حذف دفعة مسجلة بالخطأ');
+  const [isDeletingFactoryPayment, setIsDeletingFactoryPayment] = useState(false);
+  const [deleteFactoryPaymentError, setDeleteFactoryPaymentError] = useState<string | null>(null);
 
   // Test Booking Delete Confirmation Modal State
   const [deletingTestBooking, setDeletingTestBooking] = useState<Booking | null>(null);
@@ -500,6 +520,181 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setTestEditError(err.message || 'حدث خطأ أثناء تعديل الحجز التجريبي');
     } finally {
       setIsSavingTestBooking(false);
+    }
+  };
+
+  const getFactoryPaymentStatusInfo = (fo: FactoryOrder): { label: string; bg: string; text: string; border: string; dot: string } => {
+    const cost = Number(fo.factoryCostTotal) || 0;
+    const paid = Number(fo.paidToFactoryAmount) || 0;
+    const status = fo.paymentStatus || (paid <= 0 ? 'UNPAID' : paid < cost ? 'PARTIALLY_PAID' : paid === cost ? 'FULLY_PAID' : 'OVERPAID');
+
+    if (status === 'OVERPAID' || paid > cost) {
+      return {
+        label: `مسدد بالزيادة (+${(paid - cost).toLocaleString('ar-EG')} ج)`,
+        bg: 'bg-purple-50 text-purple-900 border-purple-300',
+        text: 'text-purple-700',
+        border: 'border-purple-300',
+        dot: 'bg-purple-600',
+      };
+    }
+    if (status === 'FULLY_PAID' || (paid >= cost && cost > 0)) {
+      return {
+        label: 'مدفوع بالكامل',
+        bg: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+        text: 'text-emerald-700',
+        border: 'border-emerald-300',
+        dot: 'bg-emerald-600',
+      };
+    }
+    if (status === 'PARTIALLY_PAID' || (paid > 0 && paid < cost)) {
+      return {
+        label: 'مدفوع جزئياً',
+        bg: 'bg-amber-50 text-amber-900 border-amber-300',
+        text: 'text-amber-700',
+        border: 'border-amber-300',
+        dot: 'bg-amber-500',
+      };
+    }
+    return {
+      label: 'غير مدفوع',
+      bg: 'bg-rose-50 text-rose-900 border-rose-300',
+      text: 'text-rose-700',
+      border: 'border-rose-300',
+      dot: 'bg-rose-500',
+    };
+  };
+
+  const handleOpenFactoryPaymentsModal = (fo: FactoryOrder) => {
+    setSelectedFactoryOrderForPayments(fo);
+    setEditingFactoryPayment(null);
+    setFactoryPaymentAmount('');
+    setFactoryPaymentDate(new Date().toISOString().split('T')[0]);
+    setFactoryPaymentMethod('instapay');
+    setFactoryPaymentReceipt('');
+    setFactoryPaymentNotes('');
+    setFactoryPaymentError(null);
+  };
+
+  const handleEditFactoryPaymentClick = (payment: FactoryPayment) => {
+    setEditingFactoryPayment(payment);
+    setFactoryPaymentAmount(String(payment.amount));
+    setFactoryPaymentDate(payment.date || new Date().toISOString().split('T')[0]);
+    setFactoryPaymentMethod(payment.method as any || 'instapay');
+    setFactoryPaymentReceipt(payment.receiptNumber || '');
+    setFactoryPaymentNotes(payment.notes || '');
+    setFactoryPaymentError(null);
+  };
+
+  const handleCancelEditFactoryPayment = () => {
+    setEditingFactoryPayment(null);
+    setFactoryPaymentAmount('');
+    setFactoryPaymentDate(new Date().toISOString().split('T')[0]);
+    setFactoryPaymentMethod('instapay');
+    setFactoryPaymentReceipt('');
+    setFactoryPaymentNotes('');
+    setFactoryPaymentError(null);
+  };
+
+  const handleSaveFactoryPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFactoryOrderForPayments) return;
+
+    const numAmount = parseFloat(factoryPaymentAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setFactoryPaymentError('يرجى إدخال مبلغ صحيح أكبر من الصفر');
+      return;
+    }
+
+    setIsSubmittingFactoryPayment(true);
+    setFactoryPaymentError(null);
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      let res: Response;
+      if (editingFactoryPayment) {
+        res = await fetch(`/api/admin/factory-payments/${editingFactoryPayment.id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({
+            amount: numAmount,
+            method: factoryPaymentMethod,
+            date: factoryPaymentDate,
+            receiptNumber: factoryPaymentReceipt.trim() || undefined,
+            notes: factoryPaymentNotes.trim() || undefined,
+          }),
+        });
+      } else {
+        res = await fetch(`/api/admin/factory-orders/${selectedFactoryOrderForPayments.id}/payments`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            amount: numAmount,
+            method: factoryPaymentMethod,
+            date: factoryPaymentDate,
+            receiptNumber: factoryPaymentReceipt.trim() || undefined,
+            notes: factoryPaymentNotes.trim() || undefined,
+          }),
+        });
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حفظ دفعة المصنع');
+      }
+
+      setSelectedFactoryOrderForPayments(data.factoryOrder);
+      setFactoryOrders(prev => prev.map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o));
+      handleCancelEditFactoryPayment();
+      loadAllData();
+    } catch (err: any) {
+      setFactoryPaymentError(err.message || 'حدث خطأ أثناء حفظ دفعة المصنع');
+    } finally {
+      setIsSubmittingFactoryPayment(false);
+    }
+  };
+
+  const handleConfirmDeleteFactoryPayment = async () => {
+    if (!deletingFactoryPayment) return;
+
+    setIsDeletingFactoryPayment(true);
+    setDeleteFactoryPaymentError(null);
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`/api/admin/factory-payments/${deletingFactoryPayment.payment.id}`, {
+        method: 'DELETE',
+        headers,
+        body: JSON.stringify({
+          reason: deleteFactoryPaymentReason.trim() || 'حذف دفعة مسجلة بالخطأ',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حذف دفعة المصنع');
+      }
+
+      if (data.factoryOrder) {
+        setSelectedFactoryOrderForPayments(data.factoryOrder);
+        setFactoryOrders(prev => prev.map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o));
+      }
+      setDeletingFactoryPayment(null);
+      setDeleteFactoryPaymentReason('حذف دفعة مسجلة بالخطأ');
+      loadAllData();
+    } catch (err: any) {
+      setDeleteFactoryPaymentError(err.message || 'حدث خطأ أثناء حذف الدفعة');
+    } finally {
+      setIsDeletingFactoryPayment(false);
     }
   };
 
@@ -2078,10 +2273,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <strong>تعليمات التعبئة: </strong> {fo.packagingNotes}
                       </div>
 
-                      <div className="flex justify-end pt-1">
+                      {/* Factory Financial Account & Status (admin only) */}
+                      {currentUser?.role !== 'factory' && (
+                        <div className="bg-[#FCFBF9] p-3 rounded-xl border border-[#EBDDC3] space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                              <DollarSign className="w-3.5 h-3.5 text-[#7A0C2E]" />
+                              <span>حساب تشغيل المصنع المالي</span>
+                            </span>
+                            {(() => {
+                              const pInfo = getFactoryPaymentStatusInfo(fo);
+                              return (
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${pInfo.bg} ${pInfo.border}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${pInfo.dot}`} />
+                                  <span>{pInfo.label}</span>
+                                </span>
+                              );
+                            })()}
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="text-[10px] text-slate-500 block">إجمالي المصنع</span>
+                              <strong className="text-slate-900 font-bold font-mono">
+                                {(fo.factoryCostTotal || 0).toLocaleString('ar-EG')} ج
+                              </strong>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-emerald-200 shadow-2xs">
+                              <span className="text-[10px] text-emerald-700 block">المسدد للمصنع</span>
+                              <strong className="text-emerald-800 font-bold font-mono">
+                                {(fo.paidToFactoryAmount || 0).toLocaleString('ar-EG')} ج
+                              </strong>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="text-[10px] text-slate-500 block">
+                                {(fo.remainingToFactoryAmount ?? 0) < 0 ? 'سداد بالزيادة' : 'المتبقي للمصنع'}
+                              </span>
+                              <strong className={`font-bold font-mono ${(fo.remainingToFactoryAmount ?? 0) < 0 ? 'text-purple-700' : (fo.remainingToFactoryAmount ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {(fo.remainingToFactoryAmount ?? 0) < 0 
+                                  ? `+${Math.abs(fo.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج` 
+                                  : `${(fo.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج`}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                        {currentUser?.role !== 'factory' && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenFactoryPaymentsModal(fo)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold text-xs rounded-lg transition-colors shadow-2xs"
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            <span>إدارة دفعات المصنع ({fo.payments?.length || 0})</span>
+                          </button>
+                        )}
                         <button
+                          type="button"
                           onClick={() => setPrintingFactoryOrder(fo)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FAF8F5] hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-lg border border-slate-300"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FAF8F5] hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-lg border border-slate-300 mr-auto"
                         >
                           <Printer className="w-3.5 h-3.5" />
                           <span>معاينة وطباعة أمر المصنع</span>
@@ -4028,6 +4280,387 @@ APP_URL="https://celebre-eg.com"`}
                 </div>
               </form>
 
+            </div>
+          </div>
+        )}
+
+        {/* Factory Order Payments Management Modal */}
+        {selectedFactoryOrderForPayments && (
+          <div className="fixed inset-0 z-80 bg-black/70 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-5 text-right text-xs">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-2xl">
+                    <CreditCard className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-black text-slate-900">
+                      إدارة دفعات المصنع المالية
+                    </h4>
+                    <p className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                      <span>أمر التشغيل: <strong className="font-mono text-[#7A0C2E]">{selectedFactoryOrderForPayments.orderNumber} (v{selectedFactoryOrderForPayments.version})</strong></span>
+                      <span>•</span>
+                      <span>الحجز: <strong className="font-mono text-slate-700">{selectedFactoryOrderForPayments.bookingCode}</strong></span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFactoryOrderForPayments(null)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Financial Independence Badge */}
+              <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl text-[11px] text-amber-900 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-amber-700 flex-shrink-0" />
+                <span>
+                  <strong>فصل الحسابات:</strong> هذه الحسابات تخص تكاليف ودفعات المصنع والمطبخ المركزي فقط، ومفصولة تماماً عن مدفوعات العميل أو حسابات الموزع.
+                </span>
+              </div>
+
+              {/* Financial KPI Dashboard */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 bg-[#FAF8F5] rounded-2xl border border-slate-200 text-center">
+                  <span className="text-[11px] text-slate-500 block">إجمالي أمر المصنع</span>
+                  <strong className="text-sm font-black text-slate-900 font-mono mt-0.5 block">
+                    {(selectedFactoryOrderForPayments.factoryCostTotal || 0).toLocaleString('ar-EG')} ج.م
+                  </strong>
+                </div>
+
+                <div className="p-3 bg-emerald-50/70 rounded-2xl border border-emerald-200 text-center">
+                  <span className="text-[11px] text-emerald-700 block">المسدد للمصنع</span>
+                  <strong className="text-sm font-black text-emerald-800 font-mono mt-0.5 block">
+                    {(selectedFactoryOrderForPayments.paidToFactoryAmount || 0).toLocaleString('ar-EG')} ج.م
+                  </strong>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center">
+                  <span className="text-[11px] text-slate-500 block">
+                    {(selectedFactoryOrderForPayments.remainingToFactoryAmount ?? 0) < 0 ? 'سداد بالزيادة' : 'المتبقي للمصنع'}
+                  </span>
+                  <strong className={`text-sm font-black font-mono mt-0.5 block ${(selectedFactoryOrderForPayments.remainingToFactoryAmount ?? 0) < 0 ? 'text-purple-700' : (selectedFactoryOrderForPayments.remainingToFactoryAmount ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {(selectedFactoryOrderForPayments.remainingToFactoryAmount ?? 0) < 0 
+                      ? `+${Math.abs(selectedFactoryOrderForPayments.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج.م` 
+                      : `${(selectedFactoryOrderForPayments.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج.م`}
+                  </strong>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center flex flex-col justify-center items-center">
+                  <span className="text-[11px] text-slate-500 block mb-1">حالة السداد</span>
+                  {(() => {
+                    const pInfo = getFactoryPaymentStatusInfo(selectedFactoryOrderForPayments);
+                    return (
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${pInfo.bg} ${pInfo.border}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${pInfo.dot}`} />
+                        <span>{pInfo.label}</span>
+                      </span>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Add / Edit Payment Form */}
+              <div className="p-4 bg-[#FAF8F5] rounded-2xl border border-[#EBDDC3] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                    {editingFactoryPayment ? (
+                      <>
+                        <Edit className="w-4 h-4 text-blue-600" />
+                        <span>تعديل دفعة مسجلة للمصنع (معرف: {editingFactoryPayment.id})</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4 text-[#7A0C2E]" />
+                        <span>تسجيل دفعة مالية جديدة للمصنع</span>
+                      </>
+                    )}
+                  </span>
+                  {editingFactoryPayment && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditFactoryPayment}
+                      className="text-[11px] text-slate-500 hover:text-slate-700 underline font-bold"
+                    >
+                      إلغاء التعديل والعودة للإضافة
+                    </button>
+                  )}
+                </div>
+
+                {factoryPaymentError && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{factoryPaymentError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveFactoryPayment} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">
+                        المبلغ المدفوع (بالجنيه) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="any"
+                        required
+                        placeholder="مثال: 5000"
+                        value={factoryPaymentAmount}
+                        onChange={(e) => setFactoryPaymentAmount(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-[#7A0C2E]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">
+                        تاريخ السداد <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={factoryPaymentDate}
+                        onChange={(e) => setFactoryPaymentDate(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#7A0C2E]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">
+                        طريقة السداد <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={factoryPaymentMethod}
+                        onChange={(e) => setFactoryPaymentMethod(e.target.value as any)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#7A0C2E]"
+                      >
+                        <option value="instapay">إنستاباي (InstaPay)</option>
+                        <option value="bank_transfer">تحويل بنكي</option>
+                        <option value="cash">نقدي (كاش)</option>
+                        <option value="vodafone_cash">فودافون كاش</option>
+                        <option value="other">أخرى</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">
+                        رقم مرجع التحويل أو الإيصال (إن وجد)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="مثال: INSTA-883719"
+                        value={factoryPaymentReceipt}
+                        onChange={(e) => setFactoryPaymentReceipt(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:border-[#7A0C2E]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">
+                        ملاحظات الإدارة
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="مثال: عربون تشغيل 50% أو تسوية ختامية"
+                        value={factoryPaymentNotes}
+                        onChange={(e) => setFactoryPaymentNotes(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-[#7A0C2E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    {editingFactoryPayment && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditFactoryPayment}
+                        className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl text-xs"
+                      >
+                        إلغاء
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isSubmittingFactoryPayment}
+                      className="px-5 py-2 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold rounded-xl text-xs shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {editingFactoryPayment ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isSubmittingFactoryPayment ? 'جاري الحفظ...' : 'حفظ تعديلات الدفعة'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{isSubmittingFactoryPayment ? 'جاري التسجيل...' : 'تسجيل دفعة للمصنع'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Chronological Payment History */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>السجل الزمني لدفعات أمر المصنع ({selectedFactoryOrderForPayments.payments?.length || 0})</span>
+                  </h5>
+                </div>
+
+                {(!selectedFactoryOrderForPayments.payments || selectedFactoryOrderForPayments.payments.length === 0) ? (
+                  <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    لم يتم تسجيل أي دفعات مالية لهذا الأمر حتى الآن.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl bg-white shadow-2xs">
+                    <table className="w-full text-right border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[#FAF8F5] border-b border-slate-200 text-slate-600 text-[11px] font-bold">
+                          <th className="p-3">تاريخ السداد</th>
+                          <th className="p-3">المبلغ المدفوع</th>
+                          <th className="p-3">طريقة السداد</th>
+                          <th className="p-3">رقم الإيصال / المرجع</th>
+                          <th className="p-3">المسؤول والملاحظات</th>
+                          <th className="p-3 text-center">الإجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedFactoryOrderForPayments.payments.map((p) => (
+                          <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-3 font-mono font-bold text-slate-800 whitespace-nowrap">
+                              {p.date}
+                            </td>
+                            <td className="p-3 font-mono font-black text-emerald-800 text-sm whitespace-nowrap">
+                              {p.amount.toLocaleString('ar-EG')} ج.م
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px]">
+                                {p.method === 'instapay' ? 'إنستاباي' : p.method === 'bank_transfer' ? 'تحويل بنكي' : p.method === 'cash' ? 'نقدي' : p.method === 'vodafone_cash' ? 'فودافون كاش' : p.method}
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono text-slate-600 text-[11px]">
+                              {p.receiptNumber || '—'}
+                            </td>
+                            <td className="p-3 text-slate-600 text-[11px]">
+                              <div>بواسطة: <strong className="text-slate-800">{p.recordedBy}</strong></div>
+                              {p.notes && <div className="text-slate-500 text-[10px] mt-0.5">{p.notes}</div>}
+                            </td>
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditFactoryPaymentClick(p)}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="تعديل الدفعة"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingFactoryPayment({ payment: p, order: selectedFactoryOrderForPayments })}
+                                  className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                  title="حذف الدفعة"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFactoryOrderForPayments(null)}
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors"
+                >
+                  إغلاق
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* Delete Factory Payment Confirmation Modal */}
+        {deletingFactoryPayment && (
+          <div className="fixed inset-0 z-90 bg-black/75 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right text-xs">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h4 className="text-base font-black text-slate-900">
+                  تأكيد حذف دفعة المصنع المالية
+                </h4>
+                <p className="text-slate-500 text-[11px]">
+                  سيتم حذف الدفعة المسجلة بالخطأ وإعادة احتساب الرصيد المتبقي للمصنع تلقائياً.
+                </p>
+              </div>
+
+              {deleteFactoryPaymentError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{deleteFactoryPaymentError}</span>
+                </div>
+              )}
+
+              <div className="p-3 bg-[#FAF8F5] rounded-xl border border-slate-200 space-y-1.5 text-slate-700 text-[11px]">
+                <div>أمر التشغيل: <strong className="font-mono text-[#7A0C2E]">{deletingFactoryPayment.order.orderNumber}</strong></div>
+                <div>قيمة الدفعة: <strong className="font-mono text-emerald-800 font-bold">{deletingFactoryPayment.payment.amount.toLocaleString('ar-EG')} ج.م</strong></div>
+                <div>طريقة السداد: <strong>{deletingFactoryPayment.payment.method}</strong></div>
+                {deletingFactoryPayment.payment.receiptNumber && (
+                  <div>رقم الإيصال: <strong className="font-mono">{deletingFactoryPayment.payment.receiptNumber}</strong></div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  سبب الحذف لتوثيقه في سجل التدقيق (Audit Logs):
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={deleteFactoryPaymentReason}
+                  onChange={(e) => setDeleteFactoryPaymentReason(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl text-xs text-slate-800 focus:outline-none focus:border-[#7A0C2E]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  disabled={isDeletingFactoryPayment}
+                  onClick={() => setDeletingFactoryPayment(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingFactoryPayment}
+                  onClick={handleConfirmDeleteFactoryPayment}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeletingFactoryPayment ? 'جاري الحذف...' : 'تأكيد حذف الدفعة'}</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

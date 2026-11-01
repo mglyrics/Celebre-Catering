@@ -25,10 +25,9 @@ async function runTests() {
   // Verify constant definition
   assert(
     FACTORY_PEPSI_ACCOUNTING.juiceCostDeduction === 5 &&
-    FACTORY_PEPSI_ACCOUNTING.cartonCostDeduction === 1 &&
     FACTORY_PEPSI_ACCOUNTING.pepsiCostAddition === 10 &&
-    FACTORY_PEPSI_ACCOUNTING.netAdjustment === 4,
-    'ثوابت معادلة البيبسي للمصنع: خصم 5 ج (عصير) و 1 ج (كرتونة) وإضافة 10 ج (بيبسي) = صافي +4 ج'
+    FACTORY_PEPSI_ACCOUNTING.netAdjustment === 5,
+    'ثوابت معادلة البيبسي للمصنع: خصم 5 ج (عصير) وإضافة 10 ج (بيبسي) = صافي +5 ج'
   );
 
   // Get meal Sale-12 (باتية) whose base factory price is exactly 32 EGP

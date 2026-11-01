@@ -98,22 +98,51 @@ model Payment {
 }
 
 model FactoryOrder {
-  id              String   @id @default(uuid())
-  orderNumber     String   @unique // e.g. "FO-2026-001"
-  bookingId       String
-  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  bookingCode     String
-  version         Int      @default(1)
-  status          String   @default("PENDING") // PENDING, PREPARING, COMPLETED
-  eventDate       String
-  deliveryTime    String
+  id               String           @id @default(uuid())
+  orderNumber      String           @unique // e.g. "FO-2026-001"
+  bookingId        String
+  booking          Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingCode      String
+  version          Int              @default(1)
+  status           String           @default("PENDING") // PENDING, PREPARING, COMPLETED
+  eventDate        String
+  deliveryTime     String
   deliveryLocation String
-  itemsJson       String   // JSON string of kitchen items without distributor profit margins
-  packagingNotes  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  itemsJson        String           // JSON string of kitchen items without distributor profit margins
+  packagingNotes   String?
+  factoryCostTotal Float?           @default(0)
+  paidAmount       Float?           @default(0)
+  remainingAmount  Float?           @default(0)
+  paymentStatus    String?          @default("UNPAID") // UNPAID, PARTIALLY_PAID, FULLY_PAID, OVERPAID
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  payments         FactoryPayment[]
 
   @@map("factory_orders")
+}
+
+model FactoryPayment {
+  id                 String       @id @default(uuid())
+  factoryOrderId     String
+  factoryOrder       FactoryOrder @relation(fields: [factoryOrderId], references: [id], onDelete: Cascade)
+  factoryOrderNumber String
+  bookingId          String
+  bookingCode        String
+  amount             Float
+  method             String       // instapay, bank_transfer, cash, vodafone_cash, other
+  date               String
+  notes              String?
+  receiptNumber      String?
+  recordedBy         String       @default("الإدارة")
+  status             String       @default("VALID")
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  cancelReason       String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@map("factory_payments")
 }
 
 model AuditLog {

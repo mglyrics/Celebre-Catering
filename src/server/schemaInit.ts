@@ -15,6 +15,7 @@ export const REQUIRED_TABLES = [
   'booking_items',
   'payments',
   'factory_orders',
+  'factory_payments',
   'audit_logs',
   'admin_users',
 ];
@@ -111,6 +112,31 @@ export const TABLE_DDL_QUERIES: Record<string, string> = {
       "deliveryLocation" TEXT NOT NULL,
       "itemsJson" TEXT NOT NULL,
       "packagingNotes" TEXT,
+      "factoryCostTotal" DOUBLE PRECISION DEFAULT 0,
+      "paidAmount" DOUBLE PRECISION DEFAULT 0,
+      "remainingAmount" DOUBLE PRECISION DEFAULT 0,
+      "paymentStatus" TEXT DEFAULT 'UNPAID',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  factory_payments: `
+    CREATE TABLE IF NOT EXISTS "factory_payments" (
+      "id" TEXT PRIMARY KEY,
+      "factoryOrderId" TEXT NOT NULL REFERENCES "factory_orders"("id") ON DELETE CASCADE,
+      "factoryOrderNumber" TEXT NOT NULL,
+      "bookingId" TEXT NOT NULL,
+      "bookingCode" TEXT NOT NULL,
+      "amount" DOUBLE PRECISION NOT NULL,
+      "method" TEXT NOT NULL,
+      "date" TEXT NOT NULL,
+      "notes" TEXT,
+      "receiptNumber" TEXT,
+      "recordedBy" TEXT NOT NULL DEFAULT 'الإدارة',
+      "status" TEXT NOT NULL DEFAULT 'VALID',
+      "cancelledBy" TEXT,
+      "cancelledAt" TIMESTAMP(3),
+      "cancelReason" TEXT,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );

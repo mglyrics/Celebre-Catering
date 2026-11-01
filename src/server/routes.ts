@@ -883,6 +883,110 @@ apiRouter.patch('/admin/factory-orders/:id/status', requireAuth, async (req: Aut
   }
 });
 
+// Get Single Factory Order Details
+apiRouter.get('/admin/factory-orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const order = await db.getFactoryOrderById(id);
+    if (!order) {
+      res.status(404).json({ error: 'أمر المصنع غير موجود' });
+      return;
+    }
+
+    if (req.user?.role === 'factory') {
+      const { factoryCostTotal, paidToFactoryAmount, remainingToFactoryAmount, paymentStatus, ...safeOrder } = order;
+      res.json(safeOrder);
+      return;
+    }
+
+    res.json(order);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List Factory Order Payments
+apiRouter.get('/admin/factory-orders/:id/payments', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const payments = await db.getFactoryPayments(id);
+    res.json(payments);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Record Payment to Factory
+apiRouter.post('/admin/factory-orders/:id/payments', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, method, date, notes, receiptNumber } = req.body || {};
+
+    if (!amount || Number(amount) <= 0) {
+      res.status(400).json({ error: 'قيمة دفعة المصنع يجب أن تكون رقماً أكبر من الصفر' });
+      return;
+    }
+
+    const result = await db.addFactoryPayment(
+      {
+        factoryOrderId: id,
+        amount: Number(amount),
+        method: method || 'cash',
+        date,
+        notes,
+        receiptNumber,
+      },
+      req.user?.name || req.user?.username || 'الإدارة'
+    );
+
+    res.json({ success: true, payment: result.payment, factoryOrder: result.factoryOrder });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Update Factory Payment
+apiRouter.put('/admin/factory-payments/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, method, date, notes, receiptNumber } = req.body || {};
+
+    const result = await db.updateFactoryPayment(
+      id,
+      {
+        amount: amount !== undefined ? Number(amount) : undefined,
+        method,
+        date,
+        notes,
+        receiptNumber,
+      },
+      req.user?.name || req.user?.username || 'الإدارة'
+    );
+
+    res.json({ success: true, payment: result.payment, factoryOrder: result.factoryOrder });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Delete Factory Payment
+apiRouter.delete('/admin/factory-payments/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    const result = await db.deleteFactoryPayment(
+      id,
+      req.user?.name || req.user?.username || 'الإدارة',
+      reason || 'حذف دفعة مسجلة بالخطأ'
+    );
+
+    res.json({ success: true, message: 'تم حذف دفعة المصنع بنجاح', factoryOrder: result.factoryOrder });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Overall stats & financial analytics (super_admin / admin only)
 apiRouter.get('/admin/stats', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {

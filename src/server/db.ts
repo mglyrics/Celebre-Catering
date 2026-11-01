@@ -2,24 +2,23 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
-import { Meal, Booking, BookingStatus, PaymentRecord, FactoryOrder, AuditLog, AdminUser, DrinkModification } from '../types';
+import { Meal, Booking, BookingStatus, PaymentRecord, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AuditLog, AdminUser, DrinkModification } from '../types';
 import { INITIAL_MEALS, CELEBRE_CONFIG } from '../data/defaultMeals';
 
 /**
- * Independent Accounting Rule for Factory Order:
- * Juice-to-Pepsi Replacement Formula (Factory Only):
- * 1. Deduct 5 EGP (juice cost)
- * 2. Deduct 1 EGP (carton box cost)
- * 3. Add 10 EGP (pepsi can cost)
- * Net Factory Price = Factory Base Price - 5 - 1 + 10 = Factory Base Price + 4 EGP
+ * Independent Factory Accounting Configuration for Drink Modifications:
+ * 1. Juice Removal (no_juice): Deduct 5 EGP from factory base price.
+ * 2. Juice Replacement with Pepsi (pepsi):
+ *    - Deduct 5 EGP (juice cost) from factory base price.
+ *    - Add 10 EGP (pepsi can cost) to factory base price.
+ *    Net factory formula: Factory Base Price - 5 + 10 = Factory Base Price + 5 EGP net.
  * Strictly applies ONLY to Factory Orders / WhatsApp tickets when meal originally has juice.
  * Customer and distributor prices remain strictly untouched.
  */
 export const FACTORY_PEPSI_ACCOUNTING = {
   juiceCostDeduction: 5,
-  cartonCostDeduction: 1,
   pepsiCostAddition: 10,
-  netAdjustment: 4, // -5 - 1 + 10 = +4 EGP
+  netAdjustment: 5, // -5 (juice) + 10 (can) = +5 EGP net
 };
 
 const IS_SERVERLESS = Boolean(
@@ -39,6 +38,7 @@ interface DatabaseSchema {
   bookings: Booking[];
   payments: PaymentRecord[];
   factoryOrders: FactoryOrder[];
+  factoryPayments: FactoryPayment[];
   auditLogs: AuditLog[];
   adminUsers: (AdminUser & { passwordHash: string })[];
   factoryOrderCounter: number;
@@ -91,6 +91,7 @@ function getInitialData(): DatabaseSchema {
     bookings: [],
     payments: [],
     factoryOrders: [],
+    factoryPayments: [],
     auditLogs: [],
     adminUsers: [
       {
@@ -122,6 +123,7 @@ function loadLocalDB(): DatabaseSchema {
       if (fs.existsSync(seedFile)) {
         try {
           initial = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
+          if (!initial.factoryPayments) initial.factoryPayments = [];
         } catch {
           initial = getInitialData();
         }
@@ -137,6 +139,7 @@ function loadLocalDB(): DatabaseSchema {
     }
     const raw = fs.readFileSync(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw) as DatabaseSchema;
+    if (!parsed.factoryPayments) parsed.factoryPayments = [];
     
     // Ensure all 18 meals exist if db was initialized with fewer
     if (!parsed.meals || parsed.meals.length < 18) {
@@ -1405,29 +1408,28 @@ export const db = {
       const hasJuice = meal ? meal.hasJuice : true;
 
       // Independent Factory Pricing Formula:
-      // When customer replaced juice with Pepsi AND meal originally has juice:
-      // Factory Pepsi Price = Factory Base Price - 5 (juice) - 1 (carton) + 10 (can) = Factory Base Price + 4 EGP
+      // 1. Remove juice (no_juice): -5 EGP from factory base price
+      // 2. Replace juice with Pepsi (pepsi): -5 (juice) + 10 (pepsi) = +5 EGP net to factory base price
       let factoryDrinkDelta = 0;
       let drinkLabel = 'عصير بخيرة القياسي';
       let specialInstructions = 'عصير بخيرة القياسي';
 
       if (hasJuice) {
         if (item.drinkOption === 'pepsi') {
-          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
           drinkLabel = 'استبدال العصير بكانز بيبسي';
-          specialInstructions = `استبدال العصير بكانز بيبسي (+${FACTORY_PEPSI_ACCOUNTING.netAdjustment} ج مصنع: -5 عصير -1 كرتونة +10 كانز)`;
+          specialInstructions = 'استبدال العصير بكانز بيبسي';
         } else if (item.drinkOption === 'no_juice') {
-          // If customer removed juice without replacement: do NOT add pepsi price
           factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 EGP
           drinkLabel = 'بدون عصير';
-          specialInstructions = `بدون عصير (-${CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount} ج مصنع، لا يضاف سعر البيبسي)`;
+          specialInstructions = 'بدون عصير';
         } else {
           drinkLabel = 'عصير بخيرة القياسي';
           specialInstructions = 'عصير بخيرة القياسي';
         }
       } else {
         drinkLabel = 'بدون عصير (أصلية)';
-        specialInstructions = 'وجبة أصلية بدون عصير (لا تتأثر بالمعادلة)';
+        specialInstructions = 'وجبة أصلية بدون عصير';
       }
 
       const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta);
@@ -1509,6 +1511,10 @@ export const db = {
       deliveryTime: booking.deliveryTime,
       deliveryLocation: preview.deliveryLocation,
       factoryCostTotal: preview.totalFactoryCost,
+      paidToFactoryAmount: 0,
+      remainingToFactoryAmount: preview.totalFactoryCost,
+      paymentStatus: 'UNPAID',
+      payments: [],
       items: preview.items,
       packagingNotes: preview.packagingNotes,
       createdAt: new Date().toISOString(),
@@ -1535,6 +1541,10 @@ export const db = {
               deliveryLocation: factoryOrder.deliveryLocation,
               itemsJson: JSON.stringify(factoryOrder.items),
               packagingNotes: factoryOrder.packagingNotes,
+              factoryCostTotal: factoryOrder.factoryCostTotal,
+              paidAmount: 0,
+              remainingAmount: factoryOrder.remainingToFactoryAmount,
+              paymentStatus: 'UNPAID',
             },
           });
 
@@ -1566,7 +1576,7 @@ export const db = {
     );
     const pepsiQty = pepsiAdjustedItems.reduce((acc, it) => acc + it.quantity, 0);
     const pepsiAuditNote = pepsiQty > 0
-      ? ` [تم تطبيق معادلة استبدال العصير بالبيبسي للمصنع: -5 ج عصير -1 ج كرتونة +10 ج كانز = +4 ج على ${pepsiQty} وجبة]`
+      ? ` [تم تطبيق معادلة استبدال العصير بالبيبسي للمصنع: -5 ج عصير +10 ج كانز = +5 ج على ${pepsiQty} وجبة]`
       : '';
 
     this.addAuditLog({
@@ -1587,6 +1597,11 @@ export const db = {
         const client = getPrismaClient();
         if (client) {
           const dbOrders = await client.factoryOrder.findMany({
+            include: {
+              payments: {
+                orderBy: { createdAt: 'desc' },
+              },
+            },
             orderBy: { createdAt: 'desc' },
           });
           if (dbOrders && dbOrders.length > 0) {
@@ -1595,7 +1610,44 @@ export const db = {
               try {
                 parsedItems = JSON.parse(fo.itemsJson);
               } catch {}
-              const costTotal = parsedItems.reduce((acc: number, item: any) => acc + (item.totalFactoryPrice || 0), 0);
+              const itemsTotal = parsedItems.reduce((acc: number, item: any) => acc + (item.totalFactoryPrice || 0), 0);
+              const costTotal = (fo.factoryCostTotal && fo.factoryCostTotal > 0) ? fo.factoryCostTotal : itemsTotal;
+
+              const paymentsList: FactoryPayment[] = (fo.payments || []).map((p: any) => ({
+                id: p.id,
+                factoryOrderId: p.factoryOrderId,
+                factoryOrderNumber: p.factoryOrderNumber,
+                bookingId: p.bookingId,
+                bookingCode: p.bookingCode,
+                amount: p.amount,
+                method: p.method,
+                date: p.date,
+                notes: p.notes || undefined,
+                receiptNumber: p.receiptNumber || undefined,
+                recordedBy: p.recordedBy,
+                status: p.status as any,
+                cancelledBy: p.cancelledBy || undefined,
+                cancelledAt: p.cancelledAt ? p.cancelledAt.toISOString() : undefined,
+                cancelReason: p.cancelReason || undefined,
+                createdAt: p.createdAt.toISOString(),
+                updatedAt: p.updatedAt ? p.updatedAt.toISOString() : undefined,
+              }));
+
+              const validPayments = paymentsList.filter(p => p.status === 'VALID');
+              const paidAmount = validPayments.reduce((sum, p) => sum + p.amount, 0);
+              const remainingAmount = costTotal - paidAmount;
+
+              let paymentStatus: FactoryPaymentStatus = 'UNPAID';
+              if (paidAmount <= 0) {
+                paymentStatus = 'UNPAID';
+              } else if (paidAmount < costTotal) {
+                paymentStatus = 'PARTIALLY_PAID';
+              } else if (paidAmount === costTotal) {
+                paymentStatus = 'FULLY_PAID';
+              } else {
+                paymentStatus = 'OVERPAID';
+              }
+
               return {
                 id: fo.id,
                 orderNumber: fo.orderNumber,
@@ -1607,6 +1659,10 @@ export const db = {
                 deliveryTime: fo.deliveryTime,
                 deliveryLocation: fo.deliveryLocation,
                 factoryCostTotal: costTotal,
+                paidToFactoryAmount: paidAmount,
+                remainingToFactoryAmount: remainingAmount,
+                paymentStatus,
+                payments: paymentsList,
                 items: parsedItems,
                 packagingNotes: fo.packagingNotes || '',
                 createdAt: fo.createdAt.toISOString(),
@@ -1621,7 +1677,512 @@ export const db = {
     }
 
     memoryDB = loadLocalDB();
-    return memoryDB.factoryOrders;
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+
+    return memoryDB.factoryOrders.map(fo => {
+      const parsedItems = fo.items || [];
+      const itemsTotal = parsedItems.reduce((acc: number, item: any) => acc + (item.totalFactoryPrice || 0), 0);
+      const costTotal = (fo.factoryCostTotal && fo.factoryCostTotal > 0) ? fo.factoryCostTotal : itemsTotal;
+
+      const paymentsList = memoryDB.factoryPayments.filter(
+        p => p.factoryOrderId === fo.id || p.factoryOrderNumber === fo.orderNumber
+      );
+      const validPayments = paymentsList.filter(p => p.status === 'VALID');
+      const paidAmount = validPayments.reduce((sum, p) => sum + p.amount, 0);
+      const remainingAmount = costTotal - paidAmount;
+
+      let paymentStatus: FactoryPaymentStatus = 'UNPAID';
+      if (paidAmount <= 0) {
+        paymentStatus = 'UNPAID';
+      } else if (paidAmount < costTotal) {
+        paymentStatus = 'PARTIALLY_PAID';
+      } else if (paidAmount === costTotal) {
+        paymentStatus = 'FULLY_PAID';
+      } else {
+        paymentStatus = 'OVERPAID';
+      }
+
+      return {
+        ...fo,
+        factoryCostTotal: costTotal,
+        paidToFactoryAmount: paidAmount,
+        remainingToFactoryAmount: remainingAmount,
+        paymentStatus,
+        payments: paymentsList,
+      };
+    });
+  },
+
+  async getFactoryOrderById(idOrNumber: string): Promise<FactoryOrder | null> {
+    const orders = await this.getFactoryOrders();
+    const clean = (idOrNumber || '').trim();
+    return orders.find(o => o.id === clean || o.orderNumber === clean) || null;
+  },
+
+  async getFactoryPayments(factoryOrderId?: string): Promise<FactoryPayment[]> {
+    if (factoryOrderId) {
+      const order = await this.getFactoryOrderById(factoryOrderId);
+      return order?.payments || [];
+    }
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const list = await client.factoryPayment.findMany({
+            orderBy: { createdAt: 'desc' },
+          });
+          return list.map((p: any) => ({
+            id: p.id,
+            factoryOrderId: p.factoryOrderId,
+            factoryOrderNumber: p.factoryOrderNumber,
+            bookingId: p.bookingId,
+            bookingCode: p.bookingCode,
+            amount: p.amount,
+            method: p.method,
+            date: p.date,
+            notes: p.notes || undefined,
+            receiptNumber: p.receiptNumber || undefined,
+            recordedBy: p.recordedBy,
+            status: p.status as any,
+            cancelledBy: p.cancelledBy || undefined,
+            cancelledAt: p.cancelledAt ? p.cancelledAt.toISOString() : undefined,
+            cancelReason: p.cancelReason || undefined,
+            createdAt: p.createdAt.toISOString(),
+            updatedAt: p.updatedAt ? p.updatedAt.toISOString() : undefined,
+          }));
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.getFactoryPayments.prisma');
+      }
+    }
+
+    memoryDB = loadLocalDB();
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+    return [...memoryDB.factoryPayments].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  },
+
+  async addFactoryPayment(data: {
+    factoryOrderId: string;
+    amount: number;
+    method: FactoryPayment['method'];
+    date?: string;
+    notes?: string;
+    receiptNumber?: string;
+  }, performedBy = 'الإدارة'): Promise<{ payment: FactoryPayment; factoryOrder: FactoryOrder }> {
+    const cleanOrderId = (data.factoryOrderId || '').trim();
+    const order = await this.getFactoryOrderById(cleanOrderId);
+    if (!order) {
+      throw new Error('أمر تشغيل المصنع غير موجود لتسجيل الدفعة');
+    }
+
+    const numAmount = Number(data.amount);
+    if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
+      throw new Error('قيمة دفعة المصنع يجب أن تكون رقماً موجباً أكبر من الصفر');
+    }
+
+    const cleanReceipt = data.receiptNumber?.trim();
+    if (cleanReceipt) {
+      const existingDuplicate = (order.payments || []).find(
+        p => p.status === 'VALID' && p.receiptNumber && p.receiptNumber.trim().toLowerCase() === cleanReceipt.toLowerCase()
+      );
+      if (existingDuplicate) {
+        throw new Error(`يوجد بالفعل دفعة مسجلة لنفس أمر المصنع بنفس رقم الإيصال / المرجع (${cleanReceipt}) بقيمة ${existingDuplicate.amount} ج.`);
+      }
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const paymentId = `fpay-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+    const newPayment: FactoryPayment = {
+      id: paymentId,
+      factoryOrderId: order.id,
+      factoryOrderNumber: order.orderNumber,
+      bookingId: order.bookingId,
+      bookingCode: order.bookingCode,
+      amount: numAmount,
+      method: data.method || 'cash',
+      date: data.date?.trim() || nowIso.split('T')[0],
+      notes: data.notes?.trim() || undefined,
+      receiptNumber: cleanReceipt || undefined,
+      recordedBy: performedBy,
+      status: 'VALID',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    // Recalculate balances
+    const priorValidPayments = (order.payments || []).filter(p => p.status === 'VALID');
+    const newPaid = priorValidPayments.reduce((acc, p) => acc + p.amount, 0) + numAmount;
+    const costTotal = order.factoryCostTotal || 0;
+    const newRemaining = costTotal - newPaid;
+
+    let newStatus: FactoryPaymentStatus = 'UNPAID';
+    if (newPaid <= 0) {
+      newStatus = 'UNPAID';
+    } else if (newPaid < costTotal) {
+      newStatus = 'PARTIALLY_PAID';
+    } else if (newPaid === costTotal) {
+      newStatus = 'FULLY_PAID';
+    } else {
+      newStatus = 'OVERPAID';
+    }
+
+    const auditDetail = `تم تسجيل دفعة مالية للمصنع بقيمة ${numAmount} ج.م بطريقة (${newPayment.method}) لأمر التشغيل ${order.orderNumber} (حجز: ${order.bookingCode}) بواسطة (${performedBy}). المسدد للمصنع: ${newPaid} ج، المتبقي: ${newRemaining} ج.${cleanReceipt ? ` مرجع: ${cleanReceipt}.` : ''}${newStatus === 'OVERPAID' ? ` [تنبيه: سداد بالزيادة قدره ${newPaid - costTotal} ج]` : ''}`;
+
+    // Execute in PostgreSQL transaction if configured
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.factoryPayment.create({
+              data: {
+                id: newPayment.id,
+                factoryOrderId: order.id,
+                factoryOrderNumber: order.orderNumber,
+                bookingId: order.bookingId,
+                bookingCode: order.bookingCode,
+                amount: newPayment.amount,
+                method: newPayment.method,
+                date: newPayment.date,
+                notes: newPayment.notes,
+                receiptNumber: newPayment.receiptNumber,
+                recordedBy: newPayment.recordedBy,
+                status: newPayment.status,
+              },
+            });
+
+            await tx.factoryOrder.update({
+              where: { id: order.id },
+              data: {
+                paidAmount: newPaid,
+                remainingAmount: newRemaining,
+                paymentStatus: newStatus,
+                updatedAt: now,
+              },
+            });
+
+            await tx.auditLog.create({
+              data: {
+                id: `al-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                bookingId: order.bookingId,
+                bookingCode: order.bookingCode,
+                action: 'تسجيل دفعة مصنع',
+                performedBy,
+                details: auditDetail,
+              },
+            });
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.addFactoryPayment.prisma');
+      }
+    }
+
+    // Save in memoryDB
+    memoryDB = loadLocalDB();
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+    memoryDB.factoryPayments.unshift(newPayment);
+
+    const memOrderIdx = memoryDB.factoryOrders.findIndex(o => o.id === order.id || o.orderNumber === order.orderNumber);
+    if (memOrderIdx !== -1) {
+      memoryDB.factoryOrders[memOrderIdx].paidToFactoryAmount = newPaid;
+      memoryDB.factoryOrders[memOrderIdx].remainingToFactoryAmount = newRemaining;
+      memoryDB.factoryOrders[memOrderIdx].paymentStatus = newStatus;
+      memoryDB.factoryOrders[memOrderIdx].updatedAt = nowIso;
+    }
+
+    if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
+    memoryDB.auditLogs.unshift({
+      id: `al-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      bookingId: order.bookingId,
+      bookingCode: order.bookingCode,
+      action: 'تسجيل دفعة مصنع',
+      performedBy,
+      details: auditDetail,
+      timestamp: nowIso,
+    });
+
+    saveLocalDB(memoryDB);
+
+    const updatedOrder = (await this.getFactoryOrderById(order.id)) || {
+      ...order,
+      paidToFactoryAmount: newPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newStatus,
+      payments: [newPayment, ...(order.payments || [])],
+    };
+
+    return { payment: newPayment, factoryOrder: updatedOrder };
+  },
+
+  async updateFactoryPayment(
+    paymentId: string,
+    updates: {
+      amount?: number;
+      method?: FactoryPayment['method'];
+      date?: string;
+      notes?: string;
+      receiptNumber?: string;
+    },
+    performedBy = 'الإدارة'
+  ): Promise<{ payment: FactoryPayment; factoryOrder: FactoryOrder }> {
+    memoryDB = loadLocalDB();
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+
+    const payment = memoryDB.factoryPayments.find(p => p.id === paymentId);
+    if (!payment) {
+      throw new Error('دفعة المصنع المراد تعديلها غير موجودة');
+    }
+
+    const order = memoryDB.factoryOrders.find(o => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber);
+    if (!order) {
+      throw new Error('أمر المصنع المرتبط بالدفعة غير موجود');
+    }
+
+    const oldAmount = payment.amount;
+    const oldMethod = payment.method;
+    const oldReceipt = payment.receiptNumber;
+
+    if (updates.amount !== undefined) {
+      const num = Number(updates.amount);
+      if (isNaN(num) || num <= 0) {
+        throw new Error('قيمة الدفعة المعدلة يجب أن تكون رقماً موجباً أكبر من الصفر');
+      }
+      payment.amount = num;
+    }
+
+    if (updates.method !== undefined) {
+      payment.method = updates.method;
+    }
+
+    if (updates.date !== undefined) {
+      payment.date = updates.date.trim();
+    }
+
+    if (updates.notes !== undefined) {
+      payment.notes = updates.notes.trim() || undefined;
+    }
+
+    if (updates.receiptNumber !== undefined) {
+      const cleanRec = updates.receiptNumber.trim() || undefined;
+      if (cleanRec && cleanRec !== oldReceipt) {
+        const dup = memoryDB.factoryPayments.find(
+          p => p.id !== paymentId && p.status === 'VALID' && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber) && p.receiptNumber && p.receiptNumber.trim().toLowerCase() === cleanRec.toLowerCase()
+        );
+        if (dup) {
+          throw new Error(`رقم الإيصال / المرجع (${cleanRec}) مستخدم بالفعل في دفعة أخرى لنفس أمر المصنع.`);
+        }
+      }
+      payment.receiptNumber = cleanRec;
+    }
+
+    payment.updatedAt = new Date().toISOString();
+
+    // Recalculate balances
+    const allValidPayments = memoryDB.factoryPayments.filter(
+      p => p.status === 'VALID' && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber)
+    );
+    const newPaid = allValidPayments.reduce((acc, p) => acc + p.amount, 0);
+    const itemsTotal = (order.items || []).reduce((acc: number, item: any) => acc + (item.totalFactoryPrice || 0), 0);
+    const costTotal = (order.factoryCostTotal && order.factoryCostTotal > 0) ? order.factoryCostTotal : itemsTotal;
+    const newRemaining = costTotal - newPaid;
+
+    let newStatus: FactoryPaymentStatus = 'UNPAID';
+    if (newPaid <= 0) {
+      newStatus = 'UNPAID';
+    } else if (newPaid < costTotal) {
+      newStatus = 'PARTIALLY_PAID';
+    } else if (newPaid === costTotal) {
+      newStatus = 'FULLY_PAID';
+    } else {
+      newStatus = 'OVERPAID';
+    }
+
+    order.paidToFactoryAmount = newPaid;
+    order.remainingToFactoryAmount = newRemaining;
+    order.paymentStatus = newStatus;
+    order.updatedAt = new Date().toISOString();
+
+    const auditDetail = `تم تعديل دفعة المصنع (المعرف: ${payment.id}) لأمر التشغيل ${order.orderNumber} بواسطة (${performedBy}). المبلغ: كان ${oldAmount} ج وأصبح ${payment.amount} ج، الطريقة: ${oldMethod} -> ${payment.method}. المسدد الجديد: ${newPaid} ج، المتبقي: ${newRemaining} ج.`;
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.factoryPayment.update({
+              where: { id: payment.id },
+              data: {
+                amount: payment.amount,
+                method: payment.method,
+                date: payment.date,
+                notes: payment.notes,
+                receiptNumber: payment.receiptNumber,
+                updatedAt: new Date(),
+              },
+            });
+
+            await tx.factoryOrder.update({
+              where: { id: order.id },
+              data: {
+                paidAmount: newPaid,
+                remainingAmount: newRemaining,
+                paymentStatus: newStatus,
+                updatedAt: new Date(),
+              },
+            });
+
+            await tx.auditLog.create({
+              data: {
+                id: `al-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                bookingId: order.bookingId,
+                bookingCode: order.bookingCode,
+                action: 'تعديل دفعة مصنع',
+                performedBy,
+                details: auditDetail,
+              },
+            });
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateFactoryPayment.prisma');
+      }
+    }
+
+    if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
+    memoryDB.auditLogs.unshift({
+      id: `al-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      bookingId: order.bookingId,
+      bookingCode: order.bookingCode,
+      action: 'تعديل دفعة مصنع',
+      performedBy,
+      details: auditDetail,
+      timestamp: new Date().toISOString(),
+    });
+
+    saveLocalDB(memoryDB);
+
+    const updatedOrder: FactoryOrder = {
+      ...order,
+      paidToFactoryAmount: newPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newStatus,
+      payments: allValidPayments,
+    };
+
+    return { payment, factoryOrder: updatedOrder };
+  },
+
+  async deleteFactoryPayment(
+    paymentId: string,
+    performedBy = 'الإدارة',
+    reason = 'حذف دفعة مسجلة بالخطأ'
+  ): Promise<{ success: boolean; factoryOrder: FactoryOrder }> {
+    memoryDB = loadLocalDB();
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+
+    const payIdx = memoryDB.factoryPayments.findIndex(p => p.id === paymentId);
+    if (payIdx === -1) {
+      throw new Error('دفعة المصنع المراد حذفها غير موجودة');
+    }
+
+    const payment = memoryDB.factoryPayments[payIdx];
+    const order = memoryDB.factoryOrders.find(o => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber);
+    if (!order) {
+      throw new Error('أمر المصنع المرتبط بالدفعة غير موجود');
+    }
+
+    // Remove from active payments
+    memoryDB.factoryPayments.splice(payIdx, 1);
+
+    // Recalculate balances
+    const remainingPayments = memoryDB.factoryPayments.filter(
+      p => p.status === 'VALID' && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber)
+    );
+    const newPaid = remainingPayments.reduce((acc, p) => acc + p.amount, 0);
+    const itemsTotal = (order.items || []).reduce((acc: number, item: any) => acc + (item.totalFactoryPrice || 0), 0);
+    const costTotal = (order.factoryCostTotal && order.factoryCostTotal > 0) ? order.factoryCostTotal : itemsTotal;
+    const newRemaining = costTotal - newPaid;
+
+    let newStatus: FactoryPaymentStatus = 'UNPAID';
+    if (newPaid <= 0) {
+      newStatus = 'UNPAID';
+    } else if (newPaid < costTotal) {
+      newStatus = 'PARTIALLY_PAID';
+    } else if (newPaid === costTotal) {
+      newStatus = 'FULLY_PAID';
+    } else {
+      newStatus = 'OVERPAID';
+    }
+
+    order.paidToFactoryAmount = newPaid;
+    order.remainingToFactoryAmount = newRemaining;
+    order.paymentStatus = newStatus;
+    order.updatedAt = new Date().toISOString();
+
+    const auditDetail = `قام الإداري (${performedBy}) بحذف دفعة مصنع بقيمة ${payment.amount} ج.م (طريقة: ${payment.method}، إيصال: ${payment.receiptNumber || 'بدون'}) لأمر التشغيل ${order.orderNumber}. السبب: ${reason}. المسدد الجديد: ${newPaid} ج، المتبقي: ${newRemaining} ج.`;
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.factoryPayment.delete({
+              where: { id: paymentId },
+            });
+
+            await tx.factoryOrder.update({
+              where: { id: order.id },
+              data: {
+                paidAmount: newPaid,
+                remainingAmount: newRemaining,
+                paymentStatus: newStatus,
+                updatedAt: new Date(),
+              },
+            });
+
+            await tx.auditLog.create({
+              data: {
+                id: `al-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                bookingId: order.bookingId,
+                bookingCode: order.bookingCode,
+                action: 'حذف دفعة مصنع',
+                performedBy,
+                details: auditDetail,
+              },
+            });
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.deleteFactoryPayment.prisma');
+      }
+    }
+
+    if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
+    memoryDB.auditLogs.unshift({
+      id: `al-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      bookingId: order.bookingId,
+      bookingCode: order.bookingCode,
+      action: 'حذف دفعة مصنع',
+      performedBy,
+      details: auditDetail,
+      timestamp: new Date().toISOString(),
+    });
+
+    saveLocalDB(memoryDB);
+
+    const updatedOrder: FactoryOrder = {
+      ...order,
+      paidToFactoryAmount: newPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newStatus,
+      payments: remainingPayments,
+    };
+
+    return { success: true, factoryOrder: updatedOrder };
   },
 
   async updateFactoryOrderStatus(orderId: string, status: FactoryOrder['status'], performedBy = 'المصنع'): Promise<FactoryOrder | null> {
