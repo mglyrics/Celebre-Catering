@@ -1,140 +1,90 @@
 import { db } from '../src/server/db';
 
-async function testPaymentFix() {
+async function testPaymentFixAndBookingIntegrity() {
   console.log('================================================================');
-  console.log('🚀 اختبار التحقق الشامل لإصلاح Null constraint violation on bookingCode');
+  console.log('🛡️ اختبار حماية بيانات الحجوزات الفعلية والتحقق من إصلاح تسجيل الدفعات');
   console.log('================================================================');
 
   try {
-    // 1. فحص وجود الحجز المستهدف CLB-2026-5131
-    console.log('\n[1] فحص استرجاع الحجز CLB-2026-5131 والتأكد من أرصدته الأولية...');
-    const booking = await db.getBookingById('CLB-2026-5131');
-    if (!booking) {
-      throw new Error('فشل العثور على الحجز CLB-2026-5131 في قاعدة البيانات');
+    // -------------------------------------------------------------------------
+    // 1. التحقق الصارم من سلامة وأصالة بيانات الحجز الفعلي CLB-2026-5131
+    // -------------------------------------------------------------------------
+    console.log('\n[1] فحص سلامة الحجز الفعلي المعتمد للعميل (أحمد عصام الدين حسين):');
+    const realBooking = await db.getBookingById('CLB-2026-5131');
+    if (!realBooking) {
+      throw new Error('فشل العثور على الحجز الفعلي CLB-2026-5131 في قاعدة البيانات!');
     }
 
-    console.log(`✅ تم العثور على الحجز: ${booking.bookingCode} (المعرف: ${booking.id})`);
-    console.log(`   - اسم العميل: ${booking.customerName}`);
-    console.log(`   - إجمالي الحجز: ${booking.totalDistributorPrice} ج.م`);
-    console.log(`   - المسدد السابق: ${booking.paidAmount} ج.م`);
-    console.log(`   - المتبقي السابق: ${booking.remainingAmount} ج.م`);
+    console.log(`✅ تم التحقق من الحجز: ${realBooking.bookingCode} (المعرف: ${realBooking.id})`);
+    console.log(`   - اسم العميل: ${realBooking.customerName}`);
+    console.log(`   - هاتف العميل: ${realBooking.customerPhone}`);
+    console.log(`   - المناسبة: ${realBooking.eventName} (${realBooking.eventDate} الساعة ${realBooking.deliveryTime})`);
+    console.log(`   - مكان التسليم: ${realBooking.deliveryAddress}`);
+    console.log(`   - الصنف: ${realBooking.items[0]?.mealCode} - كمية: ${realBooking.items[0]?.quantity} وجبة (${realBooking.items[0]?.drinkOption})`);
+    console.log(`   - إجمالي الحجز: ${realBooking.totalDistributorPrice} ج.م`);
+    console.log(`   - تكلفة المصنع: ${realBooking.totalFactoryPrice} ج.م`);
+    console.log(`   - المسدد: ${realBooking.paidAmount} ج.م، المتبقي: ${realBooking.remainingAmount} ج.م`);
+    console.log(`   - الحالة: ${realBooking.status} (isTest: ${realBooking.isTest})`);
 
-    if (booking.totalDistributorPrice !== 18000) {
-      throw new Error(`إجمالي الحجز يجب أن يكون 18000 ج.م، القيمة الحالية: ${booking.totalDistributorPrice}`);
+    // تأكيدات صارمة لبيانات الحجز الموثقة بـ WhatsApp
+    if (realBooking.customerName !== 'أحمد عصام الدين حسين') {
+      throw new Error(`فساد في اسم العميل للحجز CLB-2026-5131: المتوقع "أحمد عصام الدين حسين"، الفعلي: "${realBooking.customerName}"`);
+    }
+    if (realBooking.customerPhone !== '01158855911') {
+      throw new Error(`فساد في هاتف العميل للحجز CLB-2026-5131: المتوقع "01158855911"، الفعلي: "${realBooking.customerPhone}"`);
+    }
+    if (realBooking.totalDistributorPrice !== 18000) {
+      throw new Error(`فساد في إجمالي الحجز: المتوقع 18000 ج.م، الفعلي: ${realBooking.totalDistributorPrice}`);
+    }
+    if (realBooking.items[0]?.mealCode !== 'Sale-05' || realBooking.items[0]?.quantity !== 200 || realBooking.items[0]?.drinkOption !== 'pepsi') {
+      throw new Error('فساد في بنود الوجبات للحجز CLB-2026-5131!');
+    }
+    if (realBooking.isTest !== false) {
+      throw new Error('الحجز الفعلي يجب أن يكون isTest: false');
     }
 
-    const priorPaid = booking.paidAmount || 0;
-    const priorRemaining = booking.remainingAmount || 18000;
+    console.log('✅ تم إثبات سلامة وتطابق بيانات الحجز الفعلي بنسبة 100% مع رسالة WhatsApp.');
 
-    // 2. تسجيل دفعة مالية بقيمة 9000 ج.م عبر instapay ورقم إيصال 511593844624
-    console.log('\n[2] تسجيل الدفعة المالية المطلوبة:');
-    console.log('   - المبلغ: 9000 ج.م');
-    console.log('   - طريقة الدفع: instapay');
-    console.log('   - رقم الإيصال / المرجع: 511593844624');
-    console.log('   - المنفذ: الإدارة');
-
-    const paymentResult = await db.addPayment({
-      bookingId: 'CLB-2026-5131',
-      bookingCode: 'CLB-2026-5131',
-      amount: 9000,
-      method: 'instapay',
-      date: '2026-11-01',
-      notes: 'الدفعة الأولى 50% سداد إنستاباي',
-      receiptNumber: '511593844624',
-      allowOverpayment: true,
-    }, 'الإدارة');
-
-    console.log('✅ تم تسجيل الدفعة بنجاح تام وبدون أي أخطاء!');
-    console.log(`   - معرف الدفعة: ${paymentResult.payment.id}`);
-    console.log(`   - قيمة الدفعة: ${paymentResult.payment.amount} ج.م`);
-    console.log(`   - طريقة الدفع: ${paymentResult.payment.method}`);
-    console.log(`   - رقم الإيصال: ${paymentResult.payment.receiptNumber}`);
-    console.log(`   - المسدد الجديد للحجز: ${paymentResult.booking.paidAmount} ج.م`);
-    console.log(`   - المتبقي الجديد للحجز: ${paymentResult.booking.remainingAmount} ج.م`);
-
-    // التحقق من الحسابات الدقيقة
-    const expectedPaid = priorPaid + 9000;
-    const expectedRemaining = Math.max(0, priorRemaining - 9000);
-
-    if (paymentResult.booking.paidAmount !== expectedPaid) {
-      throw new Error(`قيمة المسدد غير مطابقة: المتوقع ${expectedPaid} ج.م، الفعلي: ${paymentResult.booking.paidAmount}`);
-    }
-    if (paymentResult.booking.remainingAmount !== expectedRemaining) {
-      throw new Error(`قيمة المتبقي غير مطابقة: المتوقع ${expectedRemaining} ج.م، الفعلي: ${paymentResult.booking.remainingAmount}`);
-    }
-
-    // 3. التحقق من ثبات البيانات بعد إعادة جلب الحجز من قاعدة البيانات
-    console.log('\n[3] إعادة تحميل الحجز للتأكد من ثبات البيانات (Persistence)...');
-    const reloadedBooking = await db.getBookingById('CLB-2026-5131');
-    if (!reloadedBooking) {
-      throw new Error('فشل استرجاع الحجز بعد إعادة التحميل');
-    }
-
-    console.log(`✅ تم استرجاع الحجز بعد التحميل:`);
-    console.log(`   - المسدد المحفوظ: ${reloadedBooking.paidAmount} ج.م`);
-    console.log(`   - المتبقي المحفوظ: ${reloadedBooking.remainingAmount} ج.م`);
-
-    const savedPayment = (reloadedBooking.payments || []).find(p => p.receiptNumber === '511593844624');
-    if (!savedPayment) {
-      throw new Error('الدفعة لم تظهر في مصفوفة مدفوعات الحجز المحفوظة');
-    }
-    console.log(`✅ تم التحقق من وجود الدفعة في سجل مدفوعات الحجز: معرف ${savedPayment.id} بمبلغ ${savedPayment.amount} ج.م`);
-
-    // 4. التحقق من سجل التدقيق audit_logs ووجود bookingCode إلزامي
-    console.log('\n[4] فحص سجل التدقيق (Audit Logs) للحجز CLB-2026-5131...');
-    const auditLogs = await db.getAuditLogs('CLB-2026-5131');
-    console.log(`✅ إجمالي سجلات التدقيق للحجز: ${auditLogs.length}`);
-
-    const paymentAuditLog = auditLogs.find(l => 
-      l.details.includes('511593844624') || 
-      (l.action.includes('تسجيل دفعة') && l.details.includes('9000'))
-    );
-
-    if (!paymentAuditLog) {
-      throw new Error('لم يتم العثور على سجل تدقيق يوثق هذه الدفعة!');
-    }
-
-    console.log('✅ تم العثور على سجل التدقيق بنجاح:');
-    console.log(`   - bookingCode في سجل التدقيق: "${paymentAuditLog.bookingCode}"`);
-    console.log(`   - العملية: "${paymentAuditLog.action}"`);
-    console.log(`   - القائم بالعملية: "${paymentAuditLog.performedBy}"`);
-    console.log(`   - التفاصيل: "${paymentAuditLog.details}"`);
-
-    if (!paymentAuditLog.bookingCode || paymentAuditLog.bookingCode !== 'CLB-2026-5131') {
-      throw new Error(`خطأ في bookingCode داخل سجل التدقيق: المتوقع "CLB-2026-5131"، الفعلي: "${paymentAuditLog.bookingCode}"`);
-    }
-
-    // 5. التحقق من منع تكرار الدفعة بنفس رقم الإيصال
-    console.log('\n[5] اختبار منع التكرار: محاولة تسجيل دفعة جديدة بنفس رقم الإيصال 511593844624...');
-    let duplicateRejected = false;
+    // -------------------------------------------------------------------------
+    // 2. التحقق من مناعة الحجز الفعلي ضد الحذف العرضي أو التعديل التجريبي
+    // -------------------------------------------------------------------------
+    console.log('\n[2] اختبار مناعة الحجز الفعلي ضد الحذف أو التعديل التجريبي:');
+    let deletionPrevented = false;
     try {
-      await db.addPayment({
-        bookingId: 'CLB-2026-5131',
-        amount: 9000,
-        method: 'instapay',
-        receiptNumber: '511593844624',
-      }, 'الإدارة');
+      await db.deleteTestBooking(realBooking.id, 'اختبار الحماية');
     } catch (err: any) {
-      duplicateRejected = true;
-      console.log(`✅ تم رفض التكرار بنجاح. رسالة الخطأ المتوقعة: "${err.message}"`);
+      deletionPrevented = true;
+      console.log(`✅ تم منع حذف الحجز الفعلي بنجاح: "${err.message}"`);
+    }
+    if (!deletionPrevented) {
+      throw new Error('خطر أمني: النظام سمح بحذف حجز عميل فعلي!');
     }
 
-    if (!duplicateRejected) {
-      throw new Error('فشل النظام في منع تكرار تسجيل الدفعة بنفس رقم الإيصال!');
+    let testUpdatePrevented = false;
+    try {
+      await db.updateTestBooking(realBooking.id, { customerName: 'بيانات وهمية' }, 'اختبار الحماية');
+    } catch (err: any) {
+      testUpdatePrevented = true;
+      console.log(`✅ تم منع التعديل التجريبي على الحجز الفعلي بنجاح: "${err.message}"`);
+    }
+    if (!testUpdatePrevented) {
+      throw new Error('خطر أمني: النظام سمح بتعديل حجز عميل فعلي عبر مسار تجريبي!');
     }
 
-    // 6. التحقق من حجز ثانٍ مستقل للتأكد من عمومية الحل
-    console.log('\n[6] اختبار حجز ثانٍ مستقل للتحقق من عمومية الربط بـ UUID / ID والرمز...');
-    const randomPhone = `010${Math.floor(10000000 + Math.random() * 90000000)}`;
-    const secondBooking = await db.createBooking({
-      customerName: 'حجز اختبار للتحقق العام',
-      customerPhone: randomPhone,
+    // -------------------------------------------------------------------------
+    // 3. إنشاء حجز تجريبي مستقل ومفصول تماماً لاختبار تسجيل الدفعات وسجل الرقابة
+    // -------------------------------------------------------------------------
+    console.log('\n[3] إنشاء حجز تجريبي مستقل ومفصول (isTest: true) لاختبار الدفعات:');
+    const uniqueTestPhone = `010${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const testBooking = await db.createBooking({
+      customerName: 'حجز تجريبي لفحص الدفعات والرقابة',
+      customerPhone: uniqueTestPhone,
       preferredContact: 'phone',
-      eventName: 'فعالية تجريبية مستقلة',
-      eventDate: '2026-12-15',
-      deliveryTime: '13:00',
+      eventName: 'اختبار برمجي مستقل',
+      eventDate: '2026-12-20',
+      deliveryTime: '15:00',
       deliveryGovernorate: 'القاهرة',
-      deliveryAddress: 'مدينة نصر - عباس العقاد',
+      deliveryAddress: 'مقر الاختبارات - التجمع',
       items: [
         {
           mealCode: 'Sale-01',
@@ -142,32 +92,100 @@ async function testPaymentFix() {
           drinkOption: 'standard',
         },
       ],
-      notes: 'حجز للتحقق من تعميم حل bookingCode على جميع الحجوزات',
+      notes: 'حجز تجريبي مستقل لاختبار الدفعات وعزل البيانات',
+      isTest: true,
     });
 
-    console.log(`✅ تم إنشاء حجز تجريبي ثانٍ: ${secondBooking.bookingCode} (المعرف: ${secondBooking.id})، الإجمالي: ${secondBooking.totalDistributorPrice} ج.م`);
+    console.log(`✅ تم إنشاء الحجز التجريبي: ${testBooking.bookingCode} (المعرف: ${testBooking.id})`);
+    console.log(`   - الإجمالي: ${testBooking.totalDistributorPrice} ج.م`);
+    console.log(`   - isTest: ${testBooking.isTest}`);
 
-    const secondPayment = await db.addPayment({
-      bookingId: secondBooking.id,
-      amount: 1250,
-      method: 'cash',
-      receiptNumber: `CASH-REC-${Date.now()}`,
-      notes: 'عربون نقدي 50%',
-    }, 'المحاسب');
+    // -------------------------------------------------------------------------
+    // 4. تسجيل دفعة مالية للحجز التجريبي والتحقق من حل خطأ bookingCode
+    // -------------------------------------------------------------------------
+    console.log('\n[4] تسجيل دفعة مالية 1000 ج.م للحجز التجريبي:');
+    const testReceipt = `TEST-REC-${Date.now()}`;
+    const paymentResult = await db.addPayment({
+      bookingId: testBooking.id,
+      bookingCode: testBooking.bookingCode,
+      amount: 1000,
+      method: 'instapay',
+      date: '2026-11-01',
+      notes: 'دفعة تجريبية لاختبار Null constraint',
+      receiptNumber: testReceipt,
+      allowOverpayment: false,
+    }, 'المحاسب الآلي');
 
-    console.log(`✅ تم تسجيل دفعة 1250 ج.م للحجز الثاني ${secondBooking.bookingCode} بنجاح!`);
-    console.log(`   - المسدد: ${secondPayment.booking.paidAmount} ج.م (المتوقع: 1250)`);
-    console.log(`   - المتبقي: ${secondPayment.booking.remainingAmount} ج.م (المتوقع: ${secondBooking.totalDistributorPrice - 1250})`);
+    console.log('✅ تم تسجيل الدفعة بنجاح بدون أي أخطاء!');
+    console.log(`   - المسدد الجديد: ${paymentResult.booking.paidAmount} ج.م`);
+    console.log(`   - المتبقي الجديد: ${paymentResult.booking.remainingAmount} ج.م`);
 
-    const secondLogs = await db.getAuditLogs(secondBooking.id);
-    const secondPaymentLog = secondLogs.find(l => l.action.includes('تسجيل دفعة'));
-    if (!secondPaymentLog || secondPaymentLog.bookingCode !== secondBooking.bookingCode) {
-      throw new Error(`خطأ في توثيق سجل التدقيق للحجز الثاني: bookingCode = "${secondPaymentLog?.bookingCode}"`);
+    // -------------------------------------------------------------------------
+    // 5. فحص سجل التدقيق (AuditLog) للحجز التجريبي والتأكد من bookingCode
+    // -------------------------------------------------------------------------
+    console.log('\n[5] فحص سجل التدقيق (Audit Logs) وتوثيق bookingCode:');
+    const auditLogs = await db.getAuditLogs(testBooking.id);
+    const paymentAuditLog = auditLogs.find(l => l.details.includes(testReceipt));
+
+    if (!paymentAuditLog) {
+      throw new Error('لم يتم العثور على سجل تدقيق يوثق الدفعة المسجلة!');
     }
-    console.log(`✅ توثيق التدقيق للحجز الثاني صحيح ومطابق: bookingCode = "${secondPaymentLog.bookingCode}"`);
 
+    console.log(`✅ تم توثيق الدفعة في سجل التدقيق بنجاح:`);
+    console.log(`   - bookingCode في سجل التدقيق: "${paymentAuditLog.bookingCode}"`);
+    console.log(`   - العملية: "${paymentAuditLog.action}"`);
+    console.log(`   - القائم بالعملية: "${paymentAuditLog.performedBy}"`);
+
+    if (!paymentAuditLog.bookingCode || paymentAuditLog.bookingCode !== testBooking.bookingCode) {
+      throw new Error(`خطأ: bookingCode غير مطابق: المتوقع "${testBooking.bookingCode}"، الفعلي: "${paymentAuditLog.bookingCode}"`);
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. اختبار منع تكرار الدفعة بنفس رقم الإيصال
+    // -------------------------------------------------------------------------
+    console.log('\n[6] اختبار منع تكرار الدفعة بنفس رقم الإيصال:');
+    let duplicateRejected = false;
+    try {
+      await db.addPayment({
+        bookingId: testBooking.id,
+        amount: 500,
+        method: 'cash',
+        receiptNumber: testReceipt,
+      }, 'الإدارة');
+    } catch (err: any) {
+      duplicateRejected = true;
+      console.log(`✅ تم رفض التكرار بنجاح: "${err.message}"`);
+    }
+    if (!duplicateRejected) {
+      throw new Error('فشل النظام في رفض تكرار نفس رقم الإيصال!');
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. تنظيف الحجز التجريبي وحذفه بأمان
+    // -------------------------------------------------------------------------
+    console.log('\n[7] تنظيف الحجز التجريبي وحذفه بأمان:');
+    const deleteResult = await db.deleteTestBooking(testBooking.id, 'تنظيف الاختبار');
+    console.log(`✅ تم حذف الحجز التجريبي ${deleteResult.bookingCode} بنجاح.`);
+
+    // -------------------------------------------------------------------------
+    // 8. التحقق الختامي: التأكد من أن الحجز الفعلي CLB-2026-5131 لم يتأثر مطلقاً
+    // -------------------------------------------------------------------------
+    console.log('\n[8] التحقق الختامي من عدم تأثر الحجز الفعلي بعد جميع الاختبارات:');
+    const finalRealBooking = await db.getBookingById('CLB-2026-5131');
+    if (!finalRealBooking) {
+      throw new Error('فقدان الحجز الفعلي بعد الاختبارات!');
+    }
+
+    if (finalRealBooking.customerName !== 'أحمد عصام الدين حسين' ||
+        finalRealBooking.customerPhone !== '01158855911' ||
+        finalRealBooking.totalDistributorPrice !== 18000 ||
+        finalRealBooking.items[0]?.mealCode !== 'Sale-05') {
+      throw new Error('حدث تغيير في بيانات الحجز الفعلي أثناء تنفيذ الاختبارات!');
+    }
+
+    console.log('✅ الحجز الفعلي CLB-2026-5131 محمي بنسبة 100% وظل ثابتاً تماماً دون أدنى تغيير!');
     console.log('\n================================================================');
-    console.log('🎉 نجحت جميع اختبارات التحقق بنسبة 100% وتم حل خطأ bookingCode جذرياً!');
+    console.log('🎉 نجحت جميع اختبارات الحماية وعزل البيانات وتوثيق الدفعات بنسبة 100%!');
     console.log('================================================================');
   } catch (err: any) {
     console.error('\n❌ فشل الاختبار:', err);
@@ -175,4 +193,4 @@ async function testPaymentFix() {
   }
 }
 
-testPaymentFix();
+testPaymentFixAndBookingIntegrity();

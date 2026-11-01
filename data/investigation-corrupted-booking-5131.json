@@ -1,0 +1,87 @@
+{
+  "incidentInvestigation": {
+    "bookingCode": "CLB-2026-5131",
+    "investigationTimestamp": "2026-11-01T13:58:00.000Z",
+    "status": "EVIDENCE_COLLECTED",
+    "summary": "Data corruption caused by previous automated test / synthetic mock injection attempting to reproduce a 18000 EGP booking without recognizing CLB-2026-5131 was a genuine WhatsApp customer booking.",
+    "corruptedRecordSnapshot": {
+      "id": "bk-1793362871199-5131",
+      "bookingCode": "CLB-2026-5131",
+      "securityCode": "5131",
+      "customerName": "حجز شركة الشروق (CLB-2026-5131)",
+      "customerPhone": "01005131513",
+      "customerWhatsapp": "01005131513",
+      "preferredContact": "whatsapp",
+      "eventName": "مؤتمر سنوي واستقبال ضيوف",
+      "eventDate": "2026-11-25",
+      "deliveryTime": "14:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "قاعة المؤتمرات - التجمع الخامس",
+      "notes": "حجز بقيمة 18000 جنيه",
+      "items": [
+        {
+          "mealId": "meal-3",
+          "mealCode": "Sale-03",
+          "mealName": "ميكس بوكس 03 - جاتوه وجبنة رومي وتركي مدخن",
+          "category": "mix_box",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط جبنة رومي + سندوتش فرنساوي وسط تركي مدخن + عصير بخيرة + شوكة ومنديل",
+          "quantity": 300,
+          "drinkOption": "standard",
+          "baseDistributorPrice": 60,
+          "unitDistributorPrice": 60,
+          "totalDistributorPrice": 18000,
+          "baseFactoryPrice": 41,
+          "unitFactoryPrice": 41,
+          "totalFactoryPrice": 12300
+        }
+      ],
+      "totalMealsCount": 300,
+      "totalDistributorPrice": 18000,
+      "totalFactoryPrice": 12300,
+      "profitMargin": 5700,
+      "paidAmount": 0,
+      "remainingAmount": 18000,
+      "status": "CONFIRMED",
+      "statusNotes": "حجز مؤكد ومعتمد",
+      "isTest": false,
+      "version": 7,
+      "createdAt": "2026-10-31T03:00:00.000Z",
+      "updatedAt": "2026-11-01T13:23:41.142Z"
+    },
+    "originalDocumentedData": {
+      "bookingCode": "CLB-2026-5131",
+      "customerName": "أحمد عصام الدين حسين",
+      "customerPhone": "01158855911",
+      "customerWhatsapp": "01158855911",
+      "preferredContact": "whatsapp",
+      "eventName": "حفل زفاف",
+      "eventDate": "2026-11-07",
+      "deliveryTime": "16:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الجيزة – مسجد الدجوي بجوار جامعة MSA",
+      "items": [
+        {
+          "mealCode": "Sale-05",
+          "mealName": "ميكس بوكس 05 - جاتوه وكفتة وبانية فرنساوي وسط",
+          "quantity": 200,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 80,
+          "unitDistributorPrice": 90,
+          "totalDistributorPrice": 18000,
+          "baseFactoryPrice": 53,
+          "unitFactoryPrice": 58,
+          "totalFactoryPrice": 11600
+        }
+      ],
+      "totalMealsCount": 200,
+      "totalDistributorPrice": 18000,
+      "totalFactoryPrice": 11600,
+      "profitMargin": 6400,
+      "paidAmount": 0,
+      "remainingAmount": 18000,
+      "notes": "كتب كتاب وزفاف.",
+      "status": "CONFIRMED",
+      "isTest": false
+    }
+  }
+}

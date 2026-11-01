@@ -975,45 +975,46 @@
       "id": "bk-1793362871199-5131",
       "bookingCode": "CLB-2026-5131",
       "securityCode": "5131",
-      "customerName": "حجز شركة الشروق (CLB-2026-5131)",
-      "customerPhone": "01005131513",
-      "customerWhatsapp": "01005131513",
+      "customerName": "أحمد عصام الدين حسين",
+      "customerPhone": "01158855911",
+      "customerWhatsapp": "01158855911",
       "preferredContact": "whatsapp",
-      "eventName": "مؤتمر سنوي واستقبال ضيوف",
-      "eventDate": "2026-11-25",
-      "deliveryTime": "14:00",
-      "deliveryGovernorate": "القاهرة",
-      "deliveryAddress": "قاعة المؤتمرات - التجمع الخامس",
-      "notes": "حجز بقيمة 18000 جنيه",
+      "eventName": "حفل زفاف",
+      "eventDate": "2026-11-07",
+      "deliveryTime": "16:00",
+      "deliveryGovernorate": "الجيزة",
+      "deliveryAddress": "الجيزة – مسجد الدجوي بجوار جامعة MSA",
+      "notes": "كتب كتاب وزفاف.",
       "items": [
         {
-          "mealId": "meal-3",
-          "mealCode": "Sale-03",
-          "mealName": "ميكس بوكس 03 - جاتوه وجبنة رومي وتركي مدخن",
+          "mealId": "meal-5",
+          "mealCode": "Sale-05",
+          "mealName": "ميكس بوكس 05 - جاتوه وكفتة وبانية فرنساوي وسط",
           "category": "mix_box",
-          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط جبنة رومي + سندوتش فرنساوي وسط تركي مدخن + عصير بخيرة + شوكة ومنديل",
-          "quantity": 300,
-          "drinkOption": "standard",
-          "baseDistributorPrice": 60,
-          "unitDistributorPrice": 60,
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل",
+          "quantity": 200,
+          "drinkOption": "pepsi",
+          "baseDistributorPrice": 80,
+          "unitDistributorPrice": 90,
           "totalDistributorPrice": 18000,
-          "baseFactoryPrice": 41,
-          "unitFactoryPrice": 41,
-          "totalFactoryPrice": 12300
+          "baseFactoryPrice": 53,
+          "unitFactoryPrice": 58,
+          "totalFactoryPrice": 11600,
+          "factoryDrinkAdjustment": 5
         }
       ],
-      "totalMealsCount": 300,
+      "totalMealsCount": 200,
       "totalDistributorPrice": 18000,
-      "totalFactoryPrice": 12300,
-      "profitMargin": 5700,
+      "totalFactoryPrice": 11600,
+      "profitMargin": 6400,
       "paidAmount": 0,
       "remainingAmount": 18000,
       "status": "CONFIRMED",
-      "statusNotes": "حجز مؤكد ومعتمد",
+      "statusNotes": "حجز مؤكد معتمد تم توثيقه وتأكيده عبر واتساب",
       "isTest": false,
-      "version": 7,
-      "createdAt": "2026-10-31T03:00:00.000Z",
-      "updatedAt": "2026-11-01T13:23:41.142Z"
+      "version": 8,
+      "createdAt": "2026-10-28T14:30:00.000Z",
+      "updatedAt": "2026-11-01T13:57:50.718Z"
     },
     {
       "id": "bk-1793362871199-240",
@@ -5461,6 +5462,123 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1793541664850-425",
+      "bookingId": "",
+      "bookingCode": "CLB-2026-8364",
+      "action": "حذف حجز تجريبي",
+      "performedBy": "الإدارة",
+      "details": "تم حذف الحجز التجريبي رقم CLB-2026-8364 بكافة بنوده التجريبية بعد التأكيد الصريح.",
+      "timestamp": "2026-11-01T14:01:04.850Z"
+    },
+    {
+      "id": "log-1793541664831-726",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "الإدارة المركزية",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v2) بإجمالي 50 وجبة وتكلفة مصنع 1350 ج (خالٍ تماماً من هوامش ربح الموزع).",
+      "timestamp": "2026-11-01T14:01:04.831Z"
+    },
+    {
+      "id": "log-1793541664805-813",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "تعديل حجز بواسطة الإدارة",
+      "performedBy": "الإدارة المركزية",
+      "details": "تم تعديل بيانات الحجز CLB-2026-8364 (الإصدار v2). إجمالي الوجبات: 50، إجمالي القيمة: 1950 ج.",
+      "timestamp": "2026-11-01T14:01:04.805Z"
+    },
+    {
+      "id": "al-1793541664775-882",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "حذف دفعة مصنع",
+      "performedBy": "المحاسب كريم",
+      "details": "قام الإداري (المحاسب كريم) بحذف دفعة مصنع بقيمة 650 ج.م (طريقة: cash، إيصال: CASH-FO-002) لأمر التشغيل FO-2026-109. السبب: تم إدخال إيصال الكاش بطريق الخطأ قبل الاستلام الفعلي. المسدد الجديد: 1000 ج، المتبقي: 650 ج.",
+      "timestamp": "2026-11-01T14:01:04.775Z"
+    },
+    {
+      "id": "al-1793541664761-621",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "تسجيل دفعة مصنع",
+      "performedBy": "المحاسب كريم",
+      "details": "تم تسجيل دفعة مالية للمصنع بقيمة 650 ج.م بطريقة (cash) لأمر التشغيل FO-2026-109 (حجز: CLB-2026-8364) بواسطة (المحاسب كريم). المسدد للمصنع: 1650 ج، المتبقي: 0 ج. مرجع: CASH-FO-002.",
+      "timestamp": "2026-11-01T14:01:04.757Z"
+    },
+    {
+      "id": "al-1793541664749-405",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "تعديل دفعة مصنع",
+      "performedBy": "المحاسب كريم",
+      "details": "تم تعديل دفعة المصنع (المعرف: fpay-1793541664724-702) لأمر التشغيل FO-2026-109 بواسطة (المحاسب كريم). المبلغ: كان 650 ج وأصبح 1000 ج، الطريقة: instapay -> bank_transfer. المسدد الجديد: 1000 ج، المتبقي: 650 ج.",
+      "timestamp": "2026-11-01T14:01:04.749Z"
+    },
+    {
+      "id": "al-1793541664731-404",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "تسجيل دفعة مصنع",
+      "performedBy": "المحاسب كريم",
+      "details": "تم تسجيل دفعة مالية للمصنع بقيمة 650 ج.م بطريقة (instapay) لأمر التشغيل FO-2026-109 (حجز: CLB-2026-8364) بواسطة (المحاسب كريم). المسدد للمصنع: 650 ج، المتبقي: 1000 ج. مرجع: INSTA-FO-001.",
+      "timestamp": "2026-11-01T14:01:04.724Z"
+    },
+    {
+      "id": "log-1793541664712-352",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "الإدارة المركزية",
+      "details": "تم إصدار أمر تشغيل المصنع FO-2026-109 (الإصدار v1) بإجمالي 50 وجبة وتكلفة مصنع 1650 ج (خالٍ تماماً من هوامش ربح الموزع). [تم تطبيق معادلة استبدال العصير بالبيبسي للمصنع: -5 ج عصير +10 ج كانز = +5 ج على 20 وجبة]",
+      "timestamp": "2026-11-01T14:01:04.712Z"
+    },
+    {
+      "id": "log-1793541664672-502",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8364 بإجمالي 50 وجبة وقيمة 2350 جنيه.",
+      "timestamp": "2026-11-01T14:01:04.672Z"
+    },
+    {
+      "id": "log-1793541655133-70",
+      "bookingId": "",
+      "bookingCode": "CLB-2026-6842",
+      "action": "حذف حجز تجريبي",
+      "performedBy": "تنظيف الاختبار",
+      "details": "تم حذف الحجز التجريبي رقم CLB-2026-6842 بكافة بنوده التجريبية بعد التأكيد الصريح.",
+      "timestamp": "2026-11-01T14:00:55.133Z"
+    },
+    {
+      "id": "log-1793541655102-810",
+      "bookingId": "bk-1793541655086-261",
+      "bookingCode": "CLB-2026-6842",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (instapay) للحجز CLB-2026-6842. المسدد الجديد: 1000 ج، المتبقي: 1500 ج. مرجع: TEST-REC-1793541655097.",
+      "timestamp": "2026-11-01T14:00:55.102Z"
+    },
+    {
+      "id": "log-1793541655091-252",
+      "bookingId": "bk-1793541655086-261",
+      "bookingCode": "CLB-2026-6842",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-6842 بإجمالي 50 وجبة وقيمة 2500 جنيه.",
+      "timestamp": "2026-11-01T14:00:55.091Z"
+    },
+    {
+      "id": "log-1793541470718-recovery",
+      "bookingId": "bk-1793362871199-5131",
+      "bookingCode": "CLB-2026-5131",
+      "action": "استعادة وتصحيح بيانات حجز معتمد",
+      "performedBy": "إدارة النظام المركزية (Audit & Recovery)",
+      "details": "تم استعادة البيانات الموثقة رسميًا عبر WhatsApp للحجز CLB-2026-5131 للعميل (أحمد عصام الدين حسين - 01158855911) لحفل زفاف 200 وجبة Sale-05 ببيبسي بقيمة 18000 ج وإلغاء البيانات العارضة وتأمين الحجز.",
+      "timestamp": "2026-11-01T13:57:50.718Z"
+    },
+    {
       "id": "log-1793539421197-187",
       "bookingId": "bk-1793539421180-705",
       "bookingCode": "CLB-2026-5525",
@@ -7335,11 +7453,11 @@
   "factoryOrderCounter": 108,
   "factoryPayments": [
     {
-      "id": "fpay-1793539415162-540",
-      "factoryOrderId": "fo-1793539415149-484",
+      "id": "fpay-1793541664724-702",
+      "factoryOrderId": "fo-1793541664712-594",
       "factoryOrderNumber": "FO-2026-109",
-      "bookingId": "bk-1793539415107-222",
-      "bookingCode": "CLB-2026-6151",
+      "bookingId": "bk-1793541664668-444",
+      "bookingCode": "CLB-2026-8364",
       "amount": 1000,
       "method": "bank_transfer",
       "date": "2026-11-01",
@@ -7347,8 +7465,8 @@
       "receiptNumber": "CIB-FO-001",
       "recordedBy": "المحاسب كريم",
       "status": "VALID",
-      "createdAt": "2026-11-01T13:23:35.162Z",
-      "updatedAt": "2026-11-01T13:23:35.185Z"
+      "createdAt": "2026-11-01T14:01:04.724Z",
+      "updatedAt": "2026-11-01T14:01:04.749Z"
     }
   ]
 }

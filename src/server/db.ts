@@ -1109,20 +1109,14 @@ export const db = {
     memoryDB = loadLocalDB();
     memoryDB.payments.unshift(payment);
 
-    const memBookingIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memBookingIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
     if (memBookingIdx !== -1) {
       memoryDB.bookings[memBookingIdx].paidAmount = newPaidAmount;
       memoryDB.bookings[memBookingIdx].remainingAmount = newRemainingAmount;
       memoryDB.bookings[memBookingIdx].version += 1;
       memoryDB.bookings[memBookingIdx].updatedAt = now;
     } else {
-      memoryDB.bookings.unshift({
-        ...booking,
-        paidAmount: newPaidAmount,
-        remainingAmount: newRemainingAmount,
-        version: booking.version + 1,
-        updatedAt: now,
-      });
+      throw new Error(`تعذر العثور على سجل الحجز بالمعرف الفريد ${booking.id} في قاعدة البيانات لتحديث الرصيد`);
     }
 
     memoryDB.auditLogs.unshift({
@@ -1355,10 +1349,12 @@ export const db = {
 
     // Update memoryDB
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
       saveLocalDB(memoryDB);
+    } else {
+      throw new Error(`تعذر العثور على سجل الحجز بالمعرف الفريد ${booking.id} لتحديث الحالة`);
     }
 
     // Update PostgreSQL
@@ -2455,13 +2451,13 @@ export const db = {
       throw new Error('الحجز غير موجود');
     }
 
-    const isTest = Boolean(booking.isTest || booking.bookingCode === 'CLB-2026-1699' || booking.customerName.includes('تجريب'));
+    const isTest = Boolean(booking.isTest && booking.bookingCode !== 'CLB-2026-5131');
     if (!isTest) {
       throw new Error('ممنوع: لا يمكن تعديل سوى الحجوزات التجريبية فقط (isTest: true). الحجوزات الحقيقية والتاريخية محمية بالكامل ولا تقبل التعديل من هذا المسار.');
     }
 
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
 
     const updatedBooking: Booking = {
       ...booking,
@@ -2518,7 +2514,7 @@ export const db = {
       throw new Error('الحجز غير موجود');
     }
 
-    const isTest = Boolean(booking.isTest || booking.bookingCode === 'CLB-2026-1699' || booking.customerName.includes('تجريب'));
+    const isTest = Boolean(booking.isTest && booking.bookingCode !== 'CLB-2026-5131');
     if (!isTest) {
       throw new Error('ممنوع منعاً باتاً: لا يمكن حذف سوى الحجوزات التجريبية فقط (isTest: true). الحجوزات الحقيقية للعملاء محمية ولا يجوز حذفها.');
     }
@@ -2693,7 +2689,7 @@ export const db = {
 
     // Update MemoryDB
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
       saveLocalDB(memoryDB);
@@ -2791,7 +2787,7 @@ export const db = {
 
     // Update MemoryDB
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
       saveLocalDB(memoryDB);

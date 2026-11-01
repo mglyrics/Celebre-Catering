@@ -1385,20 +1385,14 @@ var db = {
     }
     memoryDB = loadLocalDB();
     memoryDB.payments.unshift(payment);
-    const memBookingIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memBookingIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
     if (memBookingIdx !== -1) {
       memoryDB.bookings[memBookingIdx].paidAmount = newPaidAmount;
       memoryDB.bookings[memBookingIdx].remainingAmount = newRemainingAmount;
       memoryDB.bookings[memBookingIdx].version += 1;
       memoryDB.bookings[memBookingIdx].updatedAt = now;
     } else {
-      memoryDB.bookings.unshift({
-        ...booking,
-        paidAmount: newPaidAmount,
-        remainingAmount: newRemainingAmount,
-        version: booking.version + 1,
-        updatedAt: now
-      });
+      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0628\u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0641\u0631\u064A\u062F ${booking.id} \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0644\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0631\u0635\u064A\u062F`);
     }
     memoryDB.auditLogs.unshift({
       id: auditLogId,
@@ -1588,10 +1582,12 @@ var db = {
       updatedAt: now
     };
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
       saveLocalDB(memoryDB);
+    } else {
+      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0628\u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0641\u0631\u064A\u062F ${booking.id} \u0644\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u062D\u0627\u0644\u0629`);
     }
     if (databaseUrl) {
       try {
@@ -2081,7 +2077,7 @@ var db = {
     if (!payment) {
       throw new Error("\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u0627\u062F \u062A\u0639\u062F\u064A\u0644\u0647\u0627 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
     }
-    const order = await this.getFactoryOrderById(payment.factoryOrderId);
+    const order = memoryDB.factoryOrders.find((o) => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber);
     if (!order) {
       throw new Error("\u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0627\u0644\u062F\u0641\u0639\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
@@ -2107,8 +2103,8 @@ var db = {
     if (updates.receiptNumber !== void 0) {
       const cleanRec = updates.receiptNumber.trim() || void 0;
       if (cleanRec && cleanRec !== oldReceipt) {
-        const dup = (order.payments || []).find(
-          (p) => p.id !== paymentId && p.status === "VALID" && p.receiptNumber && p.receiptNumber.trim().toLowerCase() === cleanRec.toLowerCase()
+        const dup = memoryDB.factoryPayments.find(
+          (p) => p.id !== paymentId && p.status === "VALID" && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber) && p.receiptNumber && p.receiptNumber.trim().toLowerCase() === cleanRec.toLowerCase()
         );
         if (dup) {
           throw new Error(`\u0631\u0642\u0645 \u0627\u0644\u0625\u064A\u0635\u0627\u0644 / \u0627\u0644\u0645\u0631\u062C\u0639 (${cleanRec}) \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644 \u0641\u064A \u062F\u0641\u0639\u0629 \u0623\u062E\u0631\u0649 \u0644\u0646\u0641\u0633 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639.`);
@@ -2121,7 +2117,8 @@ var db = {
       (p) => p.status === "VALID" && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber)
     );
     const newPaid = allValidPayments.reduce((acc, p) => acc + p.amount, 0);
-    const costTotal = order.factoryCostTotal || 0;
+    const itemsTotal = (order.items || []).reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
+    const costTotal = order.factoryCostTotal && order.factoryCostTotal > 0 ? order.factoryCostTotal : itemsTotal;
     const newRemaining = costTotal - newPaid;
     let newStatus = "UNPAID";
     if (newPaid <= 0) {
@@ -2133,6 +2130,10 @@ var db = {
     } else {
       newStatus = "OVERPAID";
     }
+    order.paidToFactoryAmount = newPaid;
+    order.remainingToFactoryAmount = newRemaining;
+    order.paymentStatus = newStatus;
+    order.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     const auditDetail = `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 (\u0627\u0644\u0645\u0639\u0631\u0641: ${payment.id}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0627\u0644\u0645\u0628\u0644\u063A: \u0643\u0627\u0646 ${oldAmount} \u062C \u0648\u0623\u0635\u0628\u062D ${payment.amount} \u062C\u060C \u0627\u0644\u0637\u0631\u064A\u0642\u0629: ${oldMethod} -> ${payment.method}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.`;
     if (databaseUrl) {
       try {
@@ -2175,13 +2176,6 @@ var db = {
         logServerError(err, "db.updateFactoryPayment.prisma");
       }
     }
-    const memOrderIdx = memoryDB.factoryOrders.findIndex((o) => o.id === order.id || o.orderNumber === order.orderNumber);
-    if (memOrderIdx !== -1) {
-      memoryDB.factoryOrders[memOrderIdx].paidToFactoryAmount = newPaid;
-      memoryDB.factoryOrders[memOrderIdx].remainingToFactoryAmount = newRemaining;
-      memoryDB.factoryOrders[memOrderIdx].paymentStatus = newStatus;
-      memoryDB.factoryOrders[memOrderIdx].updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    }
     if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
     memoryDB.auditLogs.unshift({
       id: `al-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
@@ -2193,11 +2187,12 @@ var db = {
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
     saveLocalDB(memoryDB);
-    const updatedOrder = await this.getFactoryOrderById(order.id) || {
+    const updatedOrder = {
       ...order,
       paidToFactoryAmount: newPaid,
       remainingToFactoryAmount: newRemaining,
-      paymentStatus: newStatus
+      paymentStatus: newStatus,
+      payments: allValidPayments
     };
     return { payment, factoryOrder: updatedOrder };
   },
@@ -2209,7 +2204,7 @@ var db = {
       throw new Error("\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u0627\u062F \u062D\u0630\u0641\u0647\u0627 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
     }
     const payment = memoryDB.factoryPayments[payIdx];
-    const order = await this.getFactoryOrderById(payment.factoryOrderId);
+    const order = memoryDB.factoryOrders.find((o) => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber);
     if (!order) {
       throw new Error("\u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0627\u0644\u062F\u0641\u0639\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
@@ -2218,7 +2213,8 @@ var db = {
       (p) => p.status === "VALID" && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber)
     );
     const newPaid = remainingPayments.reduce((acc, p) => acc + p.amount, 0);
-    const costTotal = order.factoryCostTotal || 0;
+    const itemsTotal = (order.items || []).reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
+    const costTotal = order.factoryCostTotal && order.factoryCostTotal > 0 ? order.factoryCostTotal : itemsTotal;
     const newRemaining = costTotal - newPaid;
     let newStatus = "UNPAID";
     if (newPaid <= 0) {
@@ -2230,6 +2226,10 @@ var db = {
     } else {
       newStatus = "OVERPAID";
     }
+    order.paidToFactoryAmount = newPaid;
+    order.remainingToFactoryAmount = newRemaining;
+    order.paymentStatus = newStatus;
+    order.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     const auditDetail = `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062D\u0630\u0641 \u062F\u0641\u0639\u0629 \u0645\u0635\u0646\u0639 \u0628\u0642\u064A\u0645\u0629 ${payment.amount} \u062C.\u0645 (\u0637\u0631\u064A\u0642\u0629: ${payment.method}\u060C \u0625\u064A\u0635\u0627\u0644: ${payment.receiptNumber || "\u0628\u062F\u0648\u0646"}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber}. \u0627\u0644\u0633\u0628\u0628: ${reason}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.`;
     if (databaseUrl) {
       try {
@@ -2264,13 +2264,6 @@ var db = {
         logServerError(err, "db.deleteFactoryPayment.prisma");
       }
     }
-    const memOrderIdx = memoryDB.factoryOrders.findIndex((o) => o.id === order.id || o.orderNumber === order.orderNumber);
-    if (memOrderIdx !== -1) {
-      memoryDB.factoryOrders[memOrderIdx].paidToFactoryAmount = newPaid;
-      memoryDB.factoryOrders[memOrderIdx].remainingToFactoryAmount = newRemaining;
-      memoryDB.factoryOrders[memOrderIdx].paymentStatus = newStatus;
-      memoryDB.factoryOrders[memOrderIdx].updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    }
     if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
     memoryDB.auditLogs.unshift({
       id: `al-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
@@ -2282,7 +2275,7 @@ var db = {
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
     saveLocalDB(memoryDB);
-    const updatedOrder = await this.getFactoryOrderById(order.id) || {
+    const updatedOrder = {
       ...order,
       paidToFactoryAmount: newPaid,
       remainingToFactoryAmount: newRemaining,
@@ -2526,12 +2519,12 @@ var db = {
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
-    const isTest = Boolean(booking.isTest || booking.bookingCode === "CLB-2026-1699" || booking.customerName.includes("\u062A\u062C\u0631\u064A\u0628"));
+    const isTest = Boolean(booking.isTest && booking.bookingCode !== "CLB-2026-5131");
     if (!isTest) {
       throw new Error("\u0645\u0645\u0646\u0648\u0639: \u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0639\u062F\u064A\u0644 \u0633\u0648\u0649 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0642\u0637 (isTest: true). \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0648\u0627\u0644\u062A\u0627\u0631\u064A\u062E\u064A\u0629 \u0645\u062D\u0645\u064A\u0629 \u0628\u0627\u0644\u0643\u0627\u0645\u0644 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u0627\u0631.");
     }
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
     const updatedBooking = {
       ...booking,
       ...updates,
@@ -2581,7 +2574,7 @@ var db = {
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
-    const isTest = Boolean(booking.isTest || booking.bookingCode === "CLB-2026-1699" || booking.customerName.includes("\u062A\u062C\u0631\u064A\u0628"));
+    const isTest = Boolean(booking.isTest && booking.bookingCode !== "CLB-2026-5131");
     if (!isTest) {
       throw new Error("\u0645\u0645\u0646\u0648\u0639 \u0645\u0646\u0639\u0627\u064B \u0628\u0627\u062A\u0627\u064B: \u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0633\u0648\u0649 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0642\u0637 (isTest: true). \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0644\u0644\u0639\u0645\u0644\u0627\u0621 \u0645\u062D\u0645\u064A\u0629 \u0648\u0644\u0627 \u064A\u062C\u0648\u0632 \u062D\u0630\u0641\u0647\u0627.");
     }
@@ -2709,7 +2702,7 @@ var db = {
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
       saveLocalDB(memoryDB);
@@ -2796,7 +2789,7 @@ var db = {
       updatedAt: now
     };
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
       saveLocalDB(memoryDB);
