@@ -24,16 +24,17 @@ async function runBookingFixTests() {
   // ---------------------------------------------------------------------------
   console.log('🔹 1. اختبار إنشاء حجز ناجح عبر POST /api/bookings...');
   const validPayload = {
-    customerName: 'أحمد محمود التميمي',
-    customerPhone: '01284484868',
-    customerWhatsapp: '01284484868',
+    customerName: '[اختبار معزول] فحص التوافق والسيرفرلس',
+    customerPhone: '01000000091',
+    customerWhatsapp: '01000000091',
     preferredContact: 'whatsapp',
-    eventName: 'حفل زفاف قاعة الماسة',
+    eventName: 'اختبار برمجي آلي معزول',
     eventDate: '2026-11-20',
     deliveryTime: '17:30',
     deliveryGovernorate: 'القاهرة',
-    deliveryAddress: 'مدينة نصر - قاعة الماسة',
-    notes: 'التغليف بالعلبة البيضاء الرسمية مع مناديل إضافية',
+    deliveryAddress: 'مقر الاختبارات المعزول',
+    notes: 'حجز تجريبي معزول للاختبارات فقط',
+    isTest: true,
     items: [
       { mealCode: 'Sale-01', quantity: 30, drinkOption: 'standard' },
       { mealCode: 'Sale-13', quantity: 20, drinkOption: 'pepsi' }

@@ -27,16 +27,17 @@ async function runTestSuite() {
     // ---------------------------------------------------------------------------
     console.log('🔹 1. اختبار إنشاء الحجز وحفظه واسترجاعه من قاعدة البيانات...');
     const validBookingPayload = {
-      customerName: 'فاطمة الزهراء الشريف',
-      customerPhone: '01012345678',
-      customerWhatsapp: '01012345678',
+      customerName: '[اختبار معزول] فحص الاستمرارية والأخطاء',
+      customerPhone: '01000000092',
+      customerWhatsapp: '01000000092',
       preferredContact: 'whatsapp',
-      eventName: 'حفل افتتاح المقر الإداري',
+      eventName: 'اختبار برمجي مستقل معزول',
       eventDate: '2026-12-15',
       deliveryTime: '13:00',
       deliveryGovernorate: 'الجيزة',
-      deliveryAddress: 'الدقي - شارع مصدق',
-      notes: 'وجبات ساخنة وتوصيل في سيارة مجهزة',
+      deliveryAddress: 'مقر الاختبارات المعزول',
+      notes: 'حجز تجريبي معزول للاختبارات فقط',
+      isTest: true,
       items: [
         { mealCode: 'Sale-02', quantity: 25, drinkOption: 'standard' },
         { mealCode: 'Sale-05', quantity: 15, drinkOption: 'no_juice' }
@@ -88,6 +89,10 @@ async function runTestSuite() {
       throw new Error(`تعذر تتبع الحجز عبر الكود ${retrieved.bookingCode}`);
     }
     console.log(`  ✅ تم استرجاع وتتبع الحجز بكود الحجز ورمز الأمان بنجاح.`);
+
+    // Clean up test booking
+    await db.deleteTestBooking(createdBooking.id, 'تنظيف الاختبار المعزول');
+    console.log(`  ✅ تم تنظيف وحذف الحجز التجريبي المعزول بنجاح.`);
 
     // ---------------------------------------------------------------------------
     // TEST 2: Database Persistence Failure Simulation & Safe Error Logging

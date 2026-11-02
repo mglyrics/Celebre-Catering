@@ -9,6 +9,8 @@
  * 6. Resilience Guarantee: External messaging failure NEVER causes booking loss
  */
 
+import { db } from '../src/server/db';
+
 async function runPhase4Tests() {
   console.log('================================================================');
   console.log('🚀 بدء اختبارات المرحلة الرابعة: PDF، WhatsApp، وتكامل Meta');
@@ -67,16 +69,17 @@ async function runPhase4Tests() {
   // ---------------------------------------------------------------------------
   console.log('🔹 2. اختبار توليد رسالة حجز WhatsApp ورابط Messenger مع الحفظ في قاعدة البيانات...');
   const bookingPayload = {
-    customerName: 'أحمد محمود رضوان',
-    customerPhone: '01223456789',
-    customerWhatsapp: '01223456789',
+    customerName: '[اختبار معزول] فحص تكامل واتساب وميتا',
+    customerPhone: '01000000093',
+    customerWhatsapp: '01000000093',
     preferredContact: 'whatsapp',
-    eventName: 'عقيقة عائلية خاصة',
+    eventName: 'اختبار برمجي مستقل معزول',
     eventDate: '2026-11-15',
     deliveryTime: '15:00',
     deliveryGovernorate: 'الجيزة',
-    deliveryAddress: 'الدقي - شارع مصدق - برج الزهور',
-    notes: 'التسليم للمسؤول في تمام الثالثة عصراً مع التأكد من الملاعق والمناديل.',
+    deliveryAddress: 'مقر الاختبارات المعزول',
+    notes: 'حجز تجريبي معزول للاختبارات فقط',
+    isTest: true,
     items: [
       {
         mealCode: 'Sale-02',
@@ -239,6 +242,10 @@ async function runPhase4Tests() {
     throw new Error('بيانات الحجز المسترجعة غير مطابقة!');
   }
   console.log(`  ✅ الحجز [${createdBooking.bookingCode}] محفوظ بنسبة 100% في قاعدة البيانات، مع إمكانية التتبع الفوري.`);
+
+  // Cleanup test booking
+  await db.deleteTestBooking(createdBooking.id, 'تنظيف الاختبار المعزول');
+  console.log(`  ✅ تم تنظيف وحذف الحجز التجريبي المعزول بنجاح.`);
 
   console.log('\n================================================================');
   console.log('🎉 اكتملت جميع اختبارات المرحلة الرابعة بنجاح 100%!');

@@ -831,7 +831,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPaymentError(null);
 
     try {
-      const targetIdentifier = selectedBooking.id || selectedBooking.bookingCode;
+      const targetIdentifier = selectedBooking.id;
       const res = await fetch(`/api/admin/bookings/${encodeURIComponent(targetIdentifier)}/payments`, {
         method: 'POST',
         headers: {

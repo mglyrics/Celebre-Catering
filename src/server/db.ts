@@ -806,6 +806,136 @@ export const db = {
     };
   },
 
+  /**
+   * Authoritative lookup strictly by primary key ID (b.id).
+   * Used for all update, delete, payment, and status modification operations.
+   * NEVER falls back to bookingCode to guarantee total data isolation.
+   */
+  async getBookingByPrimaryId(bookingId: string): Promise<Booking | null> {
+    if (!bookingId || typeof bookingId !== 'string') return null;
+    const cleanId = bookingId.trim();
+    if (!cleanId) return null;
+
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbBooking = await client.booking.findUnique({
+            where: { id: cleanId },
+            include: {
+              items: true,
+              payments: { orderBy: { createdAt: 'desc' } },
+              factoryOrders: { orderBy: { createdAt: 'desc' } },
+              auditLogs: { orderBy: { timestamp: 'desc' } },
+            },
+          });
+          if (dbBooking) {
+            return {
+              id: dbBooking.id,
+              bookingCode: dbBooking.bookingCode,
+              securityCode: dbBooking.securityCode,
+              customerName: dbBooking.customerName,
+              customerPhone: dbBooking.customerPhone,
+              customerWhatsapp: dbBooking.customerWhatsapp || undefined,
+              preferredContact: dbBooking.preferredContact as any,
+              eventName: dbBooking.eventName,
+              eventDate: dbBooking.eventDate,
+              deliveryTime: dbBooking.deliveryTime,
+              deliveryGovernorate: dbBooking.deliveryGovernorate,
+              deliveryAddress: dbBooking.deliveryAddress,
+              notes: dbBooking.notes || '',
+              totalMealsCount: dbBooking.totalMealsCount,
+              totalDistributorPrice: dbBooking.totalDistributorPrice,
+              totalFactoryPrice: dbBooking.totalFactoryPrice ?? undefined,
+              profitMargin: dbBooking.profitMargin ?? undefined,
+              paidAmount: dbBooking.paidAmount,
+              remainingAmount: dbBooking.remainingAmount,
+              status: dbBooking.status as BookingStatus,
+              statusNotes: dbBooking.statusNotes || '',
+              isTest: dbBooking.isTest,
+              version: dbBooking.version,
+              createdAt: dbBooking.createdAt.toISOString(),
+              updatedAt: dbBooking.updatedAt.toISOString(),
+              items: dbBooking.items.map((it: any) => ({
+                mealId: it.mealId,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category as any,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption as DrinkModification,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice,
+                factoryDrinkAdjustment: it.factoryDrinkAdjustment ?? undefined,
+                unitFactoryPrice: it.unitFactoryPrice,
+                totalFactoryPrice: it.totalFactoryPrice,
+              })),
+              payments: dbBooking.payments.map((p: any) => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method as any,
+                date: p.date,
+                notes: p.notes || '',
+                receiptNumber: p.receiptNumber || undefined,
+                recordedBy: p.recordedBy || 'الإدارة',
+                status: (p.status || 'VALID') as any,
+                createdAt: p.createdAt.toISOString(),
+                cancelledBy: p.cancelledBy || undefined,
+                cancelledAt: p.cancelledAt?.toISOString() || undefined,
+                cancelReason: p.cancelReason || undefined,
+              })),
+              factoryOrders: dbBooking.factoryOrders.map((fo: any) => ({
+                id: fo.id,
+                orderNumber: fo.orderNumber,
+                bookingId: fo.bookingId,
+                bookingCode: fo.bookingCode,
+                version: fo.version,
+                status: fo.status as any,
+                eventDate: fo.eventDate,
+                deliveryTime: fo.deliveryTime,
+                deliveryLocation: fo.deliveryLocation,
+                factoryCostTotal: fo.factoryCostTotal,
+                paidToFactoryAmount: fo.paidToFactoryAmount,
+                remainingToFactoryAmount: fo.remainingToFactoryAmount,
+                paymentStatus: fo.paymentStatus as any,
+                payments: [],
+                items: [],
+                packagingNotes: fo.packagingNotes || '',
+                createdAt: fo.createdAt.toISOString(),
+                updatedAt: fo.updatedAt.toISOString(),
+              })),
+              auditLogs: dbBooking.auditLogs.map((al: any) => ({
+                id: al.id,
+                bookingId: al.bookingId,
+                bookingCode: al.bookingCode,
+                action: al.action,
+                performedBy: al.performedBy,
+                details: al.details,
+                timestamp: al.timestamp.toISOString(),
+              })),
+            };
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.getBookingByPrimaryId.prisma');
+      }
+    }
+
+    memoryDB = loadLocalDB();
+    const b = memoryDB.bookings.find(item => item.id === cleanId);
+    if (!b) return null;
+
+    return {
+      ...b,
+      payments: memoryDB.payments.filter(p => p.bookingId === b.id),
+      factoryOrders: memoryDB.factoryOrders.filter(fo => fo.bookingId === b.id),
+      auditLogs: memoryDB.auditLogs.filter(al => al.bookingId === b.id),
+    };
+  },
+
   async trackBooking(bookingCode: string, verificationCode?: string): Promise<Booking | null> {
     if (!bookingCode || typeof bookingCode !== 'string' || !bookingCode.trim()) {
       return null;
@@ -925,8 +1055,14 @@ export const db = {
   },
 
   async updateBooking(id: string, updates: Partial<Booking>, performedBy = 'الإدارة'): Promise<Booking | null> {
+    const cleanId = (id || '').trim();
+    if (!cleanId) return null;
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات تعديل الحجز تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode لمنع تداخل السجلات.');
+    }
+
     memoryDB = loadLocalDB();
-    const idx = memoryDB.bookings.findIndex(b => b.id === id || b.bookingCode === id);
+    const idx = memoryDB.bookings.findIndex(b => b.id === cleanId);
     if (idx === -1) return null;
 
     const current = memoryDB.bookings[idx];
@@ -1266,7 +1402,7 @@ export const db = {
       memPayment.cancelReason = reason.trim();
       memPayment.notes = updatedNotes;
     }
-    const memBooking = memoryDB.bookings.find(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memBooking = memoryDB.bookings.find(b => b.id === booking.id);
     if (memBooking) {
       memBooking.paidAmount = newPaidAmount;
       memBooking.remainingAmount = newRemainingAmount;
@@ -1284,7 +1420,7 @@ export const db = {
     });
     saveLocalDB(memoryDB);
 
-    const freshBooking = await this.getBookingById(booking.id);
+    const freshBooking = await this.getBookingByPrimaryId(booking.id) || await this.getBookingById(booking.id);
     return {
       success: true,
       payment: {
@@ -1323,7 +1459,15 @@ export const db = {
       throw new Error(`حالة الحجز غير صالحة: ${newStatus}`);
     }
 
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
+    }
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات تعديل حالة الحجز تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode لمنع تداخل السجلات.');
+    }
+
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error('الحجز غير موجود');
     }
@@ -1469,7 +1613,11 @@ export const db = {
   },
 
   async createFactoryOrder(bookingId: string, performedBy = 'الإدارة', options?: { forceNewVersion?: boolean }): Promise<FactoryOrder> {
-    const booking = await this.getBookingById(bookingId);
+    const cleanId = (bookingId || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId) لإصدار أمر المصنع');
+    }
+    const booking = await this.getBookingByPrimaryId(cleanId) || await this.getBookingById(cleanId);
     if (!booking) {
       throw new Error('الحجز غير موجود لإصدار أمر المصنع');
     }
@@ -1481,7 +1629,7 @@ export const db = {
 
     memoryDB = loadLocalDB();
     const existingOrders = (booking.factoryOrders || []).concat(
-      memoryDB.factoryOrders.filter(fo => fo.bookingId === bookingId)
+      memoryDB.factoryOrders.filter(fo => fo.bookingId === booking.id)
     );
     const uniqueExisting = Array.from(new Map(existingOrders.map(o => [o.orderNumber, o])).values());
 
@@ -2446,7 +2594,15 @@ export const db = {
 
   // STRICT TEST BOOKING MANAGEMENT: Only bookings with isTest === true can be modified or deleted
   async updateTestBooking(id: string, updates: Partial<Booking>, performedBy = 'الإدارة'): Promise<Booking> {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
+    }
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات تعديل الحجز التجريبي تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode.');
+    }
+
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error('الحجز غير موجود');
     }
@@ -2509,7 +2665,15 @@ export const db = {
   },
 
   async deleteTestBooking(id: string, performedBy = 'الإدارة'): Promise<{ success: boolean; bookingCode: string }> {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
+    }
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات حذف الحجز التجريبي تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode.');
+    }
+
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error('الحجز غير موجود');
     }
@@ -2539,9 +2703,9 @@ export const db = {
       }
     }
 
-    // Delete from memoryDB
+    // Delete from memoryDB - strictly by targetId!
     memoryDB = loadLocalDB();
-    memoryDB.bookings = memoryDB.bookings.filter(b => b.id !== targetId && b.bookingCode !== bookingCode);
+    memoryDB.bookings = memoryDB.bookings.filter(b => b.id !== targetId);
     memoryDB.payments = memoryDB.payments.filter(p => p.bookingId !== targetId);
     memoryDB.factoryOrders = memoryDB.factoryOrders.filter(fo => fo.bookingId !== targetId);
     saveLocalDB(memoryDB);
@@ -2580,7 +2744,15 @@ export const db = {
     },
     performedBy = 'الإدارة'
   ): Promise<Booking> {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
+    }
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات تعديل الحجز بواسطة الإدارة تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode.');
+    }
+
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error('الحجز غير موجود');
     }
@@ -2764,7 +2936,15 @@ export const db = {
   },
 
   async confirmBooking(id: string, performedBy = 'الإدارة'): Promise<Booking> {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
+    }
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات تأكيد الحجز تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode.');
+    }
+
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error('الحجز غير موجود');
     }

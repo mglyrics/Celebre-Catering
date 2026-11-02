@@ -4,16 +4,17 @@ async function runPhase2Test() {
   console.log('====================================================');
 
   const bookingPayload = {
-    customerName: 'طارق عبد العزيز السعيد',
-    customerPhone: '01012345678',
-    customerWhatsapp: '01012345678',
+    customerName: '[اختبار معزول] حجز تجريبي مرحلة 2',
+    customerPhone: '01000000002',
+    customerWhatsapp: '01000000002',
     preferredContact: 'whatsapp',
-    eventName: 'حفل زفاف قاعة الماسة الذهبية',
+    eventName: 'حفل تجريبي مرحلة 2',
     eventDate: '2026-12-20',
     deliveryTime: '18:30',
     deliveryGovernorate: 'القاهرة',
-    deliveryAddress: 'مدينة نصر - بجوار دار المدفعية - قاعة الماسة',
-    notes: 'يرجى التأكد من وضع شوكة ومنديل مع كل علبة وتسليمها باردة للمشرف في تمام 6:30 مساءً.',
+    deliveryAddress: 'مدينة نصر - قاعة تجريبية',
+    notes: 'حجز تجريبي مستقل لاختبار المرحلة الثانية',
+    isTest: true,
     items: [
       {
         mealCode: 'Sale-01',
@@ -117,6 +118,11 @@ async function runPhase2Test() {
     throw new Error('مخالفة أمنية: تسرب سعر المصنع أو هامش الربح للواجهة العامة!');
   }
   console.log(`✓ أمان البيانات: سعر المصنع وهامش الربح محجوبان تماماً عن الواجهة العامة والعميل.`);
+
+  // Clean up created test booking using db.deleteTestBooking
+  const { db } = await import('../src/server/db');
+  await db.deleteTestBooking(booking.id, 'تنظيف حجز اختبار المرحلة 2');
+  console.log(`✓ تم تنظيف وحذف الحجز التجريبي ${booking.bookingCode} بأمان.`);
 
   console.log('\n====================================================');
   console.log('🎉 نجح اختبار المرحلة الثانية بالكامل بنسبة 100%!');

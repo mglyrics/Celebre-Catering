@@ -11,16 +11,17 @@ async function runPhase3LifecycleTest() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      customerName: 'المستشار شريف فوزي',
-      customerPhone: '01223344556',
-      customerWhatsapp: '01223344556',
+      customerName: '[اختبار معزول] حفل فندقي تجريبي',
+      customerPhone: '01000000003',
+      customerWhatsapp: '01000000003',
       preferredContact: 'whatsapp',
-      eventName: 'حفل خطوبة فندقي',
+      eventName: 'حفل تجريبي مستقل',
       eventDate: '2026-11-28',
       deliveryTime: '17:00',
       deliveryGovernorate: 'الجيزة',
-      deliveryAddress: 'فندق الفورسيزونز - قاعة النيل',
-      notes: 'تنسيق مباشر مع مسؤول القاعة، العلب البيضاء الرسمية مغلقة بإحكام',
+      deliveryAddress: 'قاعة تجريبية - الجيزة',
+      notes: 'تنسيق تجريبي لاختبار دورة العمل',
+      isTest: true,
       items: [
         { mealCode: 'Sale-03', quantity: 40, drinkOption: 'standard' }, // 60 * 40 = 2400 (fact: 41 * 40 = 1640)
         { mealCode: 'Sale-17', quantity: 30, drinkOption: 'pepsi' },    // (55+10)=65 * 30 = 1950 (fact: (43+10)=53 * 30 = 1590)
@@ -266,6 +267,16 @@ async function runPhase3LifecycleTest() {
 
   if (auditLogs.length < 4) {
     throw new Error('سجل التدقيق لم يسجل كافة العمليات المطلوبة!');
+  }
+
+  // 11. Cleanup test booking
+  console.log('\n11. تنظيف وحذف الحجز التجريبي من قاعدة البيانات...');
+  const cleanRes = await fetch(`${BASE_URL}/api/admin/bookings/${bookingId}/test-delete`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (cleanRes.ok) {
+    console.log(`✅ تم تنظيف وحذف الحجز التجريبي ${bookingCode} بأمان دون ترك أي مخلفات.`);
   }
 
   console.log('\n================================================================');
