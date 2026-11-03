@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Meal, Booking, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification } from '../types';
+import { Meal, Booking, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification, OrientalSweetOption } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import {
   Lock,
@@ -171,7 +171,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editDeliveryAddress, setEditDeliveryAddress] = useState('');
   const [editStatus, setEditStatus] = useState<BookingStatus>('INITIAL');
   const [editNotes, setEditNotes] = useState('');
-  const [editItems, setEditItems] = useState<{ mealCode: string; quantity: number; drinkOption: DrinkModification }[]>([]);
+  const [editItems, setEditItems] = useState<{ mealCode: string; quantity: number; drinkOption: DrinkModification; orientalSweetOption?: OrientalSweetOption }[]>([]);
   const [editBookingError, setEditBookingError] = useState<string | null>(null);
   const [isSavingBookingEdits, setIsSavingBookingEdits] = useState(false);
 
@@ -185,6 +185,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Selected Factory Order for printing
   const [printingFactoryOrder, setPrintingFactoryOrder] = useState<FactoryOrder | null>(null);
+
+  // Client Confirmation PDF Preview Modal
+  const [previewPdfBooking, setPreviewPdfBooking] = useState<Booking | null>(null);
+
+  // Deletion of CANCELLED bookings (single & bulk)
+  const [deletingCancelledBooking, setDeletingCancelledBooking] = useState<Booking | null>(null);
+  const [isDeletingCancelledBooking, setIsDeletingCancelledBooking] = useState(false);
+  const [deleteCancelledError, setDeleteCancelledError] = useState<string | null>(null);
+
+  const [selectedCancelledBookingIds, setSelectedCancelledBookingIds] = useState<string[]>([]);
+  const [isBulkDeletingCancelled, setIsBulkDeletingCancelled] = useState(false);
+  const [bulkDeleteCancelledModalOpen, setBulkDeleteCancelledModalOpen] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
+
+  // Factory Order Revision Modal
+  const [editingFactoryOrder, setEditingFactoryOrder] = useState<FactoryOrder | null>(null);
+  const [editFactoryOrderItems, setEditFactoryOrderItems] = useState<{
+    mealCode: string;
+    mealName: string;
+    quantity: number;
+    drinkOption: DrinkModification;
+    orientalSweetOption: OrientalSweetOption;
+    baseFactoryPrice: number;
+    hasJuice: boolean;
+  }[]>([]);
+  const [editFactoryOrderPackagingNotes, setEditFactoryOrderPackagingNotes] = useState('');
+  const [isSavingFactoryOrder, setIsSavingFactoryOrder] = useState(false);
+  const [saveFactoryOrderError, setSaveFactoryOrderError] = useState<string | null>(null);
 
   // Mobile Navigation Drawer & Confirmation State
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
@@ -698,6 +726,132 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleOpenEditFactoryOrder = (fo: FactoryOrder) => {
+    setEditingFactoryOrder(fo);
+    setEditFactoryOrderPackagingNotes(fo.packagingNotes || '');
+    setSaveFactoryOrderError(null);
+    const mealsMap = new Map(meals.map(m => [m.code, m]));
+    setEditFactoryOrderItems(
+      (fo.items || []).map(it => {
+        const m = mealsMap.get(it.mealCode);
+        return {
+          mealCode: it.mealCode,
+          mealName: it.mealName || m?.name || it.mealCode,
+          quantity: it.quantity || 1,
+          drinkOption: (it.drinkOption as DrinkModification) || 'standard',
+          orientalSweetOption: (it.orientalSweetOption as OrientalSweetOption) || 'none',
+          baseFactoryPrice: m?.factoryPrice || it.baseFactoryPrice || 0,
+          hasJuice: m ? m.hasJuice : true,
+        };
+      })
+    );
+  };
+
+  const handleSaveFactoryOrder = async () => {
+    if (!editingFactoryOrder) return;
+    setIsSavingFactoryOrder(true);
+    setSaveFactoryOrderError(null);
+    try {
+      const res = await fetch(`/api/admin/factory-orders/${editingFactoryOrder.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          items: editFactoryOrderItems.map(it => ({
+            mealCode: it.mealCode,
+            quantity: it.quantity,
+            drinkOption: it.orientalSweetOption === 'replace_juice' ? 'standard' : it.drinkOption,
+            orientalSweetOption: it.orientalSweetOption,
+          })),
+          packagingNotes: editFactoryOrderPackagingNotes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل تحديث أمر المصنع');
+      }
+      setEditingFactoryOrder(null);
+      loadAllData();
+    } catch (err: any) {
+      setSaveFactoryOrderError(err.message || 'حدث خطأ أثناء تعديل أمر المصنع');
+    } finally {
+      setIsSavingFactoryOrder(false);
+    }
+  };
+
+  const handleConfirmDeleteCancelledBooking = async () => {
+    if (!deletingCancelledBooking) return;
+    setIsDeletingCancelledBooking(true);
+    setDeleteCancelledError(null);
+    try {
+      const res = await fetch(`/api/admin/bookings/${deletingCancelledBooking.id}/cancelled`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حذف الحجز الملغي');
+      }
+      setDeletingCancelledBooking(null);
+      setSelectedCancelledBookingIds(prev => prev.filter(id => id !== deletingCancelledBooking.id));
+      loadAllData();
+    } catch (err: any) {
+      setDeleteCancelledError(err.message || 'حدث خطأ أثناء حذف الحجز الملغي');
+    } finally {
+      setIsDeletingCancelledBooking(false);
+    }
+  };
+
+  const handleConfirmBulkDeleteCancelled = async () => {
+    if (selectedCancelledBookingIds.length === 0) return;
+    setIsBulkDeletingCancelled(true);
+    setBulkDeleteError(null);
+    try {
+      const res = await fetch('/api/admin/bookings/bulk-delete-cancelled', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ bookingIds: selectedCancelledBookingIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل الحذف الجماعي');
+      }
+      setSelectedCancelledBookingIds([]);
+      setBulkDeleteCancelledModalOpen(false);
+      loadAllData();
+    } catch (err: any) {
+      setBulkDeleteError(err.message || 'حدث خطأ أثناء الحذف الجماعي');
+    } finally {
+      setIsBulkDeletingCancelled(false);
+    }
+  };
+
+  const toggleSelectCancelledBooking = (id: string) => {
+    setSelectedCancelledBookingIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllCancelled = (cancelledBookings: Booking[]) => {
+    const allIds = cancelledBookings.map(b => b.id);
+    const allSelected = allIds.length > 0 && allIds.every(id => selectedCancelledBookingIds.includes(id));
+    if (allSelected) {
+      setSelectedCancelledBookingIds([]);
+    } else {
+      setSelectedCancelledBookingIds(allIds);
+    }
+  };
+
   const getBookingPaymentStatusInfo = (b: Booking): { label: string; bg: string; text: string; border: string; dot: string } => {
     const total = Number(b.totalDistributorPrice) || 0;
     const paid = Number(b.paidAmount) || 0;
@@ -929,6 +1083,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         mealCode: it.mealCode,
         quantity: it.quantity,
         drinkOption: it.drinkOption || 'standard',
+        orientalSweetOption: (it.orientalSweetOption as OrientalSweetOption) || 'none',
       }))
     );
     setEditBookingError(null);
@@ -1780,6 +1935,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   return (
                     <>
+                      {/* Bulk Actions Bar for Cancelled Bookings */}
+                      {(() => {
+                        const cancelledInFiltered = filtered.filter(b => b.status === 'CANCELLED');
+                        if (cancelledInFiltered.length === 0) return null;
+                        const allCancelledSelected = cancelledInFiltered.length > 0 && cancelledInFiltered.every(b => selectedCancelledBookingIds.includes(b.id));
+
+                        return (
+                          <div className="p-3 bg-rose-50/80 border border-rose-200 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs mb-3">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                id="select-all-cancelled"
+                                checked={allCancelledSelected}
+                                onChange={() => toggleSelectAllCancelled(cancelledInFiltered)}
+                                className="w-4 h-4 text-rose-600 rounded border-rose-300 focus:ring-rose-500 cursor-pointer"
+                              />
+                              <label htmlFor="select-all-cancelled" className="font-bold text-rose-900 cursor-pointer select-none">
+                                تحديد كافة الحجوزات الملغاة ({cancelledInFiltered.length} حجز ملغي)
+                              </label>
+                              {selectedCancelledBookingIds.length > 0 && (
+                                <span className="bg-rose-200 text-rose-800 font-mono font-bold px-2 py-0.5 rounded-full text-[11px]">
+                                  محدد: {selectedCancelledBookingIds.length}
+                                </span>
+                              )}
+                            </div>
+
+                            {selectedCancelledBookingIds.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setBulkDeleteCancelledModalOpen(true)}
+                                className="min-h-[36px] px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>حذف الحجوزات الملغاة المحددة ({selectedCancelledBookingIds.length})</span>
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       {/* 1. Mobile Cards View (Hidden on Desktop) */}
                       <div className="block md:hidden space-y-3.5">
                         {filtered.map(b => {
@@ -1799,6 +1994,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {/* Top Bar: Code, Badges, Copy */}
                               <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                                 <div className="flex items-center gap-1.5">
+                                  {b.status === 'CANCELLED' && (
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedCancelledBookingIds.includes(b.id)}
+                                      onChange={() => toggleSelectCancelledBooking(b.id)}
+                                      className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer ml-1"
+                                      title="تحديد لحذف الحجز الملغي"
+                                    />
+                                  )}
                                   <span className="font-mono font-black text-sm text-[#7A0C2E]">
                                     {b.bookingCode}
                                   </span>
@@ -2028,6 +2232,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   </select>
                                 </div>
 
+                                {/* Customer Confirmation PDF & Cancelled Delete Buttons */}
+                                <div className="space-y-2 pt-1 border-t border-slate-100">
+                                  {b.status !== 'CANCELLED' && (
+                                    <button
+                                      type="button"
+                                      disabled={b.paidAmount <= 0 || b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION'}
+                                      onClick={() => setPreviewPdfBooking(b)}
+                                      className={`w-full min-h-[40px] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 border transition-all ${
+                                        b.paidAmount > 0 && b.status !== 'INITIAL' && b.status !== 'PENDING_CONFIRMATION'
+                                          ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-2xs'
+                                          : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                      }`}
+                                      title={
+                                        b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION'
+                                          ? 'متاح فقط للحجوزات المؤكدة'
+                                          : b.paidAmount <= 0
+                                          ? 'يلزم تسجيل دفعة مالية واحدة على الأقل لإصدار إيصال العميل'
+                                          : 'عرض وطباعة إيصال العميل الرسمي PDF'
+                                      }
+                                    >
+                                      <FileText className="w-4 h-4 text-[#7A0C2E]" />
+                                      <span>إيصال العميل الرسمي (PDF A4)</span>
+                                    </button>
+                                  )}
+
+                                  {b.status === 'CANCELLED' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingCancelledBooking(b)}
+                                      className="w-full min-h-[40px] bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 flex items-center justify-center gap-1.5 transition-all shadow-2xs"
+                                    >
+                                      <Trash2 className="w-4 h-4 text-rose-600" />
+                                      <span>حذف هذا الحجز الملغي نهائياً</span>
+                                    </button>
+                                  )}
+                                </div>
+
                                 {/* Test Booking Controls on Mobile */}
                                 {b.isTest && (
                                   <div className="grid grid-cols-2 gap-2 pt-1">
@@ -2061,6 +2302,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <table className="w-full text-right text-xs">
                           <thead className="bg-[#FAF8F5] text-slate-700 font-bold border-b border-slate-200">
                             <tr>
+                              <th className="p-3 w-8 text-center">
+                                {filtered.some(b => b.status === 'CANCELLED') && (
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      filtered.filter(b => b.status === 'CANCELLED').length > 0 &&
+                                      filtered.filter(b => b.status === 'CANCELLED').every(b => selectedCancelledBookingIds.includes(b.id))
+                                    }
+                                    onChange={() => toggleSelectAllCancelled(filtered.filter(b => b.status === 'CANCELLED'))}
+                                    className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                                    title="تحديد كل الحجوزات الملغية في الصفحة"
+                                  />
+                                )}
+                              </th>
                               <th className="p-3">رقم الحجز</th>
                               <th className="p-3">العميل والموبايل</th>
                               <th className="p-3">المناسبة والموعد</th>
@@ -2074,6 +2329,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <tbody className="divide-y divide-slate-100">
                             {filtered.map(b => (
                               <tr key={b.id} className={`hover:bg-slate-50 ${b.isTest ? 'bg-purple-50/30' : ''}`}>
+                                <td className="p-3 text-center">
+                                  {b.status === 'CANCELLED' && (
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedCancelledBookingIds.includes(b.id)}
+                                      onChange={() => toggleSelectCancelledBooking(b.id)}
+                                      className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                                      title="تحديد لحذف الحجز الملغي"
+                                    />
+                                  )}
+                                </td>
                                 <td className="p-3">
                                   <div className="flex items-center gap-1">
                                     <span className="font-mono font-bold text-[#7A0C2E] block">{b.bookingCode}</span>
@@ -2162,6 +2428,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       >
                                         <MessageCircle className="w-3.5 h-3.5" />
                                         <span>واتساب المصنع</span>
+                                      </button>
+                                    )}
+
+                                    {/* Client PDF Receipt Button */}
+                                    {b.status !== 'CANCELLED' && (
+                                      <button
+                                        onClick={() => setPreviewPdfBooking(b)}
+                                        disabled={b.paidAmount <= 0 || b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION'}
+                                        className={`p-1.5 rounded-lg border transition-all ${
+                                          b.paidAmount > 0 && b.status !== 'INITIAL' && b.status !== 'PENDING_CONFIRMATION'
+                                            ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-2xs'
+                                            : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50'
+                                        }`}
+                                        title={
+                                          b.status === 'INITIAL' || b.status === 'PENDING_CONFIRMATION'
+                                            ? 'إيصال PDF متاح فقط للحجوزات المؤكدة'
+                                            : b.paidAmount <= 0
+                                            ? 'يلزم تسجيل دفعة مالية لإصدار الإيصال'
+                                            : 'عرض وطباعة إيصال العميل PDF'
+                                        }
+                                      >
+                                        <FileText className="w-4 h-4 text-[#7A0C2E]" />
+                                      </button>
+                                    )}
+
+                                    {/* Cancelled Booking Deletion Button */}
+                                    {b.status === 'CANCELLED' && (
+                                      <button
+                                        onClick={() => setDeletingCancelledBooking(b)}
+                                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-all"
+                                        title="حذف الحجز الملغي نهائياً"
+                                      >
+                                        <Trash2 className="w-4 h-4 text-rose-600" />
                                       </button>
                                     )}
 
@@ -2328,6 +2627,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           >
                             <CreditCard className="w-3.5 h-3.5" />
                             <span>إدارة دفعات المصنع ({fo.payments?.length || 0})</span>
+                          </button>
+                        )}
+                        {currentUser?.role !== 'factory' && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditFactoryOrder(fo)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-xs rounded-lg border border-blue-300 transition-colors shadow-2xs"
+                            title="تعديل كميات أو أصناف أو خيارات أمر المصنع"
+                          >
+                            <Edit className="w-3.5 h-3.5 text-blue-700" />
+                            <span>تعديل أمر المصنع (v{fo.version})</span>
                           </button>
                         )}
                         <button
@@ -3463,7 +3773,7 @@ APP_URL="https://celebre-eg.com"`}
                       type="button"
                       onClick={() => {
                         if (meals.length > 0) {
-                          setEditItems([...editItems, { mealCode: meals[0].code, quantity: 10, drinkOption: 'standard' }]);
+                          setEditItems([...editItems, { mealCode: meals[0].code, quantity: 10, drinkOption: 'standard', orientalSweetOption: 'none' }]);
                         }
                       }}
                       className="px-2.5 py-1 bg-[#7A0C2E] hover:bg-[#560820] text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1"
@@ -3536,18 +3846,45 @@ APP_URL="https://celebre-eg.com"`}
 
                         <div>
                           <select
-                            value={item.drinkOption}
+                            value={item.orientalSweetOption || 'none'}
                             onChange={(e) => {
                               const updated = [...editItems];
-                              updated[idx].drinkOption = e.target.value as DrinkModification;
+                              const val = e.target.value as OrientalSweetOption;
+                              updated[idx].orientalSweetOption = val;
+                              if (val === 'replace_juice') {
+                                updated[idx].drinkOption = 'standard';
+                              }
                               setEditItems(updated);
                             }}
-                            className="px-2.5 py-2 border rounded-xl text-xs bg-slate-50 font-semibold"
+                            className="px-2.5 py-2 border rounded-xl text-xs bg-amber-50/60 border-amber-300 font-semibold text-slate-800"
+                            title="خيار قطعة شرقي"
                           >
-                            <option value="standard">عصير بخيرة القياسي</option>
-                            <option value="no_juice">بدون عصير (-5 ج)</option>
-                            <option value="pepsi">استبدال ببيبسي (+10 ج)</option>
+                            <option value="none">بدون قطعة شرقي</option>
+                            <option value="add_with_juice">إضافة شرقي مع العصير (+20 ج)</option>
+                            <option value="replace_juice">استبدال العصير بشرقي (+15 ج)</option>
                           </select>
+                        </div>
+
+                        <div>
+                          {item.orientalSweetOption === 'replace_juice' ? (
+                            <span className="px-2.5 py-2 inline-block border rounded-xl text-xs bg-slate-100 text-slate-500 font-medium">
+                              العصير مستبدل بقطعة شرقي
+                            </span>
+                          ) : (
+                            <select
+                              value={item.drinkOption}
+                              onChange={(e) => {
+                                const updated = [...editItems];
+                                updated[idx].drinkOption = e.target.value as DrinkModification;
+                                setEditItems(updated);
+                              }}
+                              className="px-2.5 py-2 border rounded-xl text-xs bg-slate-50 font-semibold"
+                            >
+                              <option value="standard">عصير بخيرة القياسي</option>
+                              <option value="no_juice">بدون عصير (-5 ج)</option>
+                              <option value="pepsi">استبدال ببيبسي (+10 ج)</option>
+                            </select>
+                          )}
                         </div>
 
                         {editItems.length > 1 && (
@@ -4659,6 +4996,462 @@ APP_URL="https://celebre-eg.com"`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{isDeletingFactoryPayment ? 'جاري الحذف...' : 'تأكيد حذف الدفعة'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Client Confirmation PDF Preview & Print Modal */}
+        {previewPdfBooking && (
+          <div className="fixed inset-0 z-90 bg-black/80 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-4xl rounded-3xl p-5 shadow-2xl flex flex-col max-h-[95vh] space-y-4 text-right">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-xl">
+                    <FileText className="w-5 h-5 text-[#7A0C2E]" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-slate-900">
+                      إيصال تأكيد الحجز الرسمي للعميل (نسخة A4 رسمية)
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      رقم الحجز: <strong className="font-mono text-[#7A0C2E]">{previewPdfBooking.bookingCode}</strong> • العميل: {previewPdfBooking.customerName}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/api/admin/bookings/${previewPdfBooking.id}/pdf?download=true`}
+                    download={`Celebre-Confirmation-${previewPdfBooking.bookingCode}.html`}
+                    className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-2xs"
+                  >
+                    <span>تحميل الإيصال</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const iframe = document.getElementById('client-pdf-iframe') as HTMLIFrameElement;
+                      if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.print();
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition-colors"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-[#DFC066]" />
+                    <span>طباعة مباشرة</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewPdfBooking(null)}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF Preview Frame */}
+              <div className="flex-1 bg-slate-100 rounded-2xl p-2 border border-slate-200 overflow-hidden min-h-[65vh]">
+                <iframe
+                  id="client-pdf-iframe"
+                  src={`/api/admin/bookings/${previewPdfBooking.id}/pdf`}
+                  className="w-full h-full min-h-[65vh] rounded-xl border border-slate-300 bg-white shadow-xs"
+                  title="إيصال العميل"
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                <span>• تصميم قياسي صفحة واحدة A4 بالهوية المعتمدة لشركة سيليبري كاترينج وخالٍ تماماً من أي أسعار أو حسابات تخص المصنع.</span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewPdfBooking(null)}
+                  className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Single Cancelled Booking Deletion Modal */}
+        {deletingCancelledBooking && (
+          <div className="fixed inset-0 z-90 bg-black/75 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right text-xs">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h4 className="text-base font-black text-slate-900">
+                  تأكيد حذف الحجز الملغي نهائياً
+                </h4>
+                <p className="text-slate-500 text-[11px]">
+                  هذا الإجراء مخصص حصرياً للحجوزات الملغاة (CANCELLED) الخالية من أي التزامات أو مدفوعات مالية.
+                </p>
+              </div>
+
+              {deleteCancelledError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{deleteCancelledError}</span>
+                </div>
+              )}
+
+              <div className="p-3 bg-[#FAF8F5] rounded-xl border border-slate-200 space-y-1.5 text-slate-700 text-[11px]">
+                <div>رقم الحجز: <strong className="font-mono text-[#7A0C2E]">{deletingCancelledBooking.bookingCode}</strong></div>
+                <div>المعرف الأساسي: <strong className="font-mono text-slate-600 text-[10px]">{deletingCancelledBooking.id}</strong></div>
+                <div>العميل: <strong className="text-slate-900">{deletingCancelledBooking.customerName}</strong></div>
+                <div>المناسبة والموعد: <span>{deletingCancelledBooking.eventName} ({deletingCancelledBooking.eventDate})</span></div>
+                <div>حالة الحجز: <span className="font-bold text-rose-600">{deletingCancelledBooking.status}</span></div>
+                <div>المدفوعات المسجلة: <strong className="text-emerald-700">{deletingCancelledBooking.paidAmount || 0} ج.م</strong></div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  disabled={isDeletingCancelledBooking}
+                  onClick={() => setDeletingCancelledBooking(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingCancelledBooking}
+                  onClick={handleConfirmDeleteCancelledBooking}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeletingCancelledBooking ? 'جاري الحذف...' : 'تأكيد الحذف النهائي'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk Cancelled Bookings Deletion Modal */}
+        {bulkDeleteCancelledModalOpen && (
+          <div className="fixed inset-0 z-90 bg-black/75 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right text-xs">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h4 className="text-base font-black text-slate-900">
+                  تأكيد الحذف الجماعي للحجوزات الملغاة
+                </h4>
+                <p className="text-slate-500 text-[11px]">
+                  سيتم فحص كل حجز والتأكد من حالته الملغاة (CANCELLED) وخلوه التام من أي مدفوعات قبل حذفه نهائياً.
+                </p>
+              </div>
+
+              {bulkDeleteError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{bulkDeleteError}</span>
+                </div>
+              )}
+
+              <div className="p-3 bg-rose-50/60 rounded-xl border border-rose-200 text-rose-900 text-center font-bold">
+                عدد الحجوزات الملغاة المحددة للحذف: ({selectedCancelledBookingIds.length}) حجز
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  disabled={isBulkDeletingCancelled}
+                  onClick={() => setBulkDeleteCancelledModalOpen(false)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isBulkDeletingCancelled}
+                  onClick={handleConfirmBulkDeleteCancelled}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isBulkDeletingCancelled ? 'جاري الحذف الجماعي...' : `حذف ${selectedCancelledBookingIds.length} حجز نهائياً`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Factory Order Revision Modal */}
+        {editingFactoryOrder && (
+          <div className="fixed inset-0 z-80 bg-black/70 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-3xl rounded-3xl p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-4 text-right text-xs">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-blue-50 text-blue-700 rounded-xl">
+                    <Edit className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-black text-slate-900">
+                      تعديل أمر تشغيل المصنع ({editingFactoryOrder.orderNumber} - v{editingFactoryOrder.version})
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      حجز مرجعي: <strong className="font-mono text-[#7A0C2E]">{editingFactoryOrder.bookingCode}</strong> • ستتم ترقية رقم الإصدار إلى v{(editingFactoryOrder.version || 1) + 1}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingFactoryOrder(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              {saveFactoryOrderError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{saveFactoryOrderError}</span>
+                </div>
+              )}
+
+              {/* Items editing list */}
+              <div className="space-y-3">
+                <label className="font-bold text-slate-800 text-xs block">
+                  أصناف ووجبات أمر التشغيل وخيارات المشروبات والقطعة الشرقي:
+                </label>
+
+                {editFactoryOrderItems.map((it, idx) => {
+                  let drinkDelta = 0;
+                  if (it.orientalSweetOption === 'replace_juice') {
+                    drinkDelta = 0;
+                  } else if (it.hasJuice) {
+                    if (it.drinkOption === 'pepsi') drinkDelta = 5;
+                    else if (it.drinkOption === 'no_juice') drinkDelta = -5;
+                  }
+
+                  let sweetDelta = 0;
+                  if (it.orientalSweetOption === 'add_with_juice') sweetDelta = 10;
+                  else if (it.orientalSweetOption === 'replace_juice') sweetDelta = 5;
+
+                  const unitFact = Math.max(0, it.baseFactoryPrice + drinkDelta + sweetDelta);
+                  const totalFact = unitFact * it.quantity;
+
+                  return (
+                    <div key={idx} className="p-3 bg-[#FAF8F5] rounded-xl border border-slate-200 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-xs text-[#7A0C2E] bg-white px-2 py-0.5 rounded border">
+                            {it.mealCode}
+                          </span>
+                          <span className="font-bold text-slate-800">{it.mealName}</span>
+                          <span className="text-[10px] text-slate-500">
+                            (سعر المصنع الأساسي: {it.baseFactoryPrice} ج)
+                          </span>
+                        </div>
+                        <div className="font-bold font-mono text-slate-900">
+                          {unitFact} ج × {it.quantity} = <span className="text-[#7A0C2E] font-black">{totalFact.toLocaleString('ar-EG')} ج</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-200/60">
+                        {/* Quantity */}
+                        <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-lg border">
+                          <span className="text-[11px] font-semibold text-slate-600">الكمية:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editFactoryOrderItems];
+                              updated[idx].quantity = Math.max(1, updated[idx].quantity - 5);
+                              setEditFactoryOrderItems(updated);
+                            }}
+                            className="p-1 hover:bg-slate-100 rounded text-slate-700"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            value={it.quantity}
+                            onChange={(e) => {
+                              const updated = [...editFactoryOrderItems];
+                              updated[idx].quantity = Math.max(1, parseInt(e.target.value) || 1);
+                              setEditFactoryOrderItems(updated);
+                            }}
+                            className="w-14 text-center font-bold text-slate-800 border-none focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editFactoryOrderItems];
+                              updated[idx].quantity += 5;
+                              setEditFactoryOrderItems(updated);
+                            }}
+                            className="p-1 hover:bg-slate-100 rounded text-slate-700"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="text-[10px] text-slate-400">بوكس</span>
+                        </div>
+
+                        {/* Oriental Sweet */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-slate-600">شرقي:</span>
+                          <select
+                            value={it.orientalSweetOption || 'none'}
+                            onChange={(e) => {
+                              const updated = [...editFactoryOrderItems];
+                              const newSweet = e.target.value as OrientalSweetOption;
+                              updated[idx].orientalSweetOption = newSweet;
+                              if (newSweet === 'replace_juice') {
+                                updated[idx].drinkOption = 'standard';
+                              }
+                              setEditFactoryOrderItems(updated);
+                            }}
+                            className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 font-medium text-slate-700 focus:ring-1 focus:ring-[#7A0C2E]"
+                          >
+                            <option value="none">بدون قطعة شرقي (0 ج)</option>
+                            <option value="add_with_juice">إضافة مع العصير (+10 ج)</option>
+                            {it.hasJuice && (
+                              <option value="replace_juice">استبدال العصير (+5 ج)</option>
+                            )}
+                          </select>
+                        </div>
+
+                        {/* Drink */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-slate-600">المشروب:</span>
+                          {it.orientalSweetOption === 'replace_juice' ? (
+                            <span className="flex-1 text-[11px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded-lg font-bold truncate">
+                              مستبدل بالشرقي
+                            </span>
+                          ) : (
+                            <select
+                              value={it.drinkOption}
+                              onChange={(e) => {
+                                const updated = [...editFactoryOrderItems];
+                                updated[idx].drinkOption = e.target.value as DrinkModification;
+                                setEditFactoryOrderItems(updated);
+                              }}
+                              className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 font-medium text-slate-700 focus:ring-1 focus:ring-[#7A0C2E]"
+                            >
+                              <option value="standard">عصير قياسي (0 ج)</option>
+                              <option value="no_juice">بدون عصير (-5 ج)</option>
+                              <option value="pepsi">بيبسي (+5 ج صافي)</option>
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Packaging Notes */}
+              <div>
+                <label className="font-bold text-slate-800 text-xs block mb-1">
+                  تعليمات التعبئة والتغليف للمصنع:
+                </label>
+                <textarea
+                  rows={2}
+                  value={editFactoryOrderPackagingNotes}
+                  onChange={(e) => setEditFactoryOrderPackagingNotes(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl bg-[#FAF8F5] focus:outline-none focus:border-[#7A0C2E]"
+                  placeholder="تعليمات التجهيز والتغليف..."
+                />
+              </div>
+
+              {/* Live Accounting Calculation & Balance Review */}
+              {(() => {
+                let calcCost = 0;
+                let totalBoxes = 0;
+                editFactoryOrderItems.forEach(it => {
+                  let drinkDelta = 0;
+                  if (it.orientalSweetOption === 'replace_juice') {
+                    drinkDelta = 0;
+                  } else if (it.hasJuice) {
+                    if (it.drinkOption === 'pepsi') drinkDelta = 5;
+                    else if (it.drinkOption === 'no_juice') drinkDelta = -5;
+                  }
+
+                  let sweetDelta = 0;
+                  if (it.orientalSweetOption === 'add_with_juice') sweetDelta = 10;
+                  else if (it.orientalSweetOption === 'replace_juice') sweetDelta = 5;
+
+                  const unitFact = Math.max(0, it.baseFactoryPrice + drinkDelta + sweetDelta);
+                  calcCost += unitFact * it.quantity;
+                  totalBoxes += it.quantity;
+                });
+
+                const prevCost = editingFactoryOrder.factoryCostTotal || 0;
+                const paidToFact = editingFactoryOrder.paidToFactoryAmount || 0;
+                const newRemaining = calcCost - paidToFact;
+                const isOverpaid = paidToFact > calcCost;
+
+                return (
+                  <div className="space-y-2 pt-2 border-t">
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div className="bg-[#FAF8F5] p-2.5 rounded-xl border border-slate-200">
+                        <span className="text-[10px] text-slate-500 block">إجمالي البوكسات</span>
+                        <strong className="font-black text-slate-900 text-sm">{totalBoxes} بوكس</strong>
+                      </div>
+                      <div className="bg-[#FAF8F5] p-2.5 rounded-xl border border-slate-200">
+                        <span className="text-[10px] text-slate-500 block">التكلفة الجديدة للمصنع</span>
+                        <strong className="font-black text-[#7A0C2E] text-sm">{calcCost.toLocaleString('ar-EG')} ج</strong>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">كانت {prevCost.toLocaleString('ar-EG')} ج</span>
+                      </div>
+                      <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
+                        <span className="text-[10px] text-emerald-800 block">المسدد الفعلي للمصنع</span>
+                        <strong className="font-black text-emerald-800 text-sm">{paidToFact.toLocaleString('ar-EG')} ج</strong>
+                        <span className="text-[10px] text-emerald-600 block mt-0.5">{editingFactoryOrder.payments?.length || 0} دفعات سابقة</span>
+                      </div>
+                      <div className={`p-2.5 rounded-xl border ${isOverpaid ? 'bg-purple-50 border-purple-300 text-purple-900' : newRemaining === 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
+                        <span className="text-[10px] block opacity-80">
+                          {isOverpaid ? 'سداد بالزيادة (دائن)' : 'الرصيد المتبقي للمصنع'}
+                        </span>
+                        <strong className={`font-black text-sm ${isOverpaid ? 'text-purple-800' : newRemaining === 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
+                          {isOverpaid 
+                            ? `+${Math.abs(newRemaining).toLocaleString('ar-EG')} ج` 
+                            : `${newRemaining.toLocaleString('ar-EG')} ج`}
+                        </strong>
+                        <span className="text-[10px] block mt-0.5 font-bold">
+                          {isOverpaid ? 'OVERPAID' : newRemaining === 0 ? 'FULLY_PAID' : paidToFact > 0 ? 'PARTIALLY_PAID' : 'UNPAID'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {isOverpaid && (
+                      <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-purple-900 text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-purple-700 flex-shrink-0" />
+                        <div>
+                          <strong>تنبيه محاسبي (OVERPAID): </strong>
+                          المبلغ المسدد للمصنع ({paidToFact.toLocaleString('ar-EG')} ج) أكبر من تكلفة التشغيل المعدلة ({calcCost.toLocaleString('ar-EG')} ج). تظل سجلات الدفعات التاريخية محفوظة بالكامل دون حذف، ويظهر رصيد دائن للمصنع بقيمة (+{(paidToFact - calcCost).toLocaleString('ar-EG')} ج) لأغراض التسوية المحاسبية.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t">
+                <button
+                  type="button"
+                  disabled={isSavingFactoryOrder}
+                  onClick={() => setEditingFactoryOrder(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingFactoryOrder}
+                  onClick={handleSaveFactoryOrder}
+                  className="px-6 py-2 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4 text-[#DFC066]" />
+                  <span>{isSavingFactoryOrder ? 'جاري حفظ وترقية الإصدار...' : `حفظ وتحديث أمر المصنع (v${(editingFactoryOrder.version || 1) + 1})`}</span>
                 </button>
               </div>
             </div>

@@ -72,6 +72,7 @@ model BookingItem {
   ingredients           String
   quantity              Int
   drinkOption           String   @default("standard") // standard, no_juice, pepsi
+  orientalSweetOption   String   @default("none") // none, add_with_juice, replace_juice
   baseDistributorPrice  Float
   unitDistributorPrice  Float
   totalDistributorPrice Float

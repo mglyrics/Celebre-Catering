@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Meal, DrinkModification, BookingMealItem, Booking } from '../types';
+import { Meal, DrinkModification, BookingMealItem, Booking, OrientalSweetOption } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import {
   ShoppingBag,
@@ -27,7 +27,7 @@ interface BookingWizardProps {
   isOpen: boolean;
   onClose: () => void;
   meals: Meal[];
-  initialItems: { meal: Meal; quantity: number; drinkOption: DrinkModification }[];
+  initialItems: { meal: Meal; quantity: number; drinkOption: DrinkModification; orientalSweetOption?: OrientalSweetOption }[];
   onOrderSuccess: (booking: Booking, whatsappUrl: string) => void;
 }
 
@@ -68,6 +68,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
     meal: Meal;
     quantity: number;
     drinkOption: DrinkModification;
+    orientalSweetOption?: OrientalSweetOption;
   }[]>([]);
 
   // Client and Event info
@@ -89,7 +90,10 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
   // Sync initial items when modal opens
   React.useEffect(() => {
     if (initialItems && initialItems.length > 0) {
-      setCartItems(initialItems);
+      setCartItems(initialItems.map(it => ({
+        ...it,
+        orientalSweetOption: it.orientalSweetOption || 'none',
+      })));
     } else if (cartItems.length === 0 && meals.length > 0) {
       // Default with Sale-01 as starter if completely empty
       setCartItems([
@@ -97,6 +101,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
           meal: meals[0],
           quantity: 50,
           drinkOption: 'standard',
+          orientalSweetOption: 'none',
         }
       ]);
     }
@@ -111,21 +116,35 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
       const qty = Math.max(1, item.quantity);
       totalMeals += qty;
 
-      let delta = 0;
-      if (item.meal.hasJuice) {
+      const sweetOpt: OrientalSweetOption = item.orientalSweetOption || 'none';
+      let sweetDelta = 0;
+      if (sweetOpt === 'add_with_juice') {
+        sweetDelta = 20; // +20 EGP Distributor
+      } else if (sweetOpt === 'replace_juice') {
+        sweetDelta = 15; // +15 EGP Distributor
+      }
+
+      let drinkDelta = 0;
+      if (sweetOpt === 'replace_juice') {
+        // Juice is replaced by sweet: no juice discount or extra soda charges apply
+        drinkDelta = 0;
+      } else if (item.meal.hasJuice) {
         if (item.drinkOption === 'no_juice') {
-          delta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
         } else if (item.drinkOption === 'pepsi') {
-          delta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
+          drinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
         }
       }
 
-      const unitPrice = Math.max(0, item.meal.distributorPrice + delta);
+      const unitPrice = Math.max(0, item.meal.distributorPrice + drinkDelta + sweetDelta);
       const itemTotal = unitPrice * qty;
       totalDistributor += itemTotal;
 
       return {
         ...item,
+        sweetOpt,
+        sweetDelta,
+        drinkDelta,
         unitPrice,
         itemTotal,
       };
@@ -145,7 +164,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
       updated[existingIdx].quantity += 10;
       setCartItems(updated);
     } else {
-      setCartItems([...cartItems, { meal, quantity: 20, drinkOption: 'standard' }]);
+      setCartItems([...cartItems, { meal, quantity: 20, drinkOption: 'standard', orientalSweetOption: 'none' }]);
     }
   };
 
@@ -159,6 +178,15 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
   const handleUpdateDrink = (index: number, drinkOption: DrinkModification) => {
     const updated = [...cartItems];
     updated[index].drinkOption = drinkOption;
+    setCartItems(updated);
+  };
+
+  const handleUpdateSweet = (index: number, sweetOption: OrientalSweetOption) => {
+    const updated = [...cartItems];
+    updated[index].orientalSweetOption = sweetOption;
+    if (sweetOption === 'replace_juice') {
+      updated[index].drinkOption = 'standard';
+    }
     setCartItems(updated);
   };
 
@@ -229,7 +257,8 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
         items: cartItems.map(item => ({
           mealCode: item.meal.code,
           quantity: item.quantity,
-          drinkOption: item.drinkOption,
+          drinkOption: item.orientalSweetOption === 'replace_juice' ? 'standard' : item.drinkOption,
+          orientalSweetOption: item.orientalSweetOption || 'none',
         })),
       };
 
@@ -488,18 +517,40 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                         <span className="text-[11px] text-slate-400">بوكس</span>
                       </div>
 
+                      {/* Oriental Sweet Modifier Options */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-slate-600">قطعة شرقي:</span>
+                        <select
+                          value={item.orientalSweetOption || 'none'}
+                          onChange={(e) => handleUpdateSweet(idx, e.target.value as OrientalSweetOption)}
+                          className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-medium text-slate-700 focus:ring-1 focus:ring-[#7A0C2E]"
+                        >
+                          <option value="none">بدون قطعة شرقي (0 ج)</option>
+                          <option value="add_with_juice">إضافة قطعة شرقي مع العصير (+20 ج)</option>
+                          {item.meal.hasJuice && (
+                            <option value="replace_juice">استبدال العصير بقطعة شرقي (+15 ج)</option>
+                          )}
+                        </select>
+                      </div>
+
                       {/* Drink Modifier Options */}
                       <div className="flex items-center gap-1.5">
                         <span className="font-semibold text-slate-600">المشروب:</span>
-                        <select
-                          value={item.drinkOption}
-                          onChange={(e) => handleUpdateDrink(idx, e.target.value as DrinkModification)}
-                          className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-medium text-slate-700 focus:ring-1 focus:ring-[#7A0C2E]"
-                        >
-                          <option value="standard">عصير بخيرة القياسي (شامل)</option>
-                          <option value="no_juice">استبعاد العصير (-5 ج للوجبة)</option>
-                          <option value="pepsi">استبدال ببيبسي (+10 ج للوجبة)</option>
-                        </select>
+                        {item.orientalSweetOption === 'replace_juice' ? (
+                          <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1.5 rounded-lg font-bold">
+                            العصير مستبدل بقطعة شرقي
+                          </span>
+                        ) : (
+                          <select
+                            value={item.drinkOption}
+                            onChange={(e) => handleUpdateDrink(idx, e.target.value as DrinkModification)}
+                            className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-medium text-slate-700 focus:ring-1 focus:ring-[#7A0C2E]"
+                          >
+                            <option value="standard">عصير بخيرة القياسي (شامل)</option>
+                            <option value="no_juice">استبعاد العصير (-5 ج للوجبة)</option>
+                            <option value="pepsi">استبدال ببيبسي (+10 ج للوجبة)</option>
+                          </select>
+                        )}
                       </div>
 
                       {/* Item Total */}
@@ -744,6 +795,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                       <th className="p-2.5">كود الوجبة</th>
                       <th className="p-2.5">الكمية</th>
                       <th className="p-2.5">المشروب</th>
+                      <th className="p-2.5">قطعة شرقي</th>
                       <th className="p-2.5">سعر الوحدة</th>
                       <th className="p-2.5">الإجمالي</th>
                     </tr>
@@ -758,11 +810,20 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                           {item.quantity} بوكس
                         </td>
                         <td className="p-2.5 text-slate-600">
-                          {item.drinkOption === 'no_juice' 
+                          {item.orientalSweetOption === 'replace_juice'
+                            ? 'مستبدل بالشرقي'
+                            : item.drinkOption === 'no_juice' 
                             ? 'بدون عصير (-5ج)' 
                             : item.drinkOption === 'pepsi' 
                             ? 'بيبسي (+10ج)' 
                             : 'عصير بخيرة القياسي'}
+                        </td>
+                        <td className="p-2.5 text-slate-600 font-medium">
+                          {item.orientalSweetOption === 'add_with_juice'
+                            ? 'إضافة مع العصير (+20ج)'
+                            : item.orientalSweetOption === 'replace_juice'
+                            ? 'استبدال العصير (+15ج)'
+                            : '—'}
                         </td>
                         <td className="p-2.5">
                           {item.unitPrice} ج
@@ -775,7 +836,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                   </tbody>
                   <tfoot className="bg-[#FAF8F5] font-black border-t-2 border-[#E8DCC0]">
                     <tr>
-                      <td colSpan={2} className="p-3 text-slate-800">
+                      <td colSpan={3} className="p-3 text-slate-800">
                         إجمالي الوجبات: {calculations.totalMeals} وجبة
                       </td>
                       <td colSpan={3} className="p-3 text-left text-base text-[#7A0C2E]">

@@ -223,4 +223,32 @@ export const CELEBRE_CONFIG = {
     noJuiceDiscount: 5,
     pepsiExtra: 10,
   },
+  orientalSweetAdjustments: {
+    addWithJuiceCustomer: 20,
+    addWithJuiceFactory: 10,
+    replaceJuiceCustomer: 15,
+    replaceJuiceFactory: 5,
+  },
 };
+
+export const ORIENTAL_SWEET_CONFIG = {
+  add_with_juice: {
+    distributorAddition: 20,
+    factoryAddition: 10,
+    customerLabel: 'إضافة قطعة شرقي مع العصير (+20 ج)',
+    factoryLabel: 'إضافة قطعة شرقي مع العصير (+10 ج للمصنع)',
+  },
+  replace_juice: {
+    distributorAddition: 15,
+    factoryAddition: 5,
+    customerLabel: 'استبدال العصير بقطعة شرقي (+15 ج)',
+    factoryLabel: 'استبدال العصير بقطعة شرقي (+5 ج للمصنع)',
+  },
+  none: {
+    distributorAddition: 0,
+    factoryAddition: 0,
+    customerLabel: 'بدون قطعة شرقي',
+    factoryLabel: 'بدون قطعة شرقي',
+  },
+} as const;
+

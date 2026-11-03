@@ -2,8 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
-import { Meal, Booking, BookingStatus, PaymentRecord, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AuditLog, AdminUser, DrinkModification } from '../types';
-import { INITIAL_MEALS, CELEBRE_CONFIG } from '../data/defaultMeals';
+import { Meal, Booking, BookingStatus, PaymentRecord, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AuditLog, AdminUser, DrinkModification, OrientalSweetOption } from '../types';
+import { INITIAL_MEALS, CELEBRE_CONFIG, ORIENTAL_SWEET_CONFIG } from '../data/defaultMeals';
 
 /**
  * Independent Factory Accounting Configuration for Drink Modifications:
@@ -343,6 +343,7 @@ export const db = {
       mealCode: string;
       quantity: number;
       drinkOption: DrinkModification;
+      orientalSweetOption?: OrientalSweetOption;
     }[];
   }): Promise<Booking> {
     memoryDB = loadLocalDB();
@@ -365,24 +366,41 @@ export const db = {
       const baseDistributorPrice = meal.distributorPrice;
       const baseFactoryPrice = meal.factoryPrice || 0;
 
-      // Customer / Distributor drink adjustment (must remain unchanged!)
+      // Oriental Sweet Addition / Replacement
+      const sweetOpt: OrientalSweetOption = item.orientalSweetOption || 'none';
+      let orientalSweetDistributorDelta = 0;
+      let orientalSweetFactoryDelta = 0;
+      let sweetLabel = 'بدون قطعة شرقي';
+
+      if (sweetOpt === 'add_with_juice') {
+        orientalSweetDistributorDelta = 20;
+        orientalSweetFactoryDelta = 10;
+        sweetLabel = 'إضافة قطعة شرقي مع العصير (+20 ج)';
+      } else if (sweetOpt === 'replace_juice') {
+        orientalSweetDistributorDelta = 15;
+        orientalSweetFactoryDelta = 5;
+        sweetLabel = 'استبدال العصير بقطعة شرقي (+15 ج)';
+      }
+
+      // Customer / Distributor drink adjustment
       let distributorDrinkDelta = 0;
       // Independent Factory drink adjustment
       let factoryDrinkDelta = 0;
 
-      if (meal.hasJuice) {
+      // If juice is replaced by oriental sweet, juice is excluded, so no extra drink modifications apply!
+      if (sweetOpt !== 'replace_juice' && meal.hasJuice) {
         if (item.drinkOption === 'no_juice') {
           distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
           factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
         } else if (item.drinkOption === 'pepsi') {
           distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10 for customer
-          // Independent Factory Pepsi Formula: -5 (juice) -1 (carton) +10 (can) = +4 EGP
-          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP
+          // Independent Factory Pepsi Formula: -5 (juice) + 10 (can) = +5 EGP net
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
         }
       }
 
-      const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
-      const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
+      const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta + orientalSweetDistributorDelta);
+      const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta + orientalSweetFactoryDelta);
 
       const itemTotalDistributor = unitDistributorPrice * quantity;
       const itemTotalFactory = unitFactoryPrice * quantity;
@@ -398,11 +416,15 @@ export const db = {
         category: meal.category,
         quantity,
         drinkOption: item.drinkOption,
+        orientalSweetOption: sweetOpt,
+        orientalSweetLabel: sweetLabel,
+        orientalSweetDistributorAdjustment: orientalSweetDistributorDelta,
         baseDistributorPrice,
         unitDistributorPrice,
         totalDistributorPrice: itemTotalDistributor,
         baseFactoryPrice,
         factoryDrinkAdjustment: factoryDrinkDelta,
+        factoryOrientalSweetAdjustment: orientalSweetFactoryDelta,
         unitFactoryPrice,
         totalFactoryPrice: itemTotalFactory,
       };
@@ -499,6 +521,7 @@ export const db = {
                   ingredients: it.ingredients,
                   quantity: it.quantity,
                   drinkOption: it.drinkOption,
+                  orientalSweetOption: it.orientalSweetOption || 'none',
                   baseDistributorPrice: it.baseDistributorPrice,
                   unitDistributorPrice: it.unitDistributorPrice,
                   totalDistributorPrice: it.totalDistributorPrice,
@@ -590,21 +613,30 @@ export const db = {
               version: b.version,
               createdAt: b.createdAt.toISOString(),
               updatedAt: b.updatedAt.toISOString(),
-              items: b.items.map(it => ({
-                mealId: it.mealId || it.mealCode,
-                mealCode: it.mealCode,
-                mealName: it.mealName,
-                category: it.category as any,
-                ingredients: it.ingredients,
-                quantity: it.quantity,
-                drinkOption: (it.drinkOption || 'standard') as any,
-                baseDistributorPrice: it.baseDistributorPrice,
-                unitDistributorPrice: it.unitDistributorPrice,
-                totalDistributorPrice: it.totalDistributorPrice,
-                baseFactoryPrice: it.baseFactoryPrice || 0,
-                unitFactoryPrice: it.unitFactoryPrice || 0,
-                totalFactoryPrice: it.totalFactoryPrice || 0,
-              })),
+              items: b.items.map(it => {
+                const sweetOpt = ((it as any).orientalSweetOption || 'none') as OrientalSweetOption;
+                const sweetDist = sweetOpt === 'add_with_juice' ? 20 : sweetOpt === 'replace_juice' ? 15 : 0;
+                const sweetFact = sweetOpt === 'add_with_juice' ? 10 : sweetOpt === 'replace_juice' ? 5 : 0;
+                return {
+                  mealId: it.mealId || it.mealCode,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category as any,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: (it.drinkOption || 'standard') as any,
+                  orientalSweetOption: sweetOpt,
+                  orientalSweetLabel: sweetOpt === 'add_with_juice' ? 'إضافة قطعة شرقي مع العصير (+20 ج)' : sweetOpt === 'replace_juice' ? 'استبدال العصير بقطعة شرقي (+15 ج)' : undefined,
+                  orientalSweetDistributorAdjustment: sweetDist,
+                  factoryOrientalSweetAdjustment: sweetFact,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice || 0,
+                  unitFactoryPrice: it.unitFactoryPrice || 0,
+                  totalFactoryPrice: it.totalFactoryPrice || 0,
+                };
+              }),
               payments: b.payments.map(p => ({
                 id: p.id,
                 bookingId: p.bookingId,
@@ -728,21 +760,30 @@ export const db = {
               version: b.version,
               createdAt: b.createdAt.toISOString(),
               updatedAt: b.updatedAt.toISOString(),
-              items: b.items.map(it => ({
-                mealId: it.mealId || it.mealCode,
-                mealCode: it.mealCode,
-                mealName: it.mealName,
-                category: it.category as any,
-                ingredients: it.ingredients,
-                quantity: it.quantity,
-                drinkOption: (it.drinkOption || 'standard') as any,
-                baseDistributorPrice: it.baseDistributorPrice,
-                unitDistributorPrice: it.unitDistributorPrice,
-                totalDistributorPrice: it.totalDistributorPrice,
-                baseFactoryPrice: it.baseFactoryPrice || 0,
-                unitFactoryPrice: it.unitFactoryPrice || 0,
-                totalFactoryPrice: it.totalFactoryPrice || 0,
-              })),
+              items: b.items.map(it => {
+                const sweetOpt = ((it as any).orientalSweetOption || 'none') as OrientalSweetOption;
+                const sweetDist = sweetOpt === 'add_with_juice' ? 20 : sweetOpt === 'replace_juice' ? 15 : 0;
+                const sweetFact = sweetOpt === 'add_with_juice' ? 10 : sweetOpt === 'replace_juice' ? 5 : 0;
+                return {
+                  mealId: it.mealId || it.mealCode,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category as any,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: (it.drinkOption || 'standard') as any,
+                  orientalSweetOption: sweetOpt,
+                  orientalSweetLabel: sweetOpt === 'add_with_juice' ? 'إضافة قطعة شرقي مع العصير (+20 ج)' : sweetOpt === 'replace_juice' ? 'استبدال العصير بقطعة شرقي (+15 ج)' : undefined,
+                  orientalSweetDistributorAdjustment: sweetDist,
+                  factoryOrientalSweetAdjustment: sweetFact,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice || 0,
+                  unitFactoryPrice: it.unitFactoryPrice || 0,
+                  totalFactoryPrice: it.totalFactoryPrice || 0,
+                };
+              }),
               payments: b.payments.map(p => ({
                 id: p.id,
                 bookingId: p.bookingId,
@@ -856,22 +897,31 @@ export const db = {
               version: dbBooking.version,
               createdAt: dbBooking.createdAt.toISOString(),
               updatedAt: dbBooking.updatedAt.toISOString(),
-              items: dbBooking.items.map((it: any) => ({
-                mealId: it.mealId,
-                mealCode: it.mealCode,
-                mealName: it.mealName,
-                category: it.category as any,
-                ingredients: it.ingredients,
-                quantity: it.quantity,
-                drinkOption: it.drinkOption as DrinkModification,
-                baseDistributorPrice: it.baseDistributorPrice,
-                unitDistributorPrice: it.unitDistributorPrice,
-                totalDistributorPrice: it.totalDistributorPrice,
-                baseFactoryPrice: it.baseFactoryPrice,
-                factoryDrinkAdjustment: it.factoryDrinkAdjustment ?? undefined,
-                unitFactoryPrice: it.unitFactoryPrice,
-                totalFactoryPrice: it.totalFactoryPrice,
-              })),
+              items: dbBooking.items.map((it: any) => {
+                const sweetOpt = (it.orientalSweetOption || 'none') as OrientalSweetOption;
+                const sweetDist = sweetOpt === 'add_with_juice' ? 20 : sweetOpt === 'replace_juice' ? 15 : 0;
+                const sweetFact = sweetOpt === 'add_with_juice' ? 10 : sweetOpt === 'replace_juice' ? 5 : 0;
+                return {
+                  mealId: it.mealId,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category as any,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: it.drinkOption as DrinkModification,
+                  orientalSweetOption: sweetOpt,
+                  orientalSweetLabel: sweetOpt === 'add_with_juice' ? 'إضافة قطعة شرقي مع العصير (+20 ج)' : sweetOpt === 'replace_juice' ? 'استبدال العصير بقطعة شرقي (+15 ج)' : undefined,
+                  orientalSweetDistributorAdjustment: sweetDist,
+                  factoryOrientalSweetAdjustment: sweetFact,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice,
+                  factoryDrinkAdjustment: it.factoryDrinkAdjustment ?? undefined,
+                  unitFactoryPrice: it.unitFactoryPrice,
+                  totalFactoryPrice: it.totalFactoryPrice,
+                };
+              }),
               payments: dbBooking.payments.map((p: any) => ({
                 id: p.id,
                 bookingId: p.bookingId,
@@ -1547,14 +1597,30 @@ export const db = {
       const baseFactPrice = meal?.factoryPrice ?? item.baseFactoryPrice ?? 0;
       const hasJuice = meal ? meal.hasJuice : true;
 
-      // Independent Factory Pricing Formula:
+      // Oriental Sweet Factory Adjustment
+      let sweetDelta = 0;
+      let sweetLabel = 'بدون قطعة شرقي';
+      const sweetOpt: OrientalSweetOption = item.orientalSweetOption || 'none';
+
+      if (sweetOpt === 'add_with_juice') {
+        sweetDelta = 10;
+        sweetLabel = 'إضافة قطعة شرقي مع العصير (+10 ج للمصنع)';
+      } else if (sweetOpt === 'replace_juice') {
+        sweetDelta = 5;
+        sweetLabel = 'استبدال العصير بقطعة شرقي (+5 ج للمصنع)';
+      }
+
+      // Independent Factory Drink Pricing Formula:
       // 1. Remove juice (no_juice): -5 EGP from factory base price
       // 2. Replace juice with Pepsi (pepsi): -5 (juice) + 10 (pepsi) = +5 EGP net to factory base price
       let factoryDrinkDelta = 0;
       let drinkLabel = 'عصير بخيرة القياسي';
       let specialInstructions = 'عصير بخيرة القياسي';
 
-      if (hasJuice) {
+      if (sweetOpt === 'replace_juice') {
+        drinkLabel = 'العصير مستبدل بقطعة شرقي';
+        specialInstructions = 'استبدال العصير بقطعة شرقي حلويات';
+      } else if (hasJuice) {
         if (item.drinkOption === 'pepsi') {
           factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
           drinkLabel = 'استبدال العصير بكانز بيبسي';
@@ -1572,7 +1638,7 @@ export const db = {
         specialInstructions = 'وجبة أصلية بدون عصير';
       }
 
-      const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta);
+      const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta + sweetDelta);
       const totalFactItemPrice = unitFactPrice * item.quantity;
       totalFactoryCost += totalFactItemPrice;
 
@@ -1582,6 +1648,9 @@ export const db = {
         quantity: item.quantity,
         drinkOption: item.drinkOption,
         drinkLabel,
+        orientalSweetOption: sweetOpt,
+        orientalSweetLabel: sweetLabel,
+        orientalSweetFactoryAdjustment: sweetDelta,
         ingredients: meal?.ingredients || item.ingredients,
         baseFactoryPrice: baseFactPrice,
         factoryDrinkAdjustment: factoryDrinkDelta,
@@ -1639,7 +1708,13 @@ export const db = {
     }
 
     const version = uniqueExisting.length + 1;
-    memoryDB.factoryOrderCounter += 1;
+    memoryDB.factoryOrderCounter = Math.max(memoryDB.factoryOrderCounter || 100, 100);
+    do {
+      memoryDB.factoryOrderCounter += 1;
+    } while (
+      memoryDB.factoryOrders.some(o => o.orderNumber === `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`) ||
+      memoryDB.factoryPayments.some(p => p.factoryOrderNumber === `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`)
+    );
     const orderNumber = `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`;
 
     const preview = await this.getFactoryOrderPreview(bookingId);
@@ -1829,7 +1904,7 @@ export const db = {
       const costTotal = (fo.factoryCostTotal && fo.factoryCostTotal > 0) ? fo.factoryCostTotal : itemsTotal;
 
       const paymentsList = memoryDB.factoryPayments.filter(
-        p => p.factoryOrderId === fo.id || p.factoryOrderNumber === fo.orderNumber
+        p => (p.factoryOrderId ? p.factoryOrderId === fo.id : p.factoryOrderNumber === fo.orderNumber)
       );
       const validPayments = paymentsList.filter(p => p.status === 'VALID');
       const paidAmount = validPayments.reduce((sum, p) => sum + p.amount, 0);
@@ -2375,6 +2450,197 @@ export const db = {
     return fo;
   },
 
+  async updateFactoryOrder(
+    orderId: string,
+    updates: {
+      items?: {
+        mealCode: string;
+        quantity: number;
+        drinkOption: DrinkModification;
+        orientalSweetOption?: OrientalSweetOption;
+      }[];
+      packagingNotes?: string;
+      eventDate?: string;
+      deliveryTime?: string;
+      deliveryLocation?: string;
+    },
+    performedBy = 'الإدارة'
+  ): Promise<FactoryOrder> {
+    const cleanOrderId = (orderId || '').trim();
+    if (!cleanOrderId) {
+      throw new Error('يرجى تحديد معرّف أو رقم أمر تشغيل المصنع للتعديل');
+    }
+
+    memoryDB = loadLocalDB();
+    const memOrderIdx = memoryDB.factoryOrders.findIndex(
+      o => o.id === cleanOrderId || o.orderNumber === cleanOrderId
+    );
+
+    if (memOrderIdx === -1) {
+      throw new Error(`أمر تشغيل المصنع غير موجود: ${cleanOrderId}`);
+    }
+
+    const currentOrder = memoryDB.factoryOrders[memOrderIdx];
+    const prevCostTotal = currentOrder.factoryCostTotal || 0;
+    const meals = await this.getMeals(true);
+    const mealsMap = new Map(meals.map(m => [m.code, m]));
+
+    let newItems = currentOrder.items;
+    let newCostTotal = prevCostTotal;
+
+    if (updates.items && Array.isArray(updates.items)) {
+      if (updates.items.length === 0) {
+        throw new Error('يجب أن يحتوي أمر تشغيل المصنع على صنف واحد على الأقل');
+      }
+
+      newCostTotal = 0;
+      newItems = updates.items.map(it => {
+        const meal = mealsMap.get(it.mealCode);
+        if (!meal) {
+          throw new Error(`الوجبة ${it.mealCode} غير موجودة في المنيو المعتمد`);
+        }
+        const qty = Math.max(1, Math.floor(it.quantity));
+        const baseFactPrice = meal.factoryPrice || 0;
+        const hasJuice = meal.hasJuice;
+
+        let sweetDelta = 0;
+        let sweetLabel = 'بدون قطعة شرقي';
+        const sweetOpt: OrientalSweetOption = it.orientalSweetOption || 'none';
+
+        if (sweetOpt === 'add_with_juice') {
+          sweetDelta = 10;
+          sweetLabel = 'إضافة قطعة شرقي مع العصير (+10 ج للمصنع)';
+        } else if (sweetOpt === 'replace_juice') {
+          sweetDelta = 5;
+          sweetLabel = 'استبدال العصير بقطعة شرقي (+5 ج للمصنع)';
+        }
+
+        let drinkDelta = 0;
+        let drinkLabel = 'عصير بخيرة القياسي';
+        let specialInstructions = 'عصير بخيرة القياسي';
+
+        if (sweetOpt === 'replace_juice') {
+          drinkLabel = 'العصير مستبدل بقطعة شرقي';
+          specialInstructions = 'استبدال العصير بقطعة شرقي حلويات';
+        } else if (hasJuice) {
+          if (it.drinkOption === 'pepsi') {
+            drinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
+            drinkLabel = 'استبدال العصير بكانز بيبسي';
+            specialInstructions = 'استبدال العصير بكانز بيبسي';
+          } else if (it.drinkOption === 'no_juice') {
+            drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 EGP
+            drinkLabel = 'بدون عصير';
+            specialInstructions = 'بدون عصير';
+          }
+        } else {
+          drinkLabel = 'بدون عصير (أصلية)';
+          specialInstructions = 'وجبة أصلية بدون عصير';
+        }
+
+        const unitFactPrice = Math.max(0, baseFactPrice + drinkDelta + sweetDelta);
+        const itemTotal = unitFactPrice * qty;
+        newCostTotal += itemTotal;
+
+        return {
+          mealCode: meal.code,
+          mealName: meal.name,
+          quantity: qty,
+          drinkOption: it.drinkOption,
+          drinkLabel,
+          orientalSweetOption: sweetOpt,
+          orientalSweetLabel: sweetLabel,
+          orientalSweetFactoryAdjustment: sweetDelta,
+          ingredients: meal.ingredients,
+          baseFactoryPrice: baseFactPrice,
+          factoryDrinkAdjustment: drinkDelta,
+          unitFactoryPrice: unitFactPrice,
+          totalFactoryPrice: itemTotal,
+          specialInstructions,
+        };
+      });
+    }
+
+    // Retain existing valid payments for this order
+    const allPayments = (memoryDB.factoryPayments || []).filter(
+      p => (p.factoryOrderId ? p.factoryOrderId === currentOrder.id : p.factoryOrderNumber === currentOrder.orderNumber)
+    );
+    const validPayments = allPayments.filter(p => p.status === 'VALID');
+    const totalPaid = validPayments.reduce((acc, p) => acc + p.amount, 0);
+    const newRemaining = newCostTotal - totalPaid;
+
+    let newPaymentStatus: FactoryPaymentStatus = 'UNPAID';
+    if (totalPaid <= 0) {
+      newPaymentStatus = 'UNPAID';
+    } else if (totalPaid < newCostTotal) {
+      newPaymentStatus = 'PARTIALLY_PAID';
+    } else if (totalPaid === newCostTotal) {
+      newPaymentStatus = 'FULLY_PAID';
+    } else {
+      newPaymentStatus = 'OVERPAID';
+    }
+
+    const newVersion = (currentOrder.version || 1) + 1;
+    const nowIso = new Date().toISOString();
+
+    const updatedOrder: FactoryOrder = {
+      ...currentOrder,
+      version: newVersion,
+      eventDate: updates.eventDate || currentOrder.eventDate,
+      deliveryTime: updates.deliveryTime || currentOrder.deliveryTime,
+      deliveryLocation: updates.deliveryLocation || currentOrder.deliveryLocation,
+      packagingNotes: updates.packagingNotes !== undefined ? updates.packagingNotes : currentOrder.packagingNotes,
+      items: newItems,
+      factoryCostTotal: newCostTotal,
+      paidToFactoryAmount: totalPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newPaymentStatus,
+      payments: allPayments,
+      updatedAt: nowIso,
+    };
+
+    memoryDB.factoryOrders[memOrderIdx] = updatedOrder;
+
+    // PostgreSQL update
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.factoryOrder.update({
+            where: { id: currentOrder.id },
+            data: {
+              version: newVersion,
+              eventDate: updatedOrder.eventDate,
+              deliveryTime: updatedOrder.deliveryTime,
+              deliveryLocation: updatedOrder.deliveryLocation,
+              packagingNotes: updatedOrder.packagingNotes,
+              itemsJson: JSON.stringify(updatedOrder.items),
+              factoryCostTotal: newCostTotal,
+              paidAmount: totalPaid,
+              remainingAmount: newRemaining,
+              paymentStatus: newPaymentStatus,
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.updateFactoryOrder.prisma');
+      }
+    }
+
+    const auditDetail = `تم تعديل أمر تشغيل المصنع ${currentOrder.orderNumber} (ترقية للإصدار v${newVersion}) بواسطة (${performedBy}). تكلفة المصنع السابقة: ${prevCostTotal} ج، التكلفة الجديدة: ${newCostTotal} ج. المسدد الفعلي: ${totalPaid} ج، الرصيد المتبقي: ${newRemaining} ج${newPaymentStatus === 'OVERPAID' ? ` [تنبيه: سداد بالزيادة قدره ${totalPaid - newCostTotal} ج لصالح المصنع]` : ''}.`;
+
+    await this.addAuditLog({
+      bookingId: currentOrder.bookingId,
+      bookingCode: currentOrder.bookingCode,
+      action: 'تعديل أمر تشغيل المصنع',
+      performedBy,
+      details: auditDetail,
+    });
+
+    saveLocalDB(memoryDB);
+    return updatedOrder;
+  },
+
   async addAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'> & { bookingCode?: string }): Promise<AuditLog> {
     let bCode = (log.bookingCode || '').trim();
     if (!bCode && log.bookingId) {
@@ -2721,6 +2987,137 @@ export const db = {
     return { success: true, bookingCode };
   },
 
+  /**
+   * Delete an explicitly CANCELLED booking individually.
+   * Strictly enforces:
+   * - bookingId primary key only (rejects bookingCode)
+   * - booking.status === 'CANCELLED' (strictly rejects all active statuses)
+   * - No active financial payments or obligations (paidAmount === 0 and no valid payments)
+   * - No active factory payments
+   * - Full audit trail
+   */
+  async deleteCancelledBooking(id: string, performedBy = 'الإدارة'): Promise<{ success: boolean; bookingCode: string; message: string }> {
+    const cleanId = (id || '').trim();
+    if (!cleanId) {
+      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
+    }
+    if (cleanId.startsWith('CLB-')) {
+      throw new Error('عمليات حذف الحجز تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode لمنع تداخل السجلات.');
+    }
+
+    const booking = await this.getBookingByPrimaryId(cleanId);
+    if (!booking) {
+      throw new Error('الحجز المطلوب حذفه غير موجود');
+    }
+
+    // Strict status guard
+    if (booking.status !== 'CANCELLED') {
+      throw new Error(`لا يمكن حذف هذا الحجز: خاصية الحذف مخصصة حصرياً للحجوزات الملغاة (CANCELLED). حالة الحجز الحالية: (${booking.status}) وهو محمي تماماً من الحذف.`);
+    }
+
+    // Check financial obligations
+    const validPayments = (booking.payments || []).filter(p => p.status !== 'CANCELLED' && p.amount > 0);
+    if (validPayments.length > 0 || (booking.paidAmount && booking.paidAmount > 0)) {
+      throw new Error(`لا يمكن حذف الحجز لوجود مدفوعات مالية مسجلة بقيمة (${booking.paidAmount} ج.م). يجب إلغاء وتسوية الدفعات المالية أولاً أو الإبقاء على السجل للأغراض المحاسبية.`);
+    }
+
+    // Check factory order payments
+    const factoryOrdersWithPaid = (booking.factoryOrders || []).filter(fo => (fo.paidToFactoryAmount || 0) > 0);
+    if (factoryOrdersWithPaid.length > 0) {
+      throw new Error('لا يمكن حذف الحجز لارتباطه بأمر تشغيل مصنع عليه مدفوعات مسددة للمصنع. يرجى تسوية سجلات المصنع أولاً.');
+    }
+
+    const bookingCode = booking.bookingCode;
+    const targetId = booking.id;
+
+    // Delete from PostgreSQL
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.bookingItem.deleteMany({ where: { bookingId: targetId } });
+          await client.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+          await client.booking.delete({ where: { id: targetId } });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.deleteCancelledBooking.prisma');
+        throw new Error(`فشل حذف الحجز في قاعدة البيانات: ${err?.message || 'خطأ غير متوقع'}`);
+      }
+    }
+
+    // Delete from memoryDB
+    memoryDB = loadLocalDB();
+    memoryDB.bookings = memoryDB.bookings.filter(b => b.id !== targetId);
+    memoryDB.factoryOrders = memoryDB.factoryOrders.filter(fo => fo.bookingId !== targetId);
+    saveLocalDB(memoryDB);
+
+    await this.addAuditLog({
+      bookingId: '',
+      bookingCode,
+      action: 'حذف حجز ملغي',
+      performedBy,
+      details: `تم حذف الحجز الملغي رقم ${bookingCode} (المعرف: ${targetId}) نهائياً بواسطة (${performedBy}) بعد التحقق من خلوه من أي مدفوعات مالية.`,
+    });
+
+    return {
+      success: true,
+      bookingCode,
+      message: `تم حذف الحجز الملغي رقم ${bookingCode} بنجاح.`
+    };
+  },
+
+  /**
+   * Bulk Delete CANCELLED Bookings.
+   * Safe iteration validating each booking independently.
+   */
+  async deleteBatchCancelledBookings(ids: string[], performedBy = 'الإدارة'): Promise<{
+    success: boolean;
+    totalRequested: number;
+    deletedCount: number;
+    deletedCodes: string[];
+    skipped: { id: string; code?: string; reason: string }[];
+  }> {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new Error('يرجى تحديد قائمة معرّفات الحجوزات الملغاة المطلوب حذفها');
+    }
+
+    const deletedCodes: string[] = [];
+    const skipped: { id: string; code?: string; reason: string }[] = [];
+
+    for (const rawId of ids) {
+      const cleanId = (rawId || '').trim();
+      if (!cleanId || cleanId.startsWith('CLB-')) {
+        skipped.push({ id: rawId, reason: 'المعرف غير صالح أو تم تمرير كود الحجز بدلاً من bookingId' });
+        continue;
+      }
+
+      try {
+        const res = await this.deleteCancelledBooking(cleanId, performedBy);
+        deletedCodes.push(res.bookingCode);
+      } catch (err: any) {
+        skipped.push({ id: cleanId, reason: err.message || 'فشل الحذف' });
+      }
+    }
+
+    if (deletedCodes.length > 0) {
+      await this.addAuditLog({
+        bookingId: '',
+        bookingCode: 'SYSTEM',
+        action: 'حذف جماعي لحجوزات ملغاة',
+        performedBy,
+        details: `قام (${performedBy}) بعملية حذف جماعي لحجوزات ملغاة: تم حذف (${deletedCodes.length}) حجز بنجاح [${deletedCodes.join(', ')}]، وتخطي (${skipped.length}) حجز لأسباب أمنية أو مالية.`,
+      });
+    }
+
+    return {
+      success: true,
+      totalRequested: ids.length,
+      deletedCount: deletedCodes.length,
+      deletedCodes,
+      skipped,
+    };
+  },
+
   async updateBookingByAdmin(
     id: string,
     updates: {
@@ -2740,6 +3137,7 @@ export const db = {
         mealCode: string;
         quantity: number;
         drinkOption: DrinkModification;
+        orientalSweetOption?: OrientalSweetOption;
       }[];
     },
     performedBy = 'الإدارة'
@@ -2787,21 +3185,36 @@ export const db = {
         const baseDistributorPrice = meal.distributorPrice;
         const baseFactoryPrice = meal.factoryPrice || 0;
 
+        const sweetOpt: OrientalSweetOption = item.orientalSweetOption || 'none';
+        let orientalSweetDistributorDelta = 0;
+        let orientalSweetFactoryDelta = 0;
+        let sweetLabel = 'بدون قطعة شرقي';
+
+        if (sweetOpt === 'add_with_juice') {
+          orientalSweetDistributorDelta = 20;
+          orientalSweetFactoryDelta = 10;
+          sweetLabel = 'إضافة قطعة شرقي مع العصير (+20 ج)';
+        } else if (sweetOpt === 'replace_juice') {
+          orientalSweetDistributorDelta = 15;
+          orientalSweetFactoryDelta = 5;
+          sweetLabel = 'استبدال العصير بقطعة شرقي (+15 ج)';
+        }
+
         let distributorDrinkDelta = 0;
         let factoryDrinkDelta = 0;
 
-        if (meal.hasJuice) {
+        if (sweetOpt !== 'replace_juice' && meal.hasJuice) {
           if (item.drinkOption === 'no_juice') {
             distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
             factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
           } else if (item.drinkOption === 'pepsi') {
             distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10 for customer
-            factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 for factory
+            factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 for factory
           }
         }
 
-        const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
-        const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
+        const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta + orientalSweetDistributorDelta);
+        const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta + orientalSweetFactoryDelta);
         const itemTotalDistributor = unitDistributorPrice * quantity;
         const itemTotalFactory = unitFactoryPrice * quantity;
 
@@ -2816,11 +3229,14 @@ export const db = {
           ingredients: meal.ingredients,
           quantity,
           drinkOption: item.drinkOption,
+          orientalSweetOption: sweetOpt,
+          orientalSweetLabel: sweetLabel,
           baseDistributorPrice,
           unitDistributorPrice,
           totalDistributorPrice: itemTotalDistributor,
           baseFactoryPrice,
           factoryDrinkAdjustment: factoryDrinkDelta,
+          factoryOrientalSweetAdjustment: orientalSweetFactoryDelta,
           unitFactoryPrice,
           totalFactoryPrice: itemTotalFactory,
         };
@@ -2909,6 +3325,7 @@ export const db = {
                 ingredients: it.ingredients,
                 quantity: it.quantity,
                 drinkOption: it.drinkOption,
+                orientalSweetOption: it.orientalSweetOption || 'none',
                 baseDistributorPrice: it.baseDistributorPrice,
                 unitDistributorPrice: it.unitDistributorPrice,
                 totalDistributorPrice: it.totalDistributorPrice,
@@ -3047,7 +3464,9 @@ export const db = {
 export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking: Booking, factoryPhone?: string): { messageText: string; whatsappUrl: string } {
   const itemsText = factoryOrder.items.map((it) => {
     let drinkText = 'عصير بخيرة القياسي';
-    if (it.drinkOption === 'pepsi') {
+    if (it.orientalSweetOption === 'replace_juice') {
+      drinkText = 'العصير مستبدل بقطعة شرقي';
+    } else if (it.drinkOption === 'pepsi') {
       drinkText = 'استبدال العصير بكانز بيبسي';
     } else if (it.drinkOption === 'no_juice') {
       drinkText = 'بدون عصير';
@@ -3055,14 +3474,30 @@ export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking:
       drinkText = it.drinkLabel;
     }
 
-    return [
+    let sweetText = '';
+    if (it.orientalSweetOption === 'add_with_juice') {
+      sweetText = 'إضافة قطعة شرقي مع الاحتفاظ بالعصير (+10 ج للمصنع)';
+    } else if (it.orientalSweetOption === 'replace_juice') {
+      sweetText = 'استبدال العصير بقطعة شرقي (+5 ج للمصنع)';
+    } else if (it.orientalSweetLabel && it.orientalSweetLabel !== 'بدون قطعة شرقي') {
+      sweetText = it.orientalSweetLabel;
+    }
+
+    const row = [
       `• *الوجبة:* ${it.mealName} (${it.mealCode})`,
       `  - *خيار المشروب:* ${drinkText}`,
+    ];
+    if (sweetText) {
+      row.push(`  - *إضافة قطعة شرقي:* ${sweetText}`);
+    }
+    row.push(
       `  - *الكمية:* ${it.quantity} بوكس`,
       `  - *سعر المصنع المعدّل للبوكس:* ${it.unitFactoryPrice ?? 0} ج.م`,
       `  - *إجمالي الصنف للمصنع:* ${it.totalFactoryPrice ?? 0} ج.م`,
       `  - *المكونات:* ${it.ingredients}`
-    ].join('\n');
+    );
+
+    return row.join('\n');
   }).join('\n\n');
 
   const totalCost = factoryOrder.factoryCostTotal || 0;

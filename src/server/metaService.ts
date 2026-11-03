@@ -141,12 +141,19 @@ export function getMetaDiagnosticStatus() {
 export function buildBookingWhatsAppMessage(booking: Booking): { messageText: string; directUrl: string } {
   const itemsSummary = booking.items
     .map((it) => {
-      const drinkLabel =
+      let drinkLabel =
         it.drinkOption === 'no_juice'
           ? 'بدون عصير (-5ج)'
           : it.drinkOption === 'pepsi'
           ? 'بيبسي (+10ج)'
           : 'عصير بخيرة';
+
+      if (it.orientalSweetOption === 'replace_juice') {
+        drinkLabel = 'العصير مستبدل بقطعة شرقي (+15ج)';
+      } else if (it.orientalSweetOption === 'add_with_juice') {
+        drinkLabel += ' + قطعة شرقي (+20ج)';
+      }
+
       return `• كود: ${it.mealCode} | العدد: ${it.quantity} وجبة | ${drinkLabel} | الإجمالي: ${it.totalDistributorPrice} ج`;
     })
     .join('\n');

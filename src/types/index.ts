@@ -15,6 +15,8 @@ export interface Meal {
 
 export type DrinkModification = 'standard' | 'no_juice' | 'pepsi';
 
+export type OrientalSweetOption = 'none' | 'add_with_juice' | 'replace_juice';
+
 export interface BookingMealItem {
   mealId: string;
   mealCode: string;
@@ -23,11 +25,15 @@ export interface BookingMealItem {
   category: 'mix_box' | 'sandwich_box';
   quantity: number;
   drinkOption: DrinkModification;
+  orientalSweetOption?: OrientalSweetOption;
+  orientalSweetLabel?: string;
+  orientalSweetDistributorAdjustment?: number;
   baseDistributorPrice: number;
-  unitDistributorPrice: number; // final price after drink modification
+  unitDistributorPrice: number; // final price after drink and oriental sweet modification
   totalDistributorPrice: number;
   baseFactoryPrice?: number;
   factoryDrinkAdjustment?: number;
+  factoryOrientalSweetAdjustment?: number;
   unitFactoryPrice?: number;
   totalFactoryPrice?: number;
 }
@@ -116,6 +122,9 @@ export interface FactoryOrder {
     quantity: number;
     drinkOption: DrinkModification;
     drinkLabel?: string;
+    orientalSweetOption?: OrientalSweetOption;
+    orientalSweetLabel?: string;
+    orientalSweetFactoryAdjustment?: number;
     ingredients: string;
     baseFactoryPrice?: number;
     factoryDrinkAdjustment?: number;

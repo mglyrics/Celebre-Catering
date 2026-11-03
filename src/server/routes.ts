@@ -13,6 +13,7 @@ import {
   META_CONFIG,
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
+import { generateBookingPdfHtml } from './bookingPdfGenerator';
 import { logServerError } from './safeLogger';
 import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl, SUPABASE_ROOT_CA } from '../lib/prisma';
 import { runSafeMigration } from '../../scripts/migrate-to-postgres';
@@ -393,6 +394,59 @@ apiRouter.get('/bookings/track', async (req, res) => {
   }
 });
 
+// Official Client Booking Confirmation PDF / HTML Generator Endpoint
+// Available ONLY when booking is CONFIRMED (or beyond) AND deposit is recorded (paidAmount > 0)
+apiRouter.get('/bookings/:id/pdf', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { download, print, verify } = req.query;
+
+    const booking = await db.getBookingById(id);
+    if (!booking) {
+      res.status(404).json({ error: 'الحجز غير موجود' });
+      return;
+    }
+
+    // Optional client verification guard if requested
+    if (verify && typeof verify === 'string') {
+      const allowed = await db.trackBooking(booking.bookingCode, verify);
+      if (!allowed) {
+        res.status(403).json({ error: 'رمز التحقق غير متطابق' });
+        return;
+      }
+    }
+
+    const eligibleStatuses = ['CONFIRMED', 'IN_PRODUCTION', 'READY_FOR_DELIVERY', 'DELIVERED', 'COMPLETED'];
+    if (!eligibleStatuses.includes(booking.status)) {
+      res.status(400).json({
+        error: `لا يمكن إصدار إيصال تأكيد الحجز الرسمي لأن الحجز حالياً في حالة (${booking.status}). يشترط تأكيد واعتماد الحجز أولاً.`,
+        code: 'BOOKING_NOT_CONFIRMED'
+      });
+      return;
+    }
+
+    const verifiedDeposit = Number(booking.paidAmount) || 0;
+    if (verifiedDeposit <= 0) {
+      res.status(400).json({
+        error: 'لا يمكن إصدار إيصال تأكيد الحجز الرسمي إلا بعد تسجيل دفعة العربون المالية (المبلغ المسدد أكبر من صفر).',
+        code: 'DEPOSIT_NOT_RECORDED'
+      });
+      return;
+    }
+
+    const html = generateBookingPdfHtml(booking, print === 'true');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (download === 'true') {
+      res.setHeader('Content-Disposition', `attachment; filename="Celebre-Confirmation-${booking.bookingCode}.html"`);
+    }
+    res.send(html);
+  } catch (err: any) {
+    console.error('Error generating client booking PDF:', err);
+    res.status(500).json({ error: err.message || 'تعذر إصدار إيصال تأكيد الحجز' });
+  }
+});
+
 // -----------------------------------------------------------------------------
 // ADMIN & FACTORY AUTHENTICATION
 // -----------------------------------------------------------------------------
@@ -606,6 +660,49 @@ apiRouter.get('/admin/bookings/:id', requireAuth, async (req: AuthenticatedReque
     res.json(booking);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Client Confirmation PDF Endpoint
+apiRouter.get('/admin/bookings/:id/pdf', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { download, print } = req.query;
+
+    const booking = await db.getBookingById(id);
+    if (!booking) {
+      res.status(404).json({ error: 'الحجز غير موجود' });
+      return;
+    }
+
+    const eligibleStatuses = ['CONFIRMED', 'IN_PRODUCTION', 'READY_FOR_DELIVERY', 'DELIVERED', 'COMPLETED'];
+    if (!eligibleStatuses.includes(booking.status)) {
+      res.status(400).json({
+        error: `لا يمكن إصدار إيصال تأكيد الحجز الرسمي لأن الحجز حالياً في حالة (${booking.status}). يشترط تأكيد واعتماد الحجز أولاً.`,
+        code: 'BOOKING_NOT_CONFIRMED'
+      });
+      return;
+    }
+
+    const verifiedDeposit = Number(booking.paidAmount) || 0;
+    if (verifiedDeposit <= 0) {
+      res.status(400).json({
+        error: 'لا يمكن إصدار إيصال تأكيد الحجز الرسمي إلا بعد تسجيل دفعة العربون المالية (المبلغ المسدد أكبر من صفر).',
+        code: 'DEPOSIT_NOT_RECORDED'
+      });
+      return;
+    }
+
+    const html = generateBookingPdfHtml(booking, print === 'true');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (download === 'true') {
+      res.setHeader('Content-Disposition', `attachment; filename="Celebre-Client-Confirmation-${booking.bookingCode}.html"`);
+    }
+    res.send(html);
+  } catch (err: any) {
+    console.error('Error generating admin client booking PDF:', err);
+    res.status(500).json({ error: err.message || 'تعذر إصدار إيصال تأكيد الحجز' });
   }
 });
 
@@ -838,6 +935,33 @@ apiRouter.delete('/admin/bookings/:id/test-delete', requireAuth, requireRole(['s
   }
 });
 
+// Delete Cancelled Booking (Strictly allowed ONLY for CANCELLED status with zero active payments)
+apiRouter.delete('/admin/bookings/:id/cancelled', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await db.deleteCancelledBooking(id, req.user?.name || req.user?.username || 'الإدارة');
+    res.json({ success: true, message: result.message, bookingCode: result.bookingCode });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Bulk Delete Cancelled Bookings (Strictly validates each booking for CANCELLED status and zero payments)
+apiRouter.post('/admin/bookings/bulk-delete-cancelled', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { bookingIds } = req.body || {};
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      res.status(400).json({ error: 'يرجى تحديد قائمة معرّفات الحجوزات الملغاة المطلوب حذفها' });
+      return;
+    }
+
+    const result = await db.deleteBatchCancelledBookings(bookingIds, req.user?.name || req.user?.username || 'الإدارة');
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // List Factory Orders
 apiRouter.get('/admin/factory-orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
@@ -862,6 +986,17 @@ apiRouter.get('/admin/factory-orders', requireAuth, async (req: AuthenticatedReq
     res.json(orders);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Update / Revise Factory Order (recalculates authoritative factory prices, increments version, handles OVERPAID balance)
+apiRouter.put('/admin/factory-orders/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateFactoryOrder(id, req.body, req.user?.name || req.user?.username || 'الإدارة');
+    res.json({ success: true, factoryOrder: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });
 
