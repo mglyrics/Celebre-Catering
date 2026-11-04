@@ -158,6 +158,34 @@ export const DDL_STATEMENTS = [
         "deliveryLocation" TEXT NOT NULL,
         "itemsJson" TEXT NOT NULL,
         "packagingNotes" TEXT,
+        "factoryCostTotal" DOUBLE PRECISION DEFAULT 0,
+        "paidAmount" DOUBLE PRECISION DEFAULT 0,
+        "remainingAmount" DOUBLE PRECISION DEFAULT 0,
+        "paymentStatus" TEXT DEFAULT 'UNPAID',
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+  },
+  {
+    name: 'factory_payments',
+    sql: `
+      CREATE TABLE IF NOT EXISTS "factory_payments" (
+        "id" TEXT PRIMARY KEY,
+        "factoryOrderId" TEXT NOT NULL REFERENCES "factory_orders"("id") ON DELETE CASCADE,
+        "factoryOrderNumber" TEXT NOT NULL,
+        "bookingId" TEXT NOT NULL,
+        "bookingCode" TEXT NOT NULL,
+        "amount" DOUBLE PRECISION NOT NULL,
+        "method" TEXT NOT NULL,
+        "date" TEXT NOT NULL,
+        "notes" TEXT,
+        "receiptNumber" TEXT,
+        "recordedBy" TEXT NOT NULL DEFAULT 'الإدارة',
+        "status" TEXT NOT NULL DEFAULT 'VALID',
+        "cancelledBy" TEXT,
+        "cancelledAt" TIMESTAMP(3),
+        "cancelReason" TEXT,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -191,6 +219,62 @@ export const DDL_STATEMENTS = [
       );
     `,
   },
+];
+
+export const RLS_STATEMENTS = [
+  // 1. Enable RLS on all 8 tables
+  'ALTER TABLE IF EXISTS public.meals ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.bookings ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.booking_items ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.payments ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.factory_orders ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.factory_payments ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.admin_users ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.audit_logs ENABLE ROW LEVEL SECURITY;',
+
+  // 2. Safe check for anon and authenticated roles
+  `DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
+      CREATE ROLE anon NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+      CREATE ROLE authenticated NOLOGIN;
+    END IF;
+  END $$;`,
+
+  // 3. Revoke direct access from anon and authenticated
+  'REVOKE ALL ON TABLE public.bookings FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.booking_items FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.payments FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.factory_orders FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.factory_payments FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.admin_users FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.audit_logs FROM anon, authenticated;',
+
+  // 4. Meals: Read-only SELECT for active meals
+  'REVOKE ALL ON TABLE public.meals FROM anon, authenticated;',
+  'GRANT SELECT ON TABLE public.meals TO anon, authenticated;',
+
+  // 5. Clean and set policies
+  'DROP POLICY IF EXISTS "meals_public_select_active" ON public.meals;',
+  'DROP POLICY IF EXISTS "bookings_deny_direct_anon_authenticated" ON public.bookings;',
+  'DROP POLICY IF EXISTS "booking_items_deny_direct_anon_authenticated" ON public.booking_items;',
+  'DROP POLICY IF EXISTS "payments_deny_direct_anon_authenticated" ON public.payments;',
+  'DROP POLICY IF EXISTS "factory_orders_deny_direct_anon_authenticated" ON public.factory_orders;',
+  'DROP POLICY IF EXISTS "factory_payments_deny_direct_anon_authenticated" ON public.factory_payments;',
+  'DROP POLICY IF EXISTS "admin_users_deny_direct_anon_authenticated" ON public.admin_users;',
+  'DROP POLICY IF EXISTS "audit_logs_deny_direct_anon_authenticated" ON public.audit_logs;',
+
+  'CREATE POLICY "meals_public_select_active" ON public.meals FOR SELECT TO anon, authenticated USING ("isActive" = true);',
+  'CREATE POLICY "bookings_deny_direct_anon_authenticated" ON public.bookings FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "booking_items_deny_direct_anon_authenticated" ON public.booking_items FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "payments_deny_direct_anon_authenticated" ON public.payments FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "factory_orders_deny_direct_anon_authenticated" ON public.factory_orders FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "factory_payments_deny_direct_anon_authenticated" ON public.factory_payments FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "admin_users_deny_direct_anon_authenticated" ON public.admin_users FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "audit_logs_deny_direct_anon_authenticated" ON public.audit_logs FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;',
 ];
 
 export async function runInitScript() {
@@ -229,7 +313,18 @@ export async function runInitScript() {
       await client.query('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
     } catch {}
 
-    // Verify all 7 tables
+    // Apply Supabase RLS hardening
+    console.log('[Init-DB] Enforcing Supabase Row Level Security (RLS) on all production tables...');
+    for (const rlsSql of RLS_STATEMENTS) {
+      try {
+        await client.query(rlsSql);
+      } catch (rlsErr) {
+        console.warn('[Init-DB] RLS Notice:', rlsErr.message);
+      }
+    }
+    console.log('[Init-DB] Row Level Security (RLS) policies successfully enforced.');
+
+    // Verify all 8 tables
     const checkRes = await client.query(`
       SELECT table_name 
       FROM information_schema.tables 
@@ -237,7 +332,7 @@ export async function runInitScript() {
     `, [DDL_STATEMENTS.map(s => s.name)]);
 
     const existingNames = checkRes.rows.map(r => r.table_name);
-    console.log(`[Init-DB] Verification complete: ${existingNames.length}/7 tables verified.`);
+    console.log(`[Init-DB] Verification complete: ${existingNames.length}/8 tables verified.`);
     console.log('[Init-DB] Verified tables:', existingNames.join(', '));
   } catch (err) {
     console.error('[Init-DB] Error creating schema tables:', err.message);

@@ -199,6 +199,7 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
   success: boolean;
   created: string[];
   tablesFound: string[];
+  rlsEnforced?: boolean;
   errors: string[];
 }> {
   const status = await checkTablesStatus(client);
@@ -302,10 +303,164 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
   } catch {}
 
   const postCheck = await checkTablesStatus(client);
+
+  // Automatically enforce Supabase Row Level Security (RLS) on all production tables
+  let rlsEnforced = false;
+  if (postCheck.allReady) {
+    try {
+      await ensureRlsSecurity(client);
+      rlsEnforced = true;
+    } catch (rlsErr: any) {
+      logServerError(rlsErr, 'SchemaInit.RLS');
+      errors.push(`RLS init error: ${rlsErr?.message?.slice(0, 100)}`);
+    }
+  }
+
   return {
     success: postCheck.allReady,
     created,
     tablesFound: postCheck.existingTables,
+    rlsEnforced,
     errors,
   };
 }
+
+export const SUPABASE_RLS_QUERIES = [
+  // 1. Roles verification for standard pg environments
+  `DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
+      CREATE ROLE anon NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+      CREATE ROLE authenticated NOLOGIN;
+    END IF;
+  END $$;`,
+
+  // 2. Enable RLS on all 8 tables
+  'ALTER TABLE IF EXISTS public.meals ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.bookings ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.booking_items ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.payments ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.factory_orders ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.factory_payments ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.admin_users ENABLE ROW LEVEL SECURITY;',
+  'ALTER TABLE IF EXISTS public.audit_logs ENABLE ROW LEVEL SECURITY;',
+
+  // 3. Revoke direct access from anon and authenticated
+  'REVOKE ALL ON TABLE public.bookings FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.booking_items FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.payments FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.factory_orders FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.factory_payments FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.admin_users FROM anon, authenticated;',
+  'REVOKE ALL ON TABLE public.audit_logs FROM anon, authenticated;',
+
+  // 4. Meals: Read-only SELECT for active meals
+  'REVOKE ALL ON TABLE public.meals FROM anon, authenticated;',
+  'GRANT SELECT ON TABLE public.meals TO anon, authenticated;',
+
+  // 5. Clean and set policies
+  'DROP POLICY IF EXISTS "meals_public_select_active" ON public.meals;',
+  'DROP POLICY IF EXISTS "bookings_deny_direct_anon_authenticated" ON public.bookings;',
+  'DROP POLICY IF EXISTS "booking_items_deny_direct_anon_authenticated" ON public.booking_items;',
+  'DROP POLICY IF EXISTS "payments_deny_direct_anon_authenticated" ON public.payments;',
+  'DROP POLICY IF EXISTS "factory_orders_deny_direct_anon_authenticated" ON public.factory_orders;',
+  'DROP POLICY IF EXISTS "factory_payments_deny_direct_anon_authenticated" ON public.factory_payments;',
+  'DROP POLICY IF EXISTS "admin_users_deny_direct_anon_authenticated" ON public.admin_users;',
+  'DROP POLICY IF EXISTS "audit_logs_deny_direct_anon_authenticated" ON public.audit_logs;',
+
+  'CREATE POLICY "meals_public_select_active" ON public.meals FOR SELECT TO anon, authenticated USING ("isActive" = true);',
+  'CREATE POLICY "bookings_deny_direct_anon_authenticated" ON public.bookings FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "booking_items_deny_direct_anon_authenticated" ON public.booking_items FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "payments_deny_direct_anon_authenticated" ON public.payments FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "factory_orders_deny_direct_anon_authenticated" ON public.factory_orders FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "factory_payments_deny_direct_anon_authenticated" ON public.factory_payments FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "admin_users_deny_direct_anon_authenticated" ON public.admin_users FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "audit_logs_deny_direct_anon_authenticated" ON public.audit_logs FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;',
+];
+
+export async function ensureRlsSecurity(client: PrismaClient): Promise<{ success: boolean; appliedCount: number; errors: string[] }> {
+  let appliedCount = 0;
+  const errors: string[] = [];
+
+  for (const query of SUPABASE_RLS_QUERIES) {
+    try {
+      await client.$executeRawUnsafe(query);
+      appliedCount++;
+    } catch (err: any) {
+      errors.push(err?.message?.slice(0, 100) || 'Unknown error');
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    appliedCount,
+    errors,
+  };
+}
+
+export interface TableRlsInfo {
+  tableName: string;
+  rlsEnabled: boolean;
+  policiesCount: number;
+  policies: string[];
+}
+
+export async function getRlsStatusReport(client: PrismaClient): Promise<{
+  allSecured: boolean;
+  totalTables: number;
+  securedTablesCount: number;
+  tables: Record<string, TableRlsInfo>;
+}> {
+  try {
+    const rawRls: { tablename: string; rowsecurity: boolean }[] = await client.$queryRaw`
+      SELECT tablename, rowsecurity
+      FROM pg_tables
+      WHERE schemaname = 'public'
+    `;
+
+    const rawPolicies: { tablename: string; policyname: string }[] = await client.$queryRaw`
+      SELECT tablename, policyname
+      FROM pg_policies
+      WHERE schemaname = 'public'
+    `;
+
+    const tables: Record<string, TableRlsInfo> = {};
+    let securedCount = 0;
+
+    for (const tableName of REQUIRED_TABLES) {
+      const match = rawRls.find(t => t.tablename === tableName);
+      const isRls = match ? Boolean(match.rowsecurity) : false;
+      const policies = rawPolicies.filter(p => p.tablename === tableName).map(p => p.policyname);
+
+      tables[tableName] = {
+        tableName,
+        rlsEnabled: isRls,
+        policiesCount: policies.length,
+        policies,
+      };
+
+      if (isRls) {
+        securedCount++;
+      }
+    }
+
+    return {
+      allSecured: securedCount === REQUIRED_TABLES.length,
+      totalTables: REQUIRED_TABLES.length,
+      securedTablesCount: securedCount,
+      tables,
+    };
+  } catch (err: any) {
+    logServerError(err, 'GetRlsStatusReport');
+    return {
+      allSecured: false,
+      totalTables: REQUIRED_TABLES.length,
+      securedTablesCount: 0,
+      tables: {},
+    };
+  }
+}
+

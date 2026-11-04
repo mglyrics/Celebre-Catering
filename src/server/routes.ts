@@ -17,7 +17,7 @@ import { generateBookingPdfHtml } from './bookingPdfGenerator';
 import { logServerError } from './safeLogger';
 import { getPrismaClient, getSafeConnectionMetadata, formatDatabaseUrl, SUPABASE_ROOT_CA } from '../lib/prisma';
 import { runSafeMigration } from '../../scripts/migrate-to-postgres';
-import { ensureSchemaReady, checkTablesStatus, REQUIRED_TABLES } from './schemaInit';
+import { ensureSchemaReady, checkTablesStatus, REQUIRED_TABLES, ensureRlsSecurity, getRlsStatusReport } from './schemaInit';
 import {
   createAdminSession,
   validateAdminSession,
@@ -1193,3 +1193,42 @@ apiRouter.post('/admin/system/migrate', requireAuth, requireRole(['super_admin']
     res.status(500).json({ error: err?.message || 'فشل تنفيذ الترحيل' });
   }
 });
+
+// Check Supabase Row Level Security (RLS) status
+apiRouter.get('/admin/system/rls-status', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const client = getPrismaClient();
+    if (!client) {
+      res.json({
+        enabled: false,
+        storageMode: 'resilient_storage',
+        message: 'النظام يعمل بوضع التخزين المرن (data/db.json). RLS مفعل على بيئة Supabase PostgreSQL.',
+      });
+      return;
+    }
+    const report = await getRlsStatusReport(client);
+    res.json({
+      enabled: report.allSecured,
+      ...report,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Enforce/Apply Supabase RLS policies directly from Admin (super_admin only)
+apiRouter.post('/admin/system/apply-rls', requireAuth, requireRole(['super_admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    const client = getPrismaClient();
+    if (!client) {
+      res.status(400).json({ error: 'قاعدة بيانات PostgreSQL غير متصلة حالياً' });
+      return;
+    }
+    const result = await ensureRlsSecurity(client);
+    const report = await getRlsStatusReport(client);
+    res.json({ success: result.success, result, report });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
