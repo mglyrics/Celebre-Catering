@@ -962,6 +962,47 @@ apiRouter.post('/admin/bookings/bulk-delete-cancelled', requireAuth, requireRole
   }
 });
 
+// Database Inventory & Pre-Deletion Scan (Classifies real, test, demo, and cancelled bookings)
+apiRouter.get('/admin/database/inventory', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const inventory = await db.getDatabaseInventory();
+    res.json(inventory);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'فشل فحص قاعدة البيانات' });
+  }
+});
+
+// Permanent Cascade Cleanup of Selected Test & Demo Bookings
+apiRouter.post('/admin/test-bookings/clean', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { bookingIds } = req.body || {};
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      res.status(400).json({ error: 'يرجى تحديد قائمة معرفات الحجوزات التجريبية المطلوب حذفها نهائياً' });
+      return;
+    }
+
+    const result = await db.deleteBookingsPermanently(bookingIds, req.user?.name || req.user?.username || 'الإدارة');
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Single Permanent Delete of a Test Booking
+apiRouter.delete('/admin/bookings/:id/force-test', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await db.deleteBookingsPermanently([id], req.user?.name || req.user?.username || 'الإدارة');
+    if (result.skipped.length > 0 && result.deletedCount === 0) {
+      res.status(400).json({ error: result.skipped[0].reason });
+      return;
+    }
+    res.json({ success: true, message: `تم حذف الحجز بنجاح`, deletedCodes: result.deletedCodes });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // List Factory Orders
 apiRouter.get('/admin/factory-orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {

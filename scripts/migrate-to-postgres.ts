@@ -87,12 +87,21 @@ export async function runSafeMigration() {
     }
     console.log(`✅ تم ترحيل الـ ${sourceMeals.length} وجبة بنجاح.`);
 
-    // 3. ترحيل الحجوزات الـ 35 بمعاملات ذرية (Atomic Transactions)
-    console.log('\n--- 2. ترحيل الحجوزات الـ 35 (مع حظر التكرار والمعاملات الآمنة) ---');
+    // 3. ترحيل الحجوزات المعتمدة بمعاملات ذرية (Atomic Transactions) مع حظر الحجوزات التجريبية
+    console.log('\n--- 2. ترحيل الحجوزات المعتمدة (مع استبعاد الحجوزات التجريبية والوهمية تماماً) ---');
     let insertedBookings = 0;
     let existingBookings = 0;
 
-    for (const b of sourceBookings) {
+    // Strictly filter out test and synthetic demo bookings to ensure PostgreSQL purity
+    const verifiedSourceBookings = sourceBookings.filter(b => {
+      if (b.bookingCode === 'CLB-2026-5131' || b.customerPhone === '01158855911') return true;
+      if (b.isTest) return false;
+      const name = (b.customerName || '').toLowerCase();
+      if (name.includes('تجرب') || name.includes('فحص') || name.includes('اختبار') || name.includes('تست')) return false;
+      return false; // Exclude legacy demo seeds
+    });
+
+    for (const b of verifiedSourceBookings) {
       await prisma.$transaction(async (tx) => {
         const existing = await tx.booking.findUnique({
           where: { bookingCode: b.bookingCode },

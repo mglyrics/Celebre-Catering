@@ -35,7 +35,10 @@ import {
   ChevronRight,
   Copy,
   RotateCcw,
-  CreditCard
+  CreditCard,
+  XCircle,
+  Database,
+  ShieldCheck
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -62,7 +65,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'factory_orders' | 'menu' | 'audit' | 'system' | 'password'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'cancelled_bookings' | 'db_cleanup' | 'factory_orders' | 'menu' | 'audit' | 'system' | 'password'>('overview');
 
   // Session & notice state
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
@@ -198,6 +201,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isBulkDeletingCancelled, setIsBulkDeletingCancelled] = useState(false);
   const [bulkDeleteCancelledModalOpen, setBulkDeleteCancelledModalOpen] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
+
+  // Database Cleanup & Inventory States
+  const [dbInventory, setDbInventory] = useState<{
+    summary: {
+      total: number;
+      protectedReal: number;
+      confirmedTest: number;
+      legacyDemo: number;
+      cancelled: number;
+    };
+    protectedBookings: Booking[];
+    confirmedTestBookings: Booking[];
+    legacyDemoBookings: Booking[];
+    cancelledBookings: Booking[];
+    allBookings: (Booking & { classification: 'PROTECTED_REAL' | 'CONFIRMED_TEST' | 'LEGACY_DEMO' })[];
+  } | null>(null);
+  const [isLoadingInventory, setIsLoadingInventory] = useState(false);
+  const [selectedCleanupIds, setSelectedCleanupIds] = useState<string[]>([]);
+  const [isCleaningDb, setIsCleaningDb] = useState(false);
+  const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [cleanupSuccess, setCleanupSuccess] = useState<string | null>(null);
+  const [singleDeletingTestBooking, setSingleDeletingTestBooking] = useState<Booking | null>(null);
+  const [isSingleDeletingTestBooking, setIsSingleDeletingTestBooking] = useState(false);
+
+  // Filters for Cancelled and Cleanup Tabs
+  const [cancelledSearchQuery, setCancelledSearchQuery] = useState('');
+  const [cleanupFilterType, setCleanupFilterType] = useState<'all' | 'confirmed_test' | 'legacy_demo'>('all');
+  const [cleanupSearchQuery, setCleanupSearchQuery] = useState('');
 
   // Factory Order Revision Modal
   const [editingFactoryOrder, setEditingFactoryOrder] = useState<FactoryOrder | null>(null);
@@ -852,6 +884,108 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const loadDbInventory = async () => {
+    if (!token) return;
+    setIsLoadingInventory(true);
+    setCleanupError(null);
+    try {
+      const res = await fetch('/api/admin/database/inventory', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (handleAuthError(res.status)) return;
+      if (res.ok) {
+        const data = await res.json();
+        setDbInventory(data);
+      }
+    } catch (err: any) {
+      console.error('Error fetching inventory:', err);
+    } finally {
+      setIsLoadingInventory(false);
+    }
+  };
+
+  const handleExecuteCleanup = async () => {
+    if (!token || selectedCleanupIds.length === 0) return;
+    setIsCleaningDb(true);
+    setCleanupError(null);
+    try {
+      const res = await fetch('/api/admin/test-bookings/clean', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ bookingIds: selectedCleanupIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حذف الحجوزات التجريبية');
+      }
+      setCleanupSuccess(`تم حذف (${data.deletedCount}) سجل تجريبي نهائياً من قاعدة البيانات بنجاح.`);
+      setSelectedCleanupIds([]);
+      setCleanupModalOpen(false);
+      await loadAllData();
+      await loadDbInventory();
+    } catch (err: any) {
+      setCleanupError(err.message || 'حدث خطأ أثناء تنظيف قاعدة البيانات');
+    } finally {
+      setIsCleaningDb(false);
+    }
+  };
+
+  const handleSingleDeleteTestBooking = async (booking: Booking) => {
+    if (!token) return;
+    setIsSingleDeletingTestBooking(true);
+    setCleanupError(null);
+    try {
+      const res = await fetch(`/api/admin/bookings/${booking.id}/force-test`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حذف الحجز التجريبي');
+      }
+      setCleanupSuccess(`تم حذف الحجز التجريبي رقم ${booking.bookingCode} بنجاح.`);
+      setSingleDeletingTestBooking(null);
+      setSelectedCleanupIds(prev => prev.filter(id => id !== booking.id));
+      await loadAllData();
+      await loadDbInventory();
+    } catch (err: any) {
+      setCleanupError(err.message || 'حدث خطأ أثناء حذف الحجز');
+    } finally {
+      setIsSingleDeletingTestBooking(false);
+    }
+  };
+
+  const toggleSelectCleanupBooking = (id: string) => {
+    if (id === 'bk-1793362871199-5131') return; // Strictly protected
+    setSelectedCleanupIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllConfirmedTestBookings = () => {
+    if (!dbInventory) return;
+    const testIds = dbInventory.confirmedTestBookings
+      .filter(b => b.bookingCode !== 'CLB-2026-5131')
+      .map(b => b.id);
+    setSelectedCleanupIds(testIds);
+  };
+
+  const selectAllTestAndDemoBookings = () => {
+    if (!dbInventory) return;
+    const allRemovable = [
+      ...dbInventory.confirmedTestBookings,
+      ...dbInventory.legacyDemoBookings
+    ]
+      .filter(b => b.bookingCode !== 'CLB-2026-5131')
+      .map(b => b.id);
+    setSelectedCleanupIds(allRemovable);
+  };
+
   const getBookingPaymentStatusInfo = (b: Booking): { label: string; bg: string; text: string; border: string; dot: string } => {
     const total = Number(b.totalDistributorPrice) || 0;
     const paid = Number(b.paidAmount) || 0;
@@ -1398,6 +1532,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <span>التقارير والمؤشرات المالية</span>
                       </div>
                     </button>
+
+                    <button
+                      onClick={() => { setActiveTab('cancelled_bookings'); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'cancelled_bookings' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <XCircle className={`w-4 h-4 ${activeTab === 'cancelled_bookings' ? 'text-[#DFC066]' : 'text-rose-600'}`} />
+                        <span>الحجوزات الملغاة</span>
+                      </div>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-mono font-bold ${activeTab === 'cancelled_bookings' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700'}`}>
+                        {bookings.filter(b => b.status === 'CANCELLED').length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveTab('db_cleanup'); loadDbInventory(); setIsMobileNavOpen(false); }}
+                      className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl flex items-center justify-between font-bold text-xs transition-colors ${
+                        activeTab === 'db_cleanup' ? 'bg-[#7A0C2E] text-white shadow-xs' : 'text-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Database className={`w-4 h-4 ${activeTab === 'db_cleanup' ? 'text-[#DFC066]' : 'text-amber-600'}`} />
+                        <span>تنظيف قاعدة البيانات</span>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                        فحص وحذف
+                      </span>
+                    </button>
                   </>
                 )}
 
@@ -1591,6 +1755,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <TrendingUp className="w-3.5 h-3.5 text-[#DFC066]" />
                     <span>التقارير</span>
                   </button>
+
+                  <button
+                    onClick={() => setActiveTab('cancelled_bookings')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'cancelled_bookings'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                    <span>الملغاة ({bookings.filter(b => b.status === 'CANCELLED').length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('db_cleanup'); loadDbInventory(); }}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-xl whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-colors ${
+                      activeTab === 'db_cleanup'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Database className="w-3.5 h-3.5 text-amber-500" />
+                    <span>تنظيف البيانات</span>
+                  </button>
                 </>
               )}
 
@@ -1681,6 +1869,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   >
                     <ShoppingBag className="w-4 h-4" />
                     <span>الحجوزات والطلبات ({bookings.length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('cancelled_bookings')}
+                    className={`px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all ${
+                      activeTab === 'cancelled_bookings'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'text-slate-700 hover:text-[#7A0C2E]'
+                    }`}
+                  >
+                    <XCircle className="w-4 h-4 text-rose-500" />
+                    <span>الحجوزات الملغاة ({bookings.filter(b => b.status === 'CANCELLED').length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setActiveTab('db_cleanup'); loadDbInventory(); }}
+                    className={`px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all ${
+                      activeTab === 'db_cleanup'
+                        ? 'bg-[#7A0C2E] text-white shadow-xs'
+                        : 'text-slate-700 hover:text-[#7A0C2E]'
+                    }`}
+                  >
+                    <Database className="w-4 h-4 text-amber-500" />
+                    <span>تنظيف قاعدة البيانات</span>
                   </button>
                 </>
               )}
@@ -2509,6 +2721,480 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   );
                 })()}
 
+              </div>
+            )}
+
+            {/* Tab: CANCELLED BOOKINGS */}
+            {activeTab === 'cancelled_bookings' && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-rose-100 shadow-2xs">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-rose-50 text-rose-700 rounded-xl">
+                        <XCircle className="w-5 h-5" />
+                      </div>
+                      <h4 className="font-black text-base text-slate-900">
+                        الحجوزات الملغاة (Cancelled Bookings)
+                      </h4>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-100 text-rose-800">
+                        {bookings.filter(b => b.status === 'CANCELLED').length} حجز ملغي
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      إدارة ومراجعة الحجوزات الملغاة، مع إمكانية الحذف الفردي أو الجماعي الآمن للحجوزات الخالية من أي التزامات مالية.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {selectedCancelledBookingIds.length > 0 && (
+                      <button
+                        onClick={() => setBulkDeleteCancelledModalOpen(true)}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف الحجوزات الملغاة المحددة ({selectedCancelledBookingIds.length})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Search & Selection Filter Bar */}
+                {(() => {
+                  const allCancelled = bookings.filter(b => b.status === 'CANCELLED');
+                  const filteredCancelled = allCancelled.filter(b => {
+                    if (!cancelledSearchQuery.trim()) return true;
+                    const q = cancelledSearchQuery.trim().toLowerCase();
+                    return (
+                      b.bookingCode.toLowerCase().includes(q) ||
+                      b.customerName.toLowerCase().includes(q) ||
+                      b.customerPhone.includes(q)
+                    );
+                  });
+
+                  const allFilteredSelected = filteredCancelled.length > 0 && filteredCancelled.every(b => selectedCancelledBookingIds.includes(b.id));
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200">
+                        <div className="relative flex-1">
+                          <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="بحث برقم الحجز، اسم العميل، أو الهاتف..."
+                            value={cancelledSearchQuery}
+                            onChange={e => setCancelledSearchQuery(e.target.value)}
+                            className="w-full pr-9 pl-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7A0C2E]"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => toggleSelectAllCancelled(filteredCancelled)}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{allFilteredSelected ? 'إلغاء تحديد الكل' : 'تحديد الكل'}</span>
+                          </button>
+
+                          {selectedCancelledBookingIds.length > 0 && (
+                            <button
+                              onClick={() => setSelectedCancelledBookingIds([])}
+                              className="px-3 py-2 text-slate-500 hover:text-slate-700 text-xs font-semibold"
+                            >
+                              إلغاء التحديد
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {filteredCancelled.length === 0 ? (
+                        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
+                          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                            <XCircle className="w-6 h-6" />
+                          </div>
+                          <h5 className="font-bold text-slate-700 text-sm">لا توجد حجوزات ملغاة</h5>
+                          <p className="text-xs text-slate-400">
+                            {cancelledSearchQuery ? 'لا توجد نتائج تطابق معايير البحث الحالية.' : 'قائمة الحجوزات الملغاة فارغة حالياً.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-right text-xs">
+                              <thead className="bg-[#FAF8F5] text-slate-700 border-b border-slate-200 font-bold select-none">
+                                <tr>
+                                  <th className="p-3.5 text-center w-10">
+                                    <input
+                                      type="checkbox"
+                                      checked={allFilteredSelected}
+                                      onChange={() => toggleSelectAllCancelled(filteredCancelled)}
+                                      className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                                    />
+                                  </th>
+                                  <th className="p-3.5">كود الحجز</th>
+                                  <th className="p-3.5">العميل</th>
+                                  <th className="p-3.5">رقم الهاتف</th>
+                                  <th className="p-3.5">تاريخ المناسبة</th>
+                                  <th className="p-3.5">إجمالي المبلغ</th>
+                                  <th className="p-3.5">حالة السداد</th>
+                                  <th className="p-3.5 text-center">عدد الدفعات</th>
+                                  <th className="p-3.5 text-center">إجراءات</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {filteredCancelled.map(b => {
+                                  const payInfo = getBookingPaymentStatusInfo(b);
+                                  const paymentsCount = (b.payments || []).length;
+                                  return (
+                                    <tr key={b.id} className="hover:bg-slate-50 transition-colors">
+                                      <td className="p-3.5 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedCancelledBookingIds.includes(b.id)}
+                                          onChange={() => toggleSelectCancelledBooking(b.id)}
+                                          className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                                        />
+                                      </td>
+                                      <td className="p-3.5 font-mono font-bold text-[#7A0C2E]">
+                                        {b.bookingCode}
+                                      </td>
+                                      <td className="p-3.5 font-bold text-slate-800">
+                                        {b.customerName}
+                                      </td>
+                                      <td className="p-3.5 font-mono text-slate-600" dir="ltr">
+                                        {b.customerPhone}
+                                      </td>
+                                      <td className="p-3.5 text-slate-600">
+                                        {b.eventDate}
+                                      </td>
+                                      <td className="p-3.5 font-mono font-bold text-slate-900">
+                                        {b.totalDistributorPrice?.toLocaleString()} ج.م
+                                      </td>
+                                      <td className="p-3.5">
+                                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${payInfo.bg}`}>
+                                          <span className={`w-1.5 h-1.5 rounded-full ${payInfo.dot}`}></span>
+                                          <span>{payInfo.label}</span>
+                                        </span>
+                                      </td>
+                                      <td className="p-3.5 text-center font-mono">
+                                        <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md font-bold">
+                                          {paymentsCount}
+                                        </span>
+                                      </td>
+                                      <td className="p-3.5 text-center">
+                                        <button
+                                          onClick={() => setDeletingCancelledBooking(b)}
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors"
+                                          title="حذف الحجز الملغي نهائياً"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Tab: DATABASE CLEANUP & TEST BOOKINGS MANAGEMENT */}
+            {activeTab === 'db_cleanup' && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+                {/* Top Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl border border-amber-200 shadow-2xs">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-amber-50 text-amber-700 rounded-xl">
+                        <Database className="w-5 h-5" />
+                      </div>
+                      <h4 className="font-black text-base text-slate-900">
+                        إدارة الحجوزات التجريبية وتنظيف قاعدة البيانات (Production Database Cleanup)
+                      </h4>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      فحص مسبق وتنظيف جذري لكافة الحجوزات التجريبية والتوضيحية من PostgreSQL وتخزين JSON مع حماية قاطعة للحجز الحقيقي الوحيد.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={loadDbInventory}
+                      disabled={isLoadingInventory}
+                      className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInventory ? 'animate-spin' : ''}`} />
+                      <span>إعادة الفحص المسبق</span>
+                    </button>
+
+                    {selectedCleanupIds.length > 0 && (
+                      <button
+                        onClick={() => setCleanupModalOpen(true)}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف المحدد نهائياً ({selectedCleanupIds.length})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Success / Error Alerts */}
+                {cleanupSuccess && (
+                  <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span className="font-bold">{cleanupSuccess}</span>
+                    </div>
+                    <button onClick={() => setCleanupSuccess(null)} className="text-emerald-600 hover:text-emerald-800">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {cleanupError && (
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                      <span className="font-bold">{cleanupError}</span>
+                    </div>
+                    <button onClick={() => setCleanupError(null)} className="text-rose-600 hover:text-rose-800">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Sacred Real Booking Permanent Protection Card */}
+                <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 p-4 sm:p-5 rounded-2xl border-2 border-emerald-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 bg-emerald-600 text-white rounded-xl shadow-xs shrink-0">
+                      <ShieldCheck className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h5 className="font-black text-sm text-emerald-950">
+                          الحجز الحقيقي المؤكد والوحيد المحمي تماماً:
+                        </h5>
+                        <span className="font-mono font-black text-sm px-2.5 py-0.5 rounded-lg bg-emerald-700 text-white shadow-2xs">
+                          CLB-2026-5131
+                        </span>
+                      </div>
+                      <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                        العميل: <strong>أحمد عصام الدين حسين</strong> • الهاتف: <strong dir="ltr">01158855911</strong> • المناسبة: <strong>حفل زفاف</strong> • الصنف: <strong>Sale-05 (200 وجبة)</strong> • الإجمالي: <strong>18,000 ج.م</strong>
+                      </p>
+                      <div className="flex items-center gap-2 mt-1.5 text-[11px] text-emerald-900 font-bold">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span>مستثنى ومحمي برمجياً وفي قاعدة البيانات ضد أي تعديل أو حذف تلقائي أو جماعي.</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="shrink-0">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 text-emerald-900 rounded-xl text-xs font-black border border-emerald-300">
+                      <Lock className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>محمي نهائياً</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Statistics Cards */}
+                {dbInventory && (
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                      <div className="text-slate-400 text-xs font-bold mb-1">إجمالي الحجوزات</div>
+                      <div className="text-2xl font-black text-slate-800 font-mono">{dbInventory.summary.total}</div>
+                      <div className="text-[10px] text-slate-400 mt-1">كافة السجلات المسجلة</div>
+                    </div>
+
+                    <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200">
+                      <div className="text-emerald-700 text-xs font-bold mb-1">حجز حقيقي معتمد</div>
+                      <div className="text-2xl font-black text-emerald-700 font-mono">{dbInventory.summary.protectedReal}</div>
+                      <div className="text-[10px] text-emerald-600 mt-1">CLB-2026-5131 محمي</div>
+                    </div>
+
+                    <div className="bg-rose-50/50 p-4 rounded-2xl border border-rose-200">
+                      <div className="text-rose-700 text-xs font-bold mb-1">حجوزات تجريبية مؤكدة</div>
+                      <div className="text-2xl font-black text-rose-700 font-mono">{dbInventory.summary.confirmedTest}</div>
+                      <div className="text-[10px] text-rose-600 mt-1">اختبارات ومحاكاة</div>
+                    </div>
+
+                    <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-200">
+                      <div className="text-amber-700 text-xs font-bold mb-1">بيانات تجريبية وتوضيحية</div>
+                      <div className="text-2xl font-black text-amber-700 font-mono">{dbInventory.summary.legacyDemo}</div>
+                      <div className="text-[10px] text-amber-600 mt-1">حجوزات ديمو سابقة</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Selection Tools & Filter Bar */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={selectAllConfirmedTestBookings}
+                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors"
+                    >
+                      تحديد الحجوزات التجريبية المؤكدة ({dbInventory?.summary.confirmedTest || 0})
+                    </button>
+
+                    <button
+                      onClick={selectAllTestAndDemoBookings}
+                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl border border-amber-200 transition-colors"
+                    >
+                      تحديد كافة البيانات التجريبية والتوضيحية ({((dbInventory?.summary.confirmedTest || 0) + (dbInventory?.summary.legacyDemo || 0))})
+                    </button>
+
+                    {selectedCleanupIds.length > 0 && (
+                      <button
+                        onClick={() => setSelectedCleanupIds([])}
+                        className="px-3 py-1.5 text-slate-500 hover:text-slate-700 text-xs font-bold"
+                      >
+                        إلغاء التحديد ({selectedCleanupIds.length})
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={cleanupFilterType}
+                      onChange={e => setCleanupFilterType(e.target.value as any)}
+                      className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#7A0C2E]"
+                    >
+                      <option value="all">كافة السجلات</option>
+                      <option value="confirmed_test">حجوزات تجريبية مؤكدة</option>
+                      <option value="legacy_demo">بيانات تجريبية وتوضيحية</option>
+                    </select>
+
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="بحث بالكود أو الاسم..."
+                        value={cleanupSearchQuery}
+                        onChange={e => setCleanupSearchQuery(e.target.value)}
+                        className="pr-8 pl-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7A0C2E] w-40"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Inventory Table */}
+                {(() => {
+                  const all = dbInventory?.allBookings || [];
+                  const filtered = all.filter(b => {
+                    if (cleanupFilterType === 'confirmed_test' && b.classification !== 'CONFIRMED_TEST') return false;
+                    if (cleanupFilterType === 'legacy_demo' && b.classification !== 'LEGACY_DEMO') return false;
+                    if (cleanupSearchQuery.trim()) {
+                      const q = cleanupSearchQuery.trim().toLowerCase();
+                      return (
+                        b.bookingCode.toLowerCase().includes(q) ||
+                        b.customerName.toLowerCase().includes(q) ||
+                        b.customerPhone.includes(q)
+                      );
+                    }
+                    return true;
+                  });
+
+                  return (
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-right text-xs">
+                          <thead className="bg-[#FAF8F5] text-slate-700 border-b border-slate-200 font-bold select-none">
+                            <tr>
+                              <th className="p-3 text-center w-10">تحديد</th>
+                              <th className="p-3">كود الحجز</th>
+                              <th className="p-3">العميل</th>
+                              <th className="p-3">رقم الهاتف</th>
+                              <th className="p-3">تاريخ الإنشاء</th>
+                              <th className="p-3">حالة الحجز</th>
+                              <th className="p-3">التصنيف</th>
+                              <th className="p-3 text-center">إجراء فردي</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {filtered.map(b => {
+                              const isProtected = b.classification === 'PROTECTED_REAL';
+                              return (
+                                <tr
+                                  key={b.id}
+                                  className={`hover:bg-slate-50 transition-colors ${
+                                    isProtected ? 'bg-emerald-50/40 font-bold' : ''
+                                  }`}
+                                >
+                                  <td className="p-3 text-center">
+                                    {isProtected ? (
+                                      <span title="محمي تماماً من الحذف">
+                                        <Lock className="w-4 h-4 text-emerald-600 mx-auto" />
+                                      </span>
+                                    ) : (
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedCleanupIds.includes(b.id)}
+                                        onChange={() => toggleSelectCleanupBooking(b.id)}
+                                        className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                                      />
+                                    )}
+                                  </td>
+                                  <td className="p-3 font-mono font-bold text-[#7A0C2E]">
+                                    {b.bookingCode}
+                                  </td>
+                                  <td className="p-3 text-slate-800">
+                                    {b.customerName}
+                                  </td>
+                                  <td className="p-3 font-mono text-slate-600" dir="ltr">
+                                    {b.customerPhone}
+                                  </td>
+                                  <td className="p-3 text-slate-500 text-[11px]">
+                                    {b.createdAt ? new Date(b.createdAt).toLocaleDateString('ar-EG') : '-'}
+                                  </td>
+                                  <td className="p-3">
+                                    <span className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700">
+                                      {b.status}
+                                    </span>
+                                  </td>
+                                  <td className="p-3">
+                                    {isProtected ? (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                        <ShieldCheck className="w-3 h-3 text-emerald-700" />
+                                        <span>حجز حقيقي محمي من الحذف</span>
+                                      </span>
+                                    ) : b.classification === 'CONFIRMED_TEST' ? (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                                        <span>حجز تجريبي مؤكد</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                        <span>بيانات تجريبية وتوضيحية</span>
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    {isProtected ? (
+                                      <span className="text-[11px] text-emerald-700 font-bold">محمي</span>
+                                    ) : (
+                                      <button
+                                        onClick={() => setSingleDeletingTestBooking(b)}
+                                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors"
+                                        title="حذف هذا الحجز نهائياً"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -5177,6 +5863,111 @@ APP_URL="https://celebre-eg.com"`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{isBulkDeletingCancelled ? 'جاري الحذف الجماعي...' : `حذف ${selectedCancelledBookingIds.length} حجز نهائياً`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk Database Cleanup Confirmation Modal */}
+        {cleanupModalOpen && (
+          <div className="fixed inset-0 z-90 bg-black/75 flex items-center justify-center p-3 animate-in fade-in duration-150">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right text-xs">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h4 className="text-base font-black text-slate-900">
+                  تأكيد تنظيف قاعدة البيانات وحذف السجلات التجريبية
+                </h4>
+                <p className="text-slate-500 text-[11px]">
+                  سيتم حذف السجلات المحددة نهائياً وبشكل قاطع من PostgreSQL وتخزين JSON مع كافة البنود والدفعات وسجلات التشغيل المرتبطة بها.
+                </p>
+              </div>
+
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-[11px] font-bold">
+                  تأكيد الحماية: الحجز الحقيقي CLB-2026-5131 مستثنى ومحمي تماماً ولن يتأثر بهذا الإجراء.
+                </span>
+              </div>
+
+              <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 text-rose-900 text-center font-bold">
+                عدد السجلات التجريبية المطلوب حذفها نهائياً: ({selectedCleanupIds.length}) سجل
+              </div>
+
+              {cleanupError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{cleanupError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  disabled={isCleaningDb}
+                  onClick={() => setCleanupModalOpen(false)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isCleaningDb}
+                  onClick={handleExecuteCleanup}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isCleaningDb ? 'جاري التنظيف النهائي...' : `تأكيد حذف ${selectedCleanupIds.length} سجل نهائياً`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Single Test Booking Permanent Deletion Modal */}
+        {singleDeletingTestBooking && (
+          <div className="fixed inset-0 z-90 bg-black/75 flex items-center justify-center p-3 animate-in fade-in duration-150">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-right text-xs">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h4 className="text-base font-black text-slate-900">
+                  تأكيد حذف الحجز التجريبي نهائياً
+                </h4>
+                <p className="text-slate-500 text-[11px]">
+                  سيتم حذف هذا الحجز التجريبي نهائياً من قاعدة البيانات والتخزين الداخلي.
+                </p>
+              </div>
+
+              <div className="p-3 bg-[#FAF8F5] rounded-xl border border-slate-200 space-y-1.5 text-slate-700 text-[11px]">
+                <div>كود الحجز: <strong className="font-mono text-[#7A0C2E]">{singleDeletingTestBooking.bookingCode}</strong></div>
+                <div>العميل: <strong className="text-slate-900">{singleDeletingTestBooking.customerName}</strong></div>
+                <div>رقم الهاتف: <span className="font-mono">{singleDeletingTestBooking.customerPhone}</span></div>
+                <div>الحالة: <span className="font-bold">{singleDeletingTestBooking.status}</span></div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  disabled={isSingleDeletingTestBooking}
+                  onClick={() => setSingleDeletingTestBooking(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isSingleDeletingTestBooking}
+                  onClick={() => handleSingleDeleteTestBooking(singleDeletingTestBooking)}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isSingleDeletingTestBooking ? 'جاري الحذف...' : 'حذف نهائي الآن'}</span>
                 </button>
               </div>
             </div>

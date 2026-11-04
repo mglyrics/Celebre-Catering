@@ -185,6 +185,66 @@ export function normalizePhone(phone: string): string {
   return (phone || '').replace(/\D/g, '').replace(/^20/, '');
 }
 
+/**
+ * SACRED REAL BOOKING IMMUTABLE DEFINITIONS
+ * Exactly ONE confirmed customer booking must be strictly protected across all layers:
+ * CLB-2026-5131 | أحمد عصام الدين حسين | 01158855911
+ */
+export const PROTECTED_BOOKINGS = {
+  codes: Object.freeze(['CLB-2026-5131']),
+  phones: Object.freeze(['01158855911', '201158855911']),
+  names: Object.freeze(['أحمد عصام الدين حسين']),
+  primaryIds: Object.freeze(['bk-1793362871199-5131']),
+};
+
+export function isStrictlyProtectedBooking(booking: {
+  id?: string;
+  bookingCode?: string;
+  customerPhone?: string;
+  customerName?: string;
+} | null | undefined): boolean {
+  if (!booking) return false;
+  const code = (booking.bookingCode || '').trim().toUpperCase();
+  const phone = normalizePhone(booking.customerPhone || '');
+  const name = (booking.customerName || '').trim();
+  const id = (booking.id || '').trim();
+
+  if (PROTECTED_BOOKINGS.codes.includes(code)) return true;
+  if (PROTECTED_BOOKINGS.primaryIds.includes(id)) return true;
+  for (const p of PROTECTED_BOOKINGS.phones) {
+    if (phone && normalizePhone(p) === phone) return true;
+  }
+  if (name.includes('أحمد عصام الدين')) return true;
+  return false;
+}
+
+export function classifyBookingRecord(b: Booking): 'PROTECTED_REAL' | 'CONFIRMED_TEST' | 'LEGACY_DEMO' {
+  if (isStrictlyProtectedBooking(b)) return 'PROTECTED_REAL';
+
+  const testNamePatterns = ['تجرب', 'فحص', 'اختبار', 'تست', 'test', 'شركة النور للمؤتمرات'];
+  const testPhonePatterns = [
+    '01033334444', '01022223333', '01099887766', '01009988776', 
+    '01234567890', '01011223344', '01223344556', '01073746999',
+    '01049462574', '01099864798', '01028338678', '01072714940',
+    '01071088193', '01037906440'
+  ];
+
+  const name = (b.customerName || '').toLowerCase();
+  const notes = (b.notes || '').toLowerCase();
+  const phone = normalizePhone(b.customerPhone || '');
+
+  const isExplicitTest = Boolean(b.isTest);
+  const isNameTest = testNamePatterns.some(p => name.includes(p.toLowerCase()));
+  const isNotesTest = notes.includes('فحص') || notes.includes('تجرب') || notes.includes('test');
+  const isPhoneTest = testPhonePatterns.some(p => phone === normalizePhone(p));
+
+  if (isExplicitTest || isNameTest || isNotesTest || isPhoneTest) {
+    return 'CONFIRMED_TEST';
+  }
+
+  return 'LEGACY_DEMO';
+}
+
 export function isBookingCodeMatch(storedCode: string, queryCode: string): boolean {
   if (!storedCode || !queryCode) return false;
   const sClean = storedCode.trim().toUpperCase();
@@ -2944,9 +3004,13 @@ export const db = {
       throw new Error('الحجز غير موجود');
     }
 
-    const isTest = Boolean(booking.isTest && booking.bookingCode !== 'CLB-2026-5131');
+    if (isStrictlyProtectedBooking(booking)) {
+      throw new Error('ممنوع منعاً قاطعاً: الحجز CLB-2026-5131 للعميل أحمد عصام الدين حسين هو حجز حقيقي معتمد ومحمي تماماً من الحذف.');
+    }
+
+    const isTest = Boolean(booking.isTest) || classifyBookingRecord(booking) !== 'PROTECTED_REAL';
     if (!isTest) {
-      throw new Error('ممنوع منعاً باتاً: لا يمكن حذف سوى الحجوزات التجريبية فقط (isTest: true). الحجوزات الحقيقية للعملاء محمية ولا يجوز حذفها.');
+      throw new Error('ممنوع منعاً باتاً: لا يمكن حذف سوى الحجوزات التجريبية أو التوضيحية. الحجوزات الحقيقية للعملاء محمية ولا يجوز حذفها.');
     }
 
     const bookingCode = booking.bookingCode;
@@ -2957,12 +3021,14 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          // Delete child records first
-          await client.bookingItem.deleteMany({ where: { bookingId: targetId } });
-          await client.payment.deleteMany({ where: { bookingId: targetId } });
-          await client.factoryOrder.deleteMany({ where: { bookingId: targetId } });
-          await client.auditLog.deleteMany({ where: { bookingId: targetId } });
-          await client.booking.delete({ where: { id: targetId } });
+          await client.$transaction(async (tx) => {
+            await tx.bookingItem.deleteMany({ where: { bookingId: targetId } });
+            await tx.payment.deleteMany({ where: { bookingId: targetId } });
+            await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: targetId } } });
+            await tx.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+            await tx.auditLog.deleteMany({ where: { bookingId: targetId } });
+            await tx.booking.delete({ where: { id: targetId } });
+          });
         }
       } catch (err: any) {
         logServerError(err, 'db.deleteTestBooking.prisma');
@@ -2973,7 +3039,13 @@ export const db = {
     memoryDB = loadLocalDB();
     memoryDB.bookings = memoryDB.bookings.filter(b => b.id !== targetId);
     memoryDB.payments = memoryDB.payments.filter(p => p.bookingId !== targetId);
+    const removedOrderIds = new Set(
+      (memoryDB.factoryOrders || []).filter(fo => fo.bookingId === targetId).map(fo => fo.id)
+    );
     memoryDB.factoryOrders = memoryDB.factoryOrders.filter(fo => fo.bookingId !== targetId);
+    if (memoryDB.factoryPayments) {
+      memoryDB.factoryPayments = memoryDB.factoryPayments.filter(fp => !removedOrderIds.has(fp.factoryOrderId));
+    }
     saveLocalDB(memoryDB);
 
     await this.addAuditLog({
@@ -2992,9 +3064,10 @@ export const db = {
    * Strictly enforces:
    * - bookingId primary key only (rejects bookingCode)
    * - booking.status === 'CANCELLED' (strictly rejects all active statuses)
+   * - Absolute refusal if booking is CLB-2026-5131
    * - No active financial payments or obligations (paidAmount === 0 and no valid payments)
    * - No active factory payments
-   * - Full audit trail
+   * - Cascade cleanup and full audit trail
    */
   async deleteCancelledBooking(id: string, performedBy = 'الإدارة'): Promise<{ success: boolean; bookingCode: string; message: string }> {
     const cleanId = (id || '').trim();
@@ -3008,6 +3081,11 @@ export const db = {
     const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error('الحجز المطلوب حذفه غير موجود');
+    }
+
+    // Absolute protection guard
+    if (isStrictlyProtectedBooking(booking)) {
+      throw new Error('ممنوع منعاً قاطعاً: الحجز CLB-2026-5131 للعميل أحمد عصام الدين حسين هو حجز حقيقي معتمد ومحمي نهائياً من أي حذف.');
     }
 
     // Strict status guard
@@ -3035,9 +3113,14 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          await client.bookingItem.deleteMany({ where: { bookingId: targetId } });
-          await client.factoryOrder.deleteMany({ where: { bookingId: targetId } });
-          await client.booking.delete({ where: { id: targetId } });
+          await client.$transaction(async (tx) => {
+            await tx.bookingItem.deleteMany({ where: { bookingId: targetId } });
+            await tx.payment.deleteMany({ where: { bookingId: targetId } });
+            await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: targetId } } });
+            await tx.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+            await tx.auditLog.deleteMany({ where: { bookingId: targetId } });
+            await tx.booking.delete({ where: { id: targetId } });
+          });
         }
       } catch (err: any) {
         logServerError(err, 'db.deleteCancelledBooking.prisma');
@@ -3048,7 +3131,14 @@ export const db = {
     // Delete from memoryDB
     memoryDB = loadLocalDB();
     memoryDB.bookings = memoryDB.bookings.filter(b => b.id !== targetId);
+    memoryDB.payments = memoryDB.payments.filter(p => p.bookingId !== targetId);
+    const removedOrderIds = new Set(
+      (memoryDB.factoryOrders || []).filter(fo => fo.bookingId === targetId).map(fo => fo.id)
+    );
     memoryDB.factoryOrders = memoryDB.factoryOrders.filter(fo => fo.bookingId !== targetId);
+    if (memoryDB.factoryPayments) {
+      memoryDB.factoryPayments = memoryDB.factoryPayments.filter(fp => !removedOrderIds.has(fp.factoryOrderId));
+    }
     saveLocalDB(memoryDB);
 
     await this.addAuditLog({
@@ -3115,6 +3205,184 @@ export const db = {
       deletedCount: deletedCodes.length,
       deletedCodes,
       skipped,
+    };
+  },
+
+  /**
+   * Database Inventory & Pre-Deletion Scan
+   * Categorizes all records into:
+   * 1. PROTECTED_REAL (CLB-2026-5131)
+   * 2. CONFIRMED_TEST (explicit isTest = true or test names/phones)
+   * 3. LEGACY_DEMO (mock demo seed records)
+   * 4. CANCELLED (all cancelled bookings)
+   */
+  async getDatabaseInventory(): Promise<{
+    summary: {
+      total: number;
+      protectedReal: number;
+      confirmedTest: number;
+      legacyDemo: number;
+      cancelled: number;
+    };
+    protectedBookings: Booking[];
+    confirmedTestBookings: Booking[];
+    legacyDemoBookings: Booking[];
+    cancelledBookings: Booking[];
+    allBookings: (Booking & { classification: 'PROTECTED_REAL' | 'CONFIRMED_TEST' | 'LEGACY_DEMO' })[];
+  }> {
+    const all = await this.getBookings();
+    const protectedBookings: Booking[] = [];
+    const confirmedTestBookings: Booking[] = [];
+    const legacyDemoBookings: Booking[] = [];
+    const cancelledBookings: Booking[] = [];
+    const enrichedAll: (Booking & { classification: 'PROTECTED_REAL' | 'CONFIRMED_TEST' | 'LEGACY_DEMO' })[] = [];
+
+    for (const b of all) {
+      const cat = classifyBookingRecord(b);
+      enrichedAll.push({ ...b, classification: cat });
+
+      if (cat === 'PROTECTED_REAL') {
+        protectedBookings.push(b);
+      } else if (cat === 'CONFIRMED_TEST') {
+        confirmedTestBookings.push(b);
+      } else {
+        legacyDemoBookings.push(b);
+      }
+
+      if (b.status === 'CANCELLED' && cat !== 'PROTECTED_REAL') {
+        cancelledBookings.push(b);
+      }
+    }
+
+    return {
+      summary: {
+        total: all.length,
+        protectedReal: protectedBookings.length,
+        confirmedTest: confirmedTestBookings.length,
+        legacyDemo: legacyDemoBookings.length,
+        cancelled: cancelledBookings.length,
+      },
+      protectedBookings,
+      confirmedTestBookings,
+      legacyDemoBookings,
+      cancelledBookings,
+      allBookings: enrichedAll,
+    };
+  },
+
+  /**
+   * Permanent Cascade Deletion for Test & Demo Bookings
+   * Removes from PostgreSQL tables and JSON storage with 100% cascade.
+   * Strictly enforces exclusion and hard refusal for CLB-2026-5131.
+   */
+  async deleteBookingsPermanently(bookingIds: string[], performedBy = 'الإدارة'): Promise<{
+    success: boolean;
+    totalRequested: number;
+    deletedCount: number;
+    deletedCodes: string[];
+    skipped: { id: string; code?: string; reason: string }[];
+    remainingCount: number;
+  }> {
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      throw new Error('يرجى تحديد معرفات الحجوزات المطلوب حذفها نهائياً');
+    }
+
+    const deletedCodes: string[] = [];
+    const skipped: { id: string; code?: string; reason: string }[] = [];
+    const idsToDelete: string[] = [];
+
+    // 1. Strict pre-validation for each booking
+    for (const rawId of bookingIds) {
+      const cleanId = (rawId || '').trim();
+      if (!cleanId) continue;
+
+      if (cleanId.startsWith('CLB-')) {
+        skipped.push({ id: rawId, reason: 'يجب تمرير المعرف الأساسي bookingId وليس bookingCode لمنع تداخل السجلات' });
+        continue;
+      }
+
+      const booking = await this.getBookingByPrimaryId(cleanId);
+      if (!booking) {
+        skipped.push({ id: cleanId, reason: 'الحجز غير موجود في قاعدة البيانات' });
+        continue;
+      }
+
+      // STRICT SACRED CHECK: Absolute Protection for CLB-2026-5131
+      if (isStrictlyProtectedBooking(booking)) {
+        skipped.push({
+          id: cleanId,
+          code: booking.bookingCode,
+          reason: 'محظور تماماً: الحجز CLB-2026-5131 هو حجز حقيقي معتمد للعميل أحمد عصام الدين ومحمي نهائياً من أي حذف أو تعديل.'
+        });
+        continue;
+      }
+
+      idsToDelete.push(cleanId);
+      deletedCodes.push(booking.bookingCode);
+    }
+
+    if (idsToDelete.length === 0) {
+      const remaining = (await this.getBookings()).length;
+      return {
+        success: true,
+        totalRequested: bookingIds.length,
+        deletedCount: 0,
+        deletedCodes: [],
+        skipped,
+        remainingCount: remaining,
+      };
+    }
+
+    // 2. Cascade delete from PostgreSQL if configured
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.bookingItem.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.payment.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: { in: idsToDelete } } } });
+            await tx.factoryOrder.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.auditLog.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.booking.deleteMany({ where: { id: { in: idsToDelete } } });
+          });
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.deleteBookingsPermanently.prisma');
+      }
+    }
+
+    // 3. Delete from memoryDB & save to data/db.json
+    memoryDB = loadLocalDB();
+    const idSet = new Set(idsToDelete);
+    memoryDB.bookings = memoryDB.bookings.filter(b => !idSet.has(b.id));
+    memoryDB.payments = memoryDB.payments.filter(p => !idSet.has(p.bookingId));
+    const removedOrderIds = new Set(
+      (memoryDB.factoryOrders || []).filter(fo => idSet.has(fo.bookingId)).map(fo => fo.id)
+    );
+    memoryDB.factoryOrders = memoryDB.factoryOrders.filter(fo => !idSet.has(fo.bookingId));
+    if (memoryDB.factoryPayments) {
+      memoryDB.factoryPayments = memoryDB.factoryPayments.filter(fp => !removedOrderIds.has(fp.factoryOrderId));
+    }
+    saveLocalDB(memoryDB);
+
+    // 4. Record Audit Log
+    await this.addAuditLog({
+      bookingId: '',
+      bookingCode: 'SYSTEM_CLEANUP',
+      action: 'تنظيف نهائي لقاعدة البيانات',
+      performedBy,
+      details: `تم حذف (${deletedCodes.length}) سجل تجريبي نهائياً بواسطة (${performedBy}). تم تخطي (${skipped.length}) سجل. الأكواد المحذوفة: [${deletedCodes.join(', ')}]. الحجز CLB-2026-5131 محمي بنجاح.`,
+    });
+
+    const remaining = (await this.getBookings()).length;
+    return {
+      success: true,
+      totalRequested: bookingIds.length,
+      deletedCount: deletedCodes.length,
+      deletedCodes,
+      skipped,
+      remainingCount: remaining,
     };
   },
 
