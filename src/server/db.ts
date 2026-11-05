@@ -46,6 +46,7 @@ interface DatabaseSchema {
 
 import { prisma, getPrismaClient } from '../lib/prisma';
 import { logServerError, sanitizeError, SanitizedErrorInfo } from './safeLogger';
+import { ensureColumnsReady } from './schemaInit';
 
 let isPrismaConnected = false;
 const databaseUrl = process.env.DATABASE_URL;
@@ -779,20 +780,42 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          const b = await client.booking.findFirst({
-            where: {
-              OR: [
-                { id },
-                { bookingCode: id },
-              ],
-            },
-            include: {
-              items: true,
-              payments: true,
-              factoryOrders: true,
-              auditLogs: true,
-            },
-          });
+          let b: any = null;
+          try {
+            b = await client.booking.findFirst({
+              where: {
+                OR: [
+                  { id },
+                  { bookingCode: id },
+                ],
+              },
+              include: {
+                items: true,
+                payments: true,
+                factoryOrders: true,
+                auditLogs: true,
+              },
+            });
+          } catch (findErr: any) {
+            if (String(findErr?.message || '').includes('booking_items.')) {
+              ensureColumnsReady(client).catch(() => {});
+              b = await client.booking.findFirst({
+                where: {
+                  OR: [
+                    { id },
+                    { bookingCode: id },
+                  ],
+                },
+                include: {
+                  payments: true,
+                  factoryOrders: true,
+                  auditLogs: true,
+                },
+              });
+            } else {
+              throw findErr;
+            }
+          }
           if (b) {
             return {
               id: b.id,
@@ -820,7 +843,7 @@ export const db = {
               version: b.version,
               createdAt: b.createdAt.toISOString(),
               updatedAt: b.updatedAt.toISOString(),
-              items: b.items.map(it => {
+              items: (b.items || []).map((it: any) => {
                 const sweetOpt = ((it as any).orientalSweetOption || 'none') as OrientalSweetOption;
                 const sweetDist = sweetOpt === 'add_with_juice' ? 20 : sweetOpt === 'replace_juice' ? 15 : 0;
                 const sweetFact = sweetOpt === 'add_with_juice' ? 10 : sweetOpt === 'replace_juice' ? 5 : 0;
@@ -844,7 +867,7 @@ export const db = {
                   totalFactoryPrice: it.totalFactoryPrice || 0,
                 };
               }),
-              payments: b.payments.map(p => ({
+              payments: (b.payments || []).map((p: any) => ({
                 id: p.id,
                 bookingId: p.bookingId,
                 amount: p.amount,
@@ -855,7 +878,7 @@ export const db = {
                 status: (p.notes && p.notes.includes('[ملغاة')) ? 'CANCELLED' : 'VALID',
                 createdAt: p.createdAt.toISOString(),
               })),
-              factoryOrders: b.factoryOrders.map(fo => {
+              factoryOrders: (b.factoryOrders || []).map((fo: any) => {
                 let parsedItems = [];
                 try {
                   parsedItems = JSON.parse(fo.itemsJson);
@@ -877,7 +900,7 @@ export const db = {
                   updatedAt: fo.updatedAt.toISOString(),
                 };
               }),
-              auditLogs: b.auditLogs.map(al => ({
+              auditLogs: (b.auditLogs || []).map((al: any) => ({
                 id: al.id,
                 bookingId: al.bookingId || '',
                 bookingCode: al.bookingCode || b.bookingCode || '',
@@ -921,15 +944,32 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          const dbBooking = await client.booking.findUnique({
-            where: { id: cleanId },
-            include: {
-              items: true,
-              payments: { orderBy: { createdAt: 'desc' } },
-              factoryOrders: { orderBy: { createdAt: 'desc' } },
-              auditLogs: { orderBy: { timestamp: 'desc' } },
-            },
-          });
+          let dbBooking: any = null;
+          try {
+            dbBooking = await client.booking.findUnique({
+              where: { id: cleanId },
+              include: {
+                items: true,
+                payments: { orderBy: { createdAt: 'desc' } },
+                factoryOrders: { orderBy: { createdAt: 'desc' } },
+                auditLogs: { orderBy: { timestamp: 'desc' } },
+              },
+            });
+          } catch (findErr: any) {
+            if (String(findErr?.message || '').includes('booking_items.')) {
+              ensureColumnsReady(client).catch(() => {});
+              dbBooking = await client.booking.findUnique({
+                where: { id: cleanId },
+                include: {
+                  payments: { orderBy: { createdAt: 'desc' } },
+                  factoryOrders: { orderBy: { createdAt: 'desc' } },
+                  auditLogs: { orderBy: { timestamp: 'desc' } },
+                },
+              });
+            } else {
+              throw findErr;
+            }
+          }
           if (dbBooking) {
             return {
               id: dbBooking.id,
@@ -957,7 +997,7 @@ export const db = {
               version: dbBooking.version,
               createdAt: dbBooking.createdAt.toISOString(),
               updatedAt: dbBooking.updatedAt.toISOString(),
-              items: dbBooking.items.map((it: any) => {
+              items: (dbBooking.items || []).map((it: any) => {
                 const sweetOpt = (it.orientalSweetOption || 'none') as OrientalSweetOption;
                 const sweetDist = sweetOpt === 'add_with_juice' ? 20 : sweetOpt === 'replace_juice' ? 15 : 0;
                 const sweetFact = sweetOpt === 'add_with_juice' ? 10 : sweetOpt === 'replace_juice' ? 5 : 0;
@@ -1265,39 +1305,53 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
+          // Pre-flight non-destructive column check: ensures orientalSweetOption exists before queries
+          try {
+            await ensureColumnsReady(client);
+          } catch {}
+
           await client.$transaction(async (tx) => {
             // A. Search for the real booking row inside PostgreSQL by ID OR bookingCode
-            let dbBooking = null;
+            let dbBooking: any = null;
+
+            const safeFindBooking = async (whereClause: any) => {
+              try {
+                return await tx.booking.findFirst({
+                  where: whereClause,
+                  include: { payments: true, items: true },
+                });
+              } catch (lookupErr: any) {
+                // If items lookup failed due to missing column in legacy database, fall back to payments only
+                if (String(lookupErr?.message || '').includes('booking_items.')) {
+                  return await tx.booking.findFirst({
+                    where: whereClause,
+                    include: { payments: true },
+                  });
+                }
+                throw lookupErr;
+              }
+            };
 
             // Direct primary key lookup if ID is provided and is not a bookingCode
             if (data.bookingId && !data.bookingId.startsWith('CLB-')) {
-              dbBooking = await tx.booking.findUnique({
-                where: { id: data.bookingId.trim() },
-                include: { payments: true, items: true },
-              });
+              dbBooking = await safeFindBooking({ id: data.bookingId.trim() });
             }
 
             // BookingCode lookup
             const targetCode = data.bookingCode?.trim() || (rawIdInput.startsWith('CLB-') ? rawIdInput : null);
             if (!dbBooking && targetCode) {
-              dbBooking = await tx.booking.findUnique({
-                where: { bookingCode: targetCode },
-                include: { payments: true, items: true },
-              });
+              dbBooking = await safeFindBooking({ bookingCode: targetCode });
             }
 
             // General OR fallback if not yet matched
             if (!dbBooking) {
-              dbBooking = await tx.booking.findFirst({
-                where: {
-                  OR: [
-                    { id: rawIdInput },
-                    { bookingCode: rawIdInput },
-                    ...(data.bookingCode ? [{ bookingCode: data.bookingCode.trim() }] : []),
-                    ...(data.bookingId ? [{ id: data.bookingId.trim() }, { bookingCode: data.bookingId.trim() }] : []),
-                  ],
-                },
-                include: { payments: true, items: true },
+              dbBooking = await safeFindBooking({
+                OR: [
+                  { id: rawIdInput },
+                  { bookingCode: rawIdInput },
+                  ...(data.bookingCode ? [{ bookingCode: data.bookingCode.trim() }] : []),
+                  ...(data.bookingId ? [{ id: data.bookingId.trim() }, { bookingCode: data.bookingId.trim() }] : []),
+                ],
               });
             }
 
@@ -1371,8 +1425,8 @@ export const db = {
             const authoritativeBookingCode = dbBooking.bookingCode;
 
             // E. Calculate active payments and balance inside transaction
-            const activePayments = (dbBooking.payments || []).filter(p => !p.notes || !p.notes.includes('[ملغاة'));
-            const currentPaid = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+            const activePayments = (dbBooking.payments || []).filter((p: any) => !p.notes || !p.notes.includes('[ملغاة'));
+            const currentPaid = activePayments.reduce((acc: number, p: any) => acc + Number(p.amount), 0);
             const currentRemaining = Math.max(0, dbBooking.totalDistributorPrice - currentPaid);
 
             if (numAmount > currentRemaining && !data.allowOverpayment) {
@@ -1381,7 +1435,7 @@ export const db = {
 
             // F. Duplicate prevention by receipt number inside transaction
             if (cleanReceipt) {
-              const duplicate = activePayments.find(p => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
+              const duplicate = activePayments.find((p: any) => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
               if (duplicate) {
                 throw new Error(`يوجد بالفعل دفعة مسجلة بنفس رقم الإيصال / المرجع (${cleanReceipt}) بقيمة ${duplicate.amount} ج لهذا الحجز.`);
               }
@@ -1407,21 +1461,43 @@ export const db = {
             });
 
             // H. Update Booking balances in the same transaction
-            const updatedBookingRow = await tx.booking.update({
-              where: { id: authoritativeBookingId },
-              data: {
-                paidAmount: newPaidAmount,
-                remainingAmount: newRemainingAmount,
-                version: { increment: 1 },
-                updatedAt: new Date(),
-              },
-              include: {
-                items: true,
-                payments: { orderBy: { createdAt: 'desc' } },
-                factoryOrders: true,
-                auditLogs: true,
-              },
-            });
+            let updatedBookingRow: any = null;
+            try {
+              updatedBookingRow = await tx.booking.update({
+                where: { id: authoritativeBookingId },
+                data: {
+                  paidAmount: newPaidAmount,
+                  remainingAmount: newRemainingAmount,
+                  version: { increment: 1 },
+                  updatedAt: new Date(),
+                },
+                include: {
+                  items: true,
+                  payments: { orderBy: { createdAt: 'desc' } },
+                  factoryOrders: true,
+                  auditLogs: true,
+                },
+              });
+            } catch (updateErr: any) {
+              if (String(updateErr?.message || '').includes('booking_items.')) {
+                updatedBookingRow = await tx.booking.update({
+                  where: { id: authoritativeBookingId },
+                  data: {
+                    paidAmount: newPaidAmount,
+                    remainingAmount: newRemainingAmount,
+                    version: { increment: 1 },
+                    updatedAt: new Date(),
+                  },
+                  include: {
+                    payments: { orderBy: { createdAt: 'desc' } },
+                    factoryOrders: true,
+                    auditLogs: true,
+                  },
+                });
+              } else {
+                throw updateErr;
+              }
+            }
 
             // I. Record AuditLog in the same transaction
             await tx.auditLog.create({
@@ -1474,7 +1550,7 @@ export const db = {
               version: updatedBookingRow.version,
               createdAt: updatedBookingRow.createdAt.toISOString(),
               updatedAt: updatedBookingRow.updatedAt.toISOString(),
-              items: (updatedBookingRow.items || []).map(it => ({
+              items: (updatedBookingRow.items || dbBooking?.items || []).map((it: any) => ({
                 mealId: it.mealId || it.mealCode,
                 mealCode: it.mealCode,
                 mealName: it.mealName,
@@ -1490,7 +1566,7 @@ export const db = {
                 unitFactoryPrice: it.unitFactoryPrice ?? undefined,
                 totalFactoryPrice: it.totalFactoryPrice ?? undefined,
               })),
-              payments: (updatedBookingRow.payments || []).map(p => ({
+              payments: (updatedBookingRow.payments || []).map((p: any) => ({
                 id: p.id,
                 bookingId: p.bookingId,
                 amount: p.amount,

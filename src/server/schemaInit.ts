@@ -78,6 +78,7 @@ export const TABLE_DDL_QUERIES: Record<string, string> = {
       "ingredients" TEXT NOT NULL,
       "quantity" INTEGER NOT NULL,
       "drinkOption" TEXT NOT NULL DEFAULT 'standard',
+      "orientalSweetOption" TEXT DEFAULT 'none',
       "baseDistributorPrice" DOUBLE PRECISION NOT NULL,
       "unitDistributorPrice" DOUBLE PRECISION NOT NULL,
       "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
@@ -165,6 +166,51 @@ export const TABLE_DDL_QUERIES: Record<string, string> = {
   `,
 };
 
+export const SCHEMA_COLUMN_MIGRATIONS = [
+  // 1. booking_items: Oriental sweet option and prices (critical for CLB-2026-5131 & all bookings)
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "orientalSweetOption" TEXT DEFAULT \'none\';',
+  'UPDATE "booking_items" SET "orientalSweetOption" = \'none\' WHERE "orientalSweetOption" IS NULL;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "drinkOption" TEXT DEFAULT \'standard\';',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "mealId" TEXT;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "baseFactoryPrice" DOUBLE PRECISION;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "unitFactoryPrice" DOUBLE PRECISION;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "totalFactoryPrice" DOUBLE PRECISION;',
+
+  // 2. bookings columns
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "customerWhatsapp" TEXT;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "preferredContact" TEXT NOT NULL DEFAULT \'whatsapp\';',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "statusNotes" TEXT;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "totalFactoryPrice" DOUBLE PRECISION;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "profitMargin" DOUBLE PRECISION;',
+
+  // 3. payments columns
+  'ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "notes" TEXT;',
+  'ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "receiptNumber" TEXT;',
+
+  // 4. factory_orders columns
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "packagingNotes" TEXT;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "factoryCostTotal" DOUBLE PRECISION DEFAULT 0;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paidAmount" DOUBLE PRECISION DEFAULT 0;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "remainingAmount" DOUBLE PRECISION DEFAULT 0;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT \'UNPAID\';',
+
+  // 5. factory_payments columns
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "notes" TEXT;',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "receiptNumber" TEXT;',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "recordedBy" TEXT DEFAULT \'الإدارة\';',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "status" TEXT DEFAULT \'VALID\';',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "cancelledBy" TEXT;',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "cancelledAt" TIMESTAMP(3);',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "cancelReason" TEXT;',
+
+  // 6. meals columns
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "hasJuice" BOOLEAN NOT NULL DEFAULT true;',
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN NOT NULL DEFAULT true;',
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "image" TEXT;',
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "version" INTEGER NOT NULL DEFAULT 1;',
+];
+
 export async function checkTablesStatus(client: PrismaClient): Promise<{
   allReady: boolean;
   existingTables: string[];
@@ -199,6 +245,7 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
   success: boolean;
   created: string[];
   tablesFound: string[];
+  columnsEnsured?: boolean;
   rlsEnforced?: boolean;
   errors: string[];
 }> {
@@ -265,10 +312,17 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
     }
   }
 
-  // Ensure isTest column exists on bookings table
-  try {
-    await client.$executeRawUnsafe('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
-  } catch {}
+  // Ensure all required columns exist safely across all tables (non-destructive)
+  let columnsEnsured = true;
+  for (const alterQuery of SCHEMA_COLUMN_MIGRATIONS) {
+    try {
+      await client.$executeRawUnsafe(alterQuery);
+    } catch (colErr: any) {
+      logServerError(colErr, 'SchemaInit.ColumnMigration');
+      columnsEnsured = false;
+      errors.push(`Column migration: ${colErr?.message?.slice(0, 100)}`);
+    }
+  }
 
   // Seed meals if meals table exists and is empty
   try {
@@ -320,9 +374,32 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
     success: postCheck.allReady,
     created,
     tablesFound: postCheck.existingTables,
+    columnsEnsured,
     rlsEnforced,
     errors,
   };
+}
+
+let columnsMigrationRun = false;
+
+/**
+ * Runs all non-destructive column migrations once per process.
+ * Guarantees that columns like orientalSweetOption exist before executing queries.
+ */
+export async function ensureColumnsReady(client: PrismaClient): Promise<{ applied: number; errors: string[] }> {
+  if (columnsMigrationRun) return { applied: 0, errors: [] };
+  let applied = 0;
+  const errors: string[] = [];
+  for (const alterQuery of SCHEMA_COLUMN_MIGRATIONS) {
+    try {
+      await client.$executeRawUnsafe(alterQuery);
+      applied++;
+    } catch (colErr: any) {
+      errors.push(colErr?.message || 'Error');
+    }
+  }
+  columnsMigrationRun = true;
+  return { applied, errors };
 }
 
 export const SUPABASE_RLS_QUERIES = [

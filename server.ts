@@ -50,6 +50,22 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Celebre Catering Server] Listening on http://0.0.0.0:${PORT}`);
+
+    // Non-blocking schema and column migration check on boot
+    if (process.env.DATABASE_URL) {
+      import('./src/lib/prisma').then(({ getPrismaClient }) => {
+        const client = getPrismaClient();
+        if (client) {
+          import('./src/server/schemaInit').then(({ ensureSchemaReady }) => {
+            ensureSchemaReady(client).then(res => {
+              console.log('[SchemaInit] Boot schema check completed:', { success: res.success, tables: res.tablesFound.length, columnsEnsured: res.columnsEnsured });
+            }).catch(err => {
+              console.warn('[SchemaInit] Boot schema check warning:', err?.message || err);
+            });
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
   });
 }
 
