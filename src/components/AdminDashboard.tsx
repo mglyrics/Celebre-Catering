@@ -1145,6 +1145,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       setSelectedBooking(data.booking);
+      setBookings(prev => prev.map(b => b.id === data.booking.id ? data.booking : b));
       setIsPaymentModalOpen(false);
       setPaymentAmount('');
       setPaymentNotes('');

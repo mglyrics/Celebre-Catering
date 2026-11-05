@@ -773,8 +773,8 @@ apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_
     }
 
     const result = await db.addPayment({
-      bookingId: targetId,
-      bookingCode,
+      bookingId: bookingId || targetId,
+      bookingCode: bookingCode || (targetId.startsWith('CLB-') ? targetId : undefined),
       amount: Number(amount),
       method: method || 'cash',
       date,
@@ -785,7 +785,8 @@ apiRouter.post('/admin/bookings/:id/payments', requireAuth, requireRole(['super_
 
     res.json({ success: true, payment: result.payment, booking: result.booking });
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    const sanitized = logServerError(err, 'POST /admin/bookings/:id/payments');
+    res.status(400).json({ error: sanitized.errorMessage || err.message || 'حدث خطأ أثناء تسجيل الدفعة' });
   }
 });
 

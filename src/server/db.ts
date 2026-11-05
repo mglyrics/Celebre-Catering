@@ -1245,104 +1245,263 @@ export const db = {
       throw new Error('قيمة الدفعة يجب أن تكون أكبر من الصفر');
     }
 
-    const cleanId = (data.bookingId || data.bookingCode || '').trim();
-    if (!cleanId) {
+    const rawIdInput = (data.bookingId || data.bookingCode || '').trim();
+    if (!rawIdInput) {
       throw new Error('يرجى تحديد معرّف الحجز أو كود الحجز لتسجيل الدفعة');
     }
 
-    // 1. Authoritative lookup: Search in PostgreSQL first, then memoryDB
-    const booking = await this.getBookingById(cleanId);
-    if (!booking) {
-      throw new Error(`الحجز غير موجود (المعرّف المطلوب: "${cleanId}"). يرجى التأكد من صحة رقم أو كود الحجز.`);
-    }
-
-    // 2. Calculate active valid payments
-    const validPayments = (booking.payments || []).filter(p => p.status !== 'CANCELLED');
-    const currentPaid = validPayments.reduce((acc, p) => acc + Number(p.amount), 0);
-    const currentRemaining = Math.max(0, booking.totalDistributorPrice - currentPaid);
-
-    // 3. Validation: prevent overpayment without administrative override
-    if (numAmount > currentRemaining && !data.allowOverpayment) {
-      throw new Error(`قيمة الدفعة (${numAmount.toLocaleString('ar-EG')} ج) تتجاوز المبلغ المتبقي على العميل (${currentRemaining.toLocaleString('ar-EG')} ج). إذا كانت دفعة تسوية خاصة أو زيادة مقصودة، يرجى تفعيل خيار "سماح بمبلغ تسوية زائد".`);
-    }
-
-    // 4. Duplicate prevention (idempotency check by receipt number if provided)
     const cleanReceipt = (data.receiptNumber || '').trim();
-    if (cleanReceipt) {
-      const duplicateReceipt = validPayments.find(p => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
-      if (duplicateReceipt) {
-        throw new Error(`يوجد بالفعل دفعة مسجلة بنفس رقم الإيصال / المرجع (${cleanReceipt}) بقيمة ${duplicateReceipt.amount} ج لهذا الحجز.`);
-      }
-    }
-
     const paymentId = `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const paymentDate = data.date || new Date().toISOString().split('T')[0];
     const paymentNotes = (data.notes || '').trim();
-    const newPaidAmount = currentPaid + numAmount;
-    const newRemainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
     const now = new Date().toISOString();
     const auditLogId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const auditDetails = `تم تسجيل دفعة بقيمة ${numAmount} ج.م بطريقة (${data.method}) للحجز ${booking.bookingCode}. المسدد الجديد: ${newPaidAmount} ج، المتبقي: ${newRemainingAmount} ج. مرجع: ${cleanReceipt || 'لا يوجد'}.`;
 
-    const payment: PaymentRecord = {
-      id: paymentId,
-      bookingId: booking.id, // Primary key of Booking
-      amount: numAmount,
-      method: data.method,
-      date: paymentDate,
-      notes: paymentNotes,
-      receiptNumber: cleanReceipt,
-      recordedBy: performedBy,
-      status: 'VALID',
-      createdAt: now,
-    };
+    let finalPayment: PaymentRecord | null = null;
+    let finalBooking: Booking | null = null;
 
-    const authoritativeBookingCode = (booking.bookingCode || '').trim();
-    if (!authoritativeBookingCode) {
-      throw new Error(`تعذر العثور على كود الحجز المعتمد (bookingCode) للحجز ${booking.id} لتوثيق سجل التدقيق`);
-    }
-
-    // 5. Execute atomic transaction in PostgreSQL if databaseUrl is configured
+    // 1. Transactional Execution in PostgreSQL (Authoritative)
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
           await client.$transaction(async (tx) => {
-            // A. Create Payment row - explicitly bound to booking.id primary key
+            // A. Search for the real booking row inside PostgreSQL by ID OR bookingCode
+            let dbBooking = null;
+
+            // Direct primary key lookup if ID is provided and is not a bookingCode
+            if (data.bookingId && !data.bookingId.startsWith('CLB-')) {
+              dbBooking = await tx.booking.findUnique({
+                where: { id: data.bookingId.trim() },
+                include: { payments: true, items: true },
+              });
+            }
+
+            // BookingCode lookup
+            const targetCode = data.bookingCode?.trim() || (rawIdInput.startsWith('CLB-') ? rawIdInput : null);
+            if (!dbBooking && targetCode) {
+              dbBooking = await tx.booking.findUnique({
+                where: { bookingCode: targetCode },
+                include: { payments: true, items: true },
+              });
+            }
+
+            // General OR fallback if not yet matched
+            if (!dbBooking) {
+              dbBooking = await tx.booking.findFirst({
+                where: {
+                  OR: [
+                    { id: rawIdInput },
+                    { bookingCode: rawIdInput },
+                    ...(data.bookingCode ? [{ bookingCode: data.bookingCode.trim() }] : []),
+                    ...(data.bookingId ? [{ id: data.bookingId.trim() }, { bookingCode: data.bookingId.trim() }] : []),
+                  ],
+                },
+                include: { payments: true, items: true },
+              });
+            }
+
+            // B. If booking not in PostgreSQL, check local persistent storage and auto-sync parent record
+            if (!dbBooking) {
+              memoryDB = loadLocalDB();
+              const memBooking = memoryDB.bookings.find(b => 
+                b.id === rawIdInput || 
+                b.bookingCode === rawIdInput ||
+                (data.bookingCode && b.bookingCode === data.bookingCode.trim()) ||
+                (data.bookingId && (b.id === data.bookingId.trim() || b.bookingCode === data.bookingId.trim()))
+              );
+
+              if (memBooking) {
+                dbBooking = await tx.booking.create({
+                  data: {
+                    id: memBooking.id,
+                    bookingCode: memBooking.bookingCode,
+                    securityCode: memBooking.securityCode || '0000',
+                    customerName: memBooking.customerName,
+                    customerPhone: memBooking.customerPhone,
+                    customerWhatsapp: memBooking.customerWhatsapp || memBooking.customerPhone,
+                    preferredContact: memBooking.preferredContact || 'whatsapp',
+                    eventName: memBooking.eventName,
+                    eventDate: memBooking.eventDate,
+                    deliveryTime: memBooking.deliveryTime,
+                    deliveryGovernorate: memBooking.deliveryGovernorate,
+                    deliveryAddress: memBooking.deliveryAddress,
+                    notes: memBooking.notes || '',
+                    totalMealsCount: memBooking.totalMealsCount,
+                    totalDistributorPrice: memBooking.totalDistributorPrice,
+                    totalFactoryPrice: memBooking.totalFactoryPrice,
+                    profitMargin: memBooking.profitMargin,
+                    paidAmount: memBooking.paidAmount || 0,
+                    remainingAmount: memBooking.remainingAmount,
+                    status: memBooking.status || 'INITIAL',
+                    statusNotes: memBooking.statusNotes,
+                    isTest: memBooking.isTest ?? false,
+                    version: memBooking.version || 1,
+                    items: {
+                      create: (memBooking.items || []).map(it => ({
+                        mealId: it.mealId || it.mealCode,
+                        mealCode: it.mealCode,
+                        mealName: it.mealName,
+                        category: it.category || 'mix_box',
+                        ingredients: it.ingredients || '',
+                        quantity: it.quantity,
+                        drinkOption: it.drinkOption || 'standard',
+                        orientalSweetOption: (it as any).orientalSweetOption || 'none',
+                        baseDistributorPrice: it.baseDistributorPrice,
+                        unitDistributorPrice: it.unitDistributorPrice,
+                        totalDistributorPrice: it.totalDistributorPrice,
+                        baseFactoryPrice: it.baseFactoryPrice,
+                        unitFactoryPrice: it.unitFactoryPrice,
+                        totalFactoryPrice: it.totalFactoryPrice,
+                      })),
+                    },
+                  },
+                  include: { payments: true, items: true },
+                });
+              }
+            }
+
+            // C. Validate booking existence in database
+            if (!dbBooking) {
+              throw new Error(`تعذر العثور على سجل الحجز في قاعدة البيانات (المعرّف أو الكود: "${rawIdInput}"). يرجى التأكد من صحة بيانات الحجز.`);
+            }
+
+            // D. Extract the true internal primary key from the PostgreSQL row
+            const authoritativeBookingId = dbBooking.id;
+            const authoritativeBookingCode = dbBooking.bookingCode;
+
+            // E. Calculate active payments and balance inside transaction
+            const activePayments = (dbBooking.payments || []).filter(p => !p.notes || !p.notes.includes('[ملغاة'));
+            const currentPaid = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+            const currentRemaining = Math.max(0, dbBooking.totalDistributorPrice - currentPaid);
+
+            if (numAmount > currentRemaining && !data.allowOverpayment) {
+              throw new Error(`قيمة الدفعة (${numAmount.toLocaleString('ar-EG')} ج) تتجاوز المبلغ المتبقي على العميل (${currentRemaining.toLocaleString('ar-EG')} ج). إذا كانت دفعة تسوية خاصة أو زيادة مقصودة، يرجى تفعيل خيار "سماح بمبلغ تسوية زائد".`);
+            }
+
+            // F. Duplicate prevention by receipt number inside transaction
+            if (cleanReceipt) {
+              const duplicate = activePayments.find(p => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
+              if (duplicate) {
+                throw new Error(`يوجد بالفعل دفعة مسجلة بنفس رقم الإيصال / المرجع (${cleanReceipt}) بقيمة ${duplicate.amount} ج لهذا الحجز.`);
+              }
+            }
+
+            const newPaidAmount = currentPaid + numAmount;
+            const newRemainingAmount = Math.max(0, dbBooking.totalDistributorPrice - newPaidAmount);
+            const auditDetails = `تم تسجيل دفعة بقيمة ${numAmount} ج.م بطريقة (${data.method}) للحجز ${authoritativeBookingCode}. المسدد الجديد: ${newPaidAmount} ج، المتبقي: ${newRemainingAmount} ج. مرجع: ${cleanReceipt || 'لا يوجد'}.`;
+
+            // G. Create Payment row using verified bookingId and Prisma relation connection
             await tx.payment.create({
               data: {
-                id: payment.id,
-                bookingId: booking.id, // Foreign key referencing bookings(id)
-                amount: payment.amount,
-                method: payment.method,
-                date: payment.date,
-                notes: `[سجلت بواسطة: ${performedBy}] ${payment.notes}`.trim(),
-                receiptNumber: payment.receiptNumber || null,
+                id: paymentId,
+                amount: numAmount,
+                method: data.method,
+                date: paymentDate,
+                notes: `[سجلت بواسطة: ${performedBy}] ${paymentNotes}`.trim(),
+                receiptNumber: cleanReceipt || null,
+                booking: {
+                  connect: { id: authoritativeBookingId },
+                },
               },
             });
 
-            // B. Update Booking row - only financial balances (status and prices stay strictly intact)
-            await tx.booking.update({
-              where: { id: booking.id },
+            // H. Update Booking balances in the same transaction
+            const updatedBookingRow = await tx.booking.update({
+              where: { id: authoritativeBookingId },
               data: {
                 paidAmount: newPaidAmount,
                 remainingAmount: newRemainingAmount,
                 version: { increment: 1 },
                 updatedAt: new Date(),
               },
+              include: {
+                items: true,
+                payments: { orderBy: { createdAt: 'desc' } },
+                factoryOrders: true,
+                auditLogs: true,
+              },
             });
 
-            // C. Create AuditLog row with authoritative bookingCode
+            // I. Record AuditLog in the same transaction
             await tx.auditLog.create({
               data: {
                 id: auditLogId,
-                bookingId: booking.id,
+                bookingId: authoritativeBookingId,
                 bookingCode: authoritativeBookingCode,
                 action: 'تسجيل دفعة مالية',
                 performedBy,
                 details: auditDetails,
               },
             });
+
+            finalPayment = {
+              id: paymentId,
+              bookingId: authoritativeBookingId,
+              amount: numAmount,
+              method: data.method,
+              date: paymentDate,
+              notes: paymentNotes,
+              receiptNumber: cleanReceipt,
+              recordedBy: performedBy,
+              status: 'VALID',
+              createdAt: now,
+            };
+
+            finalBooking = {
+              id: updatedBookingRow.id,
+              bookingCode: updatedBookingRow.bookingCode,
+              securityCode: updatedBookingRow.securityCode,
+              customerName: updatedBookingRow.customerName,
+              customerPhone: updatedBookingRow.customerPhone,
+              customerWhatsapp: updatedBookingRow.customerWhatsapp || undefined,
+              preferredContact: updatedBookingRow.preferredContact as any,
+              eventName: updatedBookingRow.eventName,
+              eventDate: updatedBookingRow.eventDate,
+              deliveryTime: updatedBookingRow.deliveryTime,
+              deliveryGovernorate: updatedBookingRow.deliveryGovernorate,
+              deliveryAddress: updatedBookingRow.deliveryAddress,
+              notes: updatedBookingRow.notes || '',
+              totalMealsCount: updatedBookingRow.totalMealsCount,
+              totalDistributorPrice: updatedBookingRow.totalDistributorPrice,
+              totalFactoryPrice: updatedBookingRow.totalFactoryPrice ?? undefined,
+              profitMargin: updatedBookingRow.profitMargin ?? undefined,
+              paidAmount: updatedBookingRow.paidAmount,
+              remainingAmount: updatedBookingRow.remainingAmount,
+              status: updatedBookingRow.status as any,
+              statusNotes: updatedBookingRow.statusNotes || '',
+              isTest: updatedBookingRow.isTest,
+              version: updatedBookingRow.version,
+              createdAt: updatedBookingRow.createdAt.toISOString(),
+              updatedAt: updatedBookingRow.updatedAt.toISOString(),
+              items: (updatedBookingRow.items || []).map(it => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category as any,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: (it.drinkOption || 'standard') as any,
+                orientalSweetOption: (it.orientalSweetOption || 'none') as any,
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice ?? undefined,
+                unitFactoryPrice: it.unitFactoryPrice ?? undefined,
+                totalFactoryPrice: it.totalFactoryPrice ?? undefined,
+              })),
+              payments: (updatedBookingRow.payments || []).map(p => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method as any,
+                date: p.date,
+                notes: p.notes || '',
+                receiptNumber: p.receiptNumber || '',
+                status: (p.notes && p.notes.includes('[ملغاة')) ? 'CANCELLED' : 'VALID',
+                createdAt: p.createdAt.toISOString(),
+              })),
+            };
           });
         }
       } catch (err: any) {
@@ -1351,42 +1510,98 @@ export const db = {
       }
     }
 
-    // 6. Update local memoryDB cache (for fallback / local development)
+    // 2. MemoryDB / Local Storage Synchronization & Standalone Handling
     memoryDB = loadLocalDB();
-    memoryDB.payments.unshift(payment);
+    const memBooking = memoryDB.bookings.find(b => 
+      b.id === rawIdInput || 
+      b.bookingCode === rawIdInput ||
+      (data.bookingCode && b.bookingCode === data.bookingCode.trim()) ||
+      (data.bookingId && (b.id === data.bookingId.trim() || b.bookingCode === data.bookingId.trim()))
+    );
 
-    const memBookingIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
-    if (memBookingIdx !== -1) {
-      memoryDB.bookings[memBookingIdx].paidAmount = newPaidAmount;
-      memoryDB.bookings[memBookingIdx].remainingAmount = newRemainingAmount;
-      memoryDB.bookings[memBookingIdx].version += 1;
-      memoryDB.bookings[memBookingIdx].updatedAt = now;
-    } else {
-      throw new Error(`تعذر العثور على سجل الحجز بالمعرف الفريد ${booking.id} في قاعدة البيانات لتحديث الرصيد`);
+    if (!finalBooking && !memBooking) {
+      throw new Error(`الحجز غير موجود (المعرّف المطلوب: "${rawIdInput}"). يرجى التأكد من صحة رقم أو كود الحجز.`);
     }
 
-    memoryDB.auditLogs.unshift({
-      id: auditLogId,
-      bookingId: booking.id,
-      bookingCode: authoritativeBookingCode,
-      action: 'تسجيل دفعة مالية',
-      performedBy,
-      details: auditDetails,
-      timestamp: now,
-    });
+    const targetMemBooking = memBooking || finalBooking!;
+    const authoritativeId = targetMemBooking.id;
+    const authoritativeCode = targetMemBooking.bookingCode;
 
-    saveLocalDB(memoryDB);
+    if (!finalPayment) {
+      const existingPayments = (memoryDB.payments || []).filter(p => 
+        (p.bookingId === authoritativeId || p.bookingId === authoritativeCode) && 
+        p.status !== 'CANCELLED' && 
+        (!p.notes || !p.notes.includes('[ملغاة'))
+      );
+      const currentPaid = existingPayments.reduce((acc, p) => acc + Number(p.amount), 0);
+      const currentRemaining = Math.max(0, targetMemBooking.totalDistributorPrice - currentPaid);
 
-    // 7. Return latest booking state
-    const refreshedBooking = await this.getBookingById(booking.id);
-    return {
-      payment,
-      booking: refreshedBooking || {
-        ...booking,
+      if (numAmount > currentRemaining && !data.allowOverpayment) {
+        throw new Error(`قيمة الدفعة (${numAmount.toLocaleString('ar-EG')} ج) تتجاوز المبلغ المتبقي على العميل (${currentRemaining.toLocaleString('ar-EG')} ج). إذا كانت دفعة تسوية خاصة أو زيادة مقصودة، يرجى تفعيل خيار "سماح بمبلغ تسوية زائد".`);
+      }
+
+      if (cleanReceipt) {
+        const duplicate = existingPayments.find(p => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
+        if (duplicate) {
+          throw new Error(`يوجد بالفعل دفعة مسجلة بنفس رقم الإيصال / المرجع (${cleanReceipt}) بقيمة ${duplicate.amount} ج لهذا الحجز.`);
+        }
+      }
+
+      const newPaidAmount = currentPaid + numAmount;
+      const newRemainingAmount = Math.max(0, targetMemBooking.totalDistributorPrice - newPaidAmount);
+
+      finalPayment = {
+        id: paymentId,
+        bookingId: authoritativeId,
+        amount: numAmount,
+        method: data.method,
+        date: paymentDate,
+        notes: paymentNotes,
+        receiptNumber: cleanReceipt,
+        recordedBy: performedBy,
+        status: 'VALID',
+        createdAt: now,
+      };
+
+      finalBooking = {
+        ...targetMemBooking,
         paidAmount: newPaidAmount,
         remainingAmount: newRemainingAmount,
-        version: booking.version + 1,
-      },
+        version: targetMemBooking.version + 1,
+        updatedAt: now,
+        payments: [finalPayment, ...existingPayments],
+      };
+    }
+
+    if (!finalBooking || !finalPayment) {
+      throw new Error('فشل إتمام تسجيل الدفعة في قاعدة البيانات أو التخزين الدائم');
+    }
+
+    // Keep memoryDB aligned
+    const memBookingIdx = memoryDB.bookings.findIndex(b => b.id === authoritativeId || b.bookingCode === authoritativeCode);
+    if (memBookingIdx !== -1) {
+      memoryDB.bookings[memBookingIdx].paidAmount = finalBooking.paidAmount;
+      memoryDB.bookings[memBookingIdx].remainingAmount = finalBooking.remainingAmount;
+      memoryDB.bookings[memBookingIdx].version = finalBooking.version;
+      memoryDB.bookings[memBookingIdx].updatedAt = now;
+    }
+    if (!memoryDB.payments.some(p => p.id === finalPayment!.id)) {
+      memoryDB.payments.unshift(finalPayment);
+    }
+    memoryDB.auditLogs.unshift({
+      id: auditLogId,
+      bookingId: authoritativeId,
+      bookingCode: authoritativeCode,
+      action: 'تسجيل دفعة مالية',
+      performedBy,
+      details: `تم تسجيل دفعة بقيمة ${numAmount} ج.م بطريقة (${data.method}) للحجز ${authoritativeCode}. المسدد الجديد: ${finalBooking.paidAmount} ج، المتبقي: ${finalBooking.remainingAmount} ج. مرجع: ${cleanReceipt || 'لا يوجد'}.`,
+      timestamp: now,
+    });
+    saveLocalDB(memoryDB);
+
+    return {
+      payment: finalPayment,
+      booking: finalBooking,
     };
   },
 
