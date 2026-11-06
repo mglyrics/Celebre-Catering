@@ -17,8 +17,10 @@ import { INITIAL_MEALS, CELEBRE_CONFIG, ORIENTAL_SWEET_CONFIG } from '../data/de
  */
 export const FACTORY_PEPSI_ACCOUNTING = {
   juiceCostDeduction: 5,
+  packageCostDeduction: 1, // 1 EGP package cost deduction
+  totalJuiceDeduction: 6, // 5 + 1 = 6 EGP deduction
   pepsiCostAddition: 10,
-  netAdjustment: 5, // -5 (juice) + 10 (can) = +5 EGP net
+  netAdjustment: 4, // -5 (juice) - 1 (package) + 10 (can) = +4 EGP net
 };
 
 const IS_SERVERLESS = Boolean(
@@ -451,12 +453,12 @@ export const db = {
       // If juice is replaced by oriental sweet, juice is excluded, so no extra drink modifications apply!
       if (sweetOpt !== 'replace_juice' && meal.hasJuice) {
         if (item.drinkOption === 'no_juice') {
-          distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
-          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5
+          distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 for customer
+          factoryDrinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction; // -5 juice - 1 package = -6 EGP for factory
         } else if (item.drinkOption === 'pepsi') {
           distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10 for customer
-          // Independent Factory Pepsi Formula: -5 (juice) + 10 (can) = +5 EGP net
-          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
+          // Approved Factory Pepsi Formula: -5 (juice) - 1 (package) + 10 (can) = +4 EGP net
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP
         }
       }
 
@@ -1973,11 +1975,11 @@ export const db = {
         specialInstructions = 'استبدال العصير بقطعة شرقي حلويات';
       } else if (hasJuice) {
         if (item.drinkOption === 'pepsi') {
-          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
+          factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP (-5 juice -1 package +10 can)
           drinkLabel = 'استبدال العصير بكانز بيبسي';
           specialInstructions = 'استبدال العصير بكانز بيبسي';
         } else if (item.drinkOption === 'no_juice') {
-          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 EGP
+          factoryDrinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction; // -6 EGP (-5 juice -1 package)
           drinkLabel = 'بدون عصير';
           specialInstructions = 'بدون عصير';
         } else {
@@ -2032,7 +2034,11 @@ export const db = {
     };
   },
 
-  async createFactoryOrder(bookingId: string, performedBy = 'الإدارة', options?: { forceNewVersion?: boolean }): Promise<FactoryOrder> {
+  async createFactoryOrder(
+    bookingId: string, 
+    performedBy = 'الإدارة', 
+    options?: { forceNewVersion?: boolean; targetVersion?: number; preserveBookingStatus?: boolean; customAuditDetails?: string }
+  ): Promise<FactoryOrder> {
     const cleanId = (bookingId || '').trim();
     if (!cleanId) {
       throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId) لإصدار أمر المصنع');
@@ -2058,7 +2064,7 @@ export const db = {
       throw new Error(`يوجد بالفعل أمر مصنع صادر لهذا الحجز (${latest.orderNumber} - الإصدار v${latest.version}). إذا تم تعديل الحجز وتريد إصدار نسخة عمل جديدة للمصنع، يرجى تأكيد خيار "إصدار نسخة عمل جديدة".`);
     }
 
-    const version = uniqueExisting.length + 1;
+    const version = options?.targetVersion !== undefined ? options.targetVersion : (uniqueExisting.length + 1);
     memoryDB.factoryOrderCounter = Math.max(memoryDB.factoryOrderCounter || 100, 100);
     do {
       memoryDB.factoryOrderCounter += 1;
@@ -2118,15 +2124,17 @@ export const db = {
             },
           });
 
-          // Transition booking status in PostgreSQL to IN_PRODUCTION
-          await client.booking.update({
-            where: { id: booking.id },
-            data: {
-              status: 'IN_PRODUCTION',
-              statusNotes: `تم تحويل الحجز للمصنع وإصدار أمر التشغيل ${orderNumber} (الإصدار v${version})`,
-              updatedAt: new Date(),
-            },
-          });
+          if (!options?.preserveBookingStatus) {
+            // Transition booking status in PostgreSQL to IN_PRODUCTION
+            await client.booking.update({
+              where: { id: booking.id },
+              data: {
+                status: 'IN_PRODUCTION',
+                statusNotes: `تم تحويل الحجز للمصنع وإصدار أمر التشغيل ${orderNumber} (الإصدار v${version})`,
+                updatedAt: new Date(),
+              },
+            });
+          }
         }
       } catch (err: any) {
         logServerError(err, 'db.createFactoryOrder.prisma');
@@ -2135,7 +2143,7 @@ export const db = {
 
     // Update memory booking
     const memBooking = memoryDB.bookings.find(b => b.id === booking.id);
-    if (memBooking) {
+    if (memBooking && !options?.preserveBookingStatus) {
       memBooking.status = 'IN_PRODUCTION';
       memBooking.statusNotes = `تم إصدار أمر تشغيل المصنع رقم ${orderNumber} (الإصدار v${version})`;
       memBooking.updatedAt = new Date().toISOString();
@@ -2146,15 +2154,19 @@ export const db = {
     );
     const pepsiQty = pepsiAdjustedItems.reduce((acc, it) => acc + it.quantity, 0);
     const pepsiAuditNote = pepsiQty > 0
-      ? ` [تم تطبيق معادلة استبدال العصير بالبيبسي للمصنع: -5 ج عصير +10 ج كانز = +5 ج على ${pepsiQty} وجبة]`
+      ? ` [تم تطبيق معادلة استبدال العصير بالبيبسي للمصنع: -5 ج عصير -1 ج عبوة +10 ج كانز = +4 ج على ${pepsiQty} وجبة]`
       : '';
+
+    const auditText = options?.customAuditDetails 
+      ? options.customAuditDetails 
+      : `تم إصدار أمر تشغيل المصنع ${orderNumber} (الإصدار v${version}) بإجمالي ${booking.totalMealsCount} وجبة وتكلفة مصنع ${preview.totalFactoryCost} ج (خالٍ تماماً من هوامش ربح الموزع).${pepsiAuditNote}`;
 
     this.addAuditLog({
       bookingId: booking.id,
       bookingCode: booking.bookingCode,
       action: 'إصدار أمر تشغيل المصنع',
       performedBy,
-      details: `تم إصدار أمر تشغيل المصنع ${orderNumber} (الإصدار v${version}) بإجمالي ${booking.totalMealsCount} وجبة وتكلفة مصنع ${preview.totalFactoryCost} ج (خالٍ تماماً من هوامش ربح الموزع).${pepsiAuditNote}`,
+      details: auditText,
     });
 
     saveLocalDB(memoryDB);
@@ -2875,11 +2887,11 @@ export const db = {
           specialInstructions = 'استبدال العصير بقطعة شرقي حلويات';
         } else if (hasJuice) {
           if (it.drinkOption === 'pepsi') {
-            drinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 EGP
+            drinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 EGP (-5 juice -1 package +10 can)
             drinkLabel = 'استبدال العصير بكانز بيبسي';
             specialInstructions = 'استبدال العصير بكانز بيبسي';
           } else if (it.drinkOption === 'no_juice') {
-            drinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 EGP
+            drinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction; // -6 EGP (-5 juice -1 package)
             drinkLabel = 'بدون عصير';
             specialInstructions = 'بدون عصير';
           }
@@ -3764,11 +3776,11 @@ export const db = {
 
         if (sweetOpt !== 'replace_juice' && meal.hasJuice) {
           if (item.drinkOption === 'no_juice') {
-            distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
-            factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+            distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount; // -5 for customer
+            factoryDrinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction; // -6 for factory (-5 juice -1 package)
           } else if (item.drinkOption === 'pepsi') {
             distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra; // +10 for customer
-            factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +5 for factory
+            factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment; // +4 for factory (-5 juice -1 package +10 can)
           }
         }
 

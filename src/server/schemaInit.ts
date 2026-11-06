@@ -353,6 +353,14 @@ export async function ensureSchemaReady(client: PrismaClient): Promise<{
           ingredients: 'قطعة جاتوة مغلفة + باتية + عصير بخيرة + شوكة ومنديل'
         },
       }).catch(() => {});
+
+      // Ensure Sale-05 base factory price is synchronized to 56 EGP in PostgreSQL
+      await client.meal.updateMany({
+        where: { code: 'Sale-05' },
+        data: { 
+          factoryPrice: 56
+        },
+      }).catch(() => {});
     }
   } catch {}
 

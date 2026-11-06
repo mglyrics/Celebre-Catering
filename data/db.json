@@ -62,13 +62,13 @@
       "category": "mix_box",
       "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل",
       "distributorPrice": 80,
-      "factoryPrice": 53,
+      "factoryPrice": 56,
       "hasJuice": true,
       "isActive": true,
       "image": "/assets/aistudio/________________7b046020.jpg",
       "id": "meal-5",
-      "version": 1,
-      "updatedAt": "2026-10-23T10:00:45.715Z"
+      "version": 2,
+      "updatedAt": "2026-11-06T12:06:36.938Z"
     },
     {
       "code": "Sale-06",
@@ -255,6 +255,104 @@
   ],
   "bookings": [
     {
+      "id": "bk-1793966826579-585",
+      "bookingCode": "CLB-2026-8924",
+      "securityCode": "8780",
+      "customerName": "[اختبار برمجي] فحص حذف العصير",
+      "customerPhone": "01011113333",
+      "customerWhatsapp": "01011113333",
+      "preferredContact": "whatsapp",
+      "eventName": "اختبار حذف العصير",
+      "eventDate": "2026-11-25",
+      "deliveryTime": "16:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "معمل الاختبارات",
+      "notes": "",
+      "items": [
+        {
+          "mealId": "meal-5",
+          "mealCode": "Sale-05",
+          "mealName": "ميكس بوكس 05 - جاتوه وكفتة وبانية فرنساوي وسط",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 50,
+          "drinkOption": "no_juice",
+          "orientalSweetOption": "none",
+          "orientalSweetLabel": "بدون قطعة شرقي",
+          "orientalSweetDistributorAdjustment": 0,
+          "baseDistributorPrice": 80,
+          "unitDistributorPrice": 75,
+          "totalDistributorPrice": 3750,
+          "baseFactoryPrice": 56,
+          "factoryDrinkAdjustment": -6,
+          "factoryOrientalSweetAdjustment": 0,
+          "unitFactoryPrice": 50,
+          "totalFactoryPrice": 2500
+        }
+      ],
+      "totalMealsCount": 50,
+      "totalDistributorPrice": 3750,
+      "totalFactoryPrice": 2500,
+      "profitMargin": 1250,
+      "paidAmount": 0,
+      "remainingAmount": 3750,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "isTest": true,
+      "version": 1,
+      "createdAt": "2026-11-06T12:07:06.579Z",
+      "updatedAt": "2026-11-06T12:07:06.579Z"
+    },
+    {
+      "id": "bk-1793966826561-101",
+      "bookingCode": "CLB-2026-4009",
+      "securityCode": "9065",
+      "customerName": "[اختبار برمجي] فحص سعر المصنع Sale-05",
+      "customerPhone": "01011112222",
+      "customerWhatsapp": "01011112222",
+      "preferredContact": "whatsapp",
+      "eventName": "اختبار دقة حساب المصنع",
+      "eventDate": "2026-11-25",
+      "deliveryTime": "16:00",
+      "deliveryGovernorate": "القاهرة",
+      "deliveryAddress": "معمل الاختبارات",
+      "notes": "",
+      "items": [
+        {
+          "mealId": "meal-5",
+          "mealCode": "Sale-05",
+          "mealName": "ميكس بوكس 05 - جاتوه وكفتة وبانية فرنساوي وسط",
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل",
+          "category": "mix_box",
+          "quantity": 200,
+          "drinkOption": "pepsi",
+          "orientalSweetOption": "none",
+          "orientalSweetLabel": "بدون قطعة شرقي",
+          "orientalSweetDistributorAdjustment": 0,
+          "baseDistributorPrice": 80,
+          "unitDistributorPrice": 90,
+          "totalDistributorPrice": 18000,
+          "baseFactoryPrice": 56,
+          "factoryDrinkAdjustment": 4,
+          "factoryOrientalSweetAdjustment": 0,
+          "unitFactoryPrice": 60,
+          "totalFactoryPrice": 12000
+        }
+      ],
+      "totalMealsCount": 200,
+      "totalDistributorPrice": 18000,
+      "totalFactoryPrice": 12000,
+      "profitMargin": 6000,
+      "paidAmount": 0,
+      "remainingAmount": 18000,
+      "status": "INITIAL",
+      "statusNotes": "حجز مبدئي جديد مسجل عبر الموقع",
+      "isTest": true,
+      "version": 1,
+      "createdAt": "2026-11-06T12:07:06.561Z",
+      "updatedAt": "2026-11-06T12:07:06.561Z"
+    },
+    {
       "id": "bk-1793868680423-589",
       "bookingCode": "CLB-2026-9542",
       "securityCode": "6719",
@@ -398,16 +496,16 @@
           "baseDistributorPrice": 80,
           "unitDistributorPrice": 90,
           "totalDistributorPrice": 18000,
-          "baseFactoryPrice": 53,
-          "unitFactoryPrice": 58,
-          "totalFactoryPrice": 11600,
-          "factoryDrinkAdjustment": 5
+          "baseFactoryPrice": 56,
+          "unitFactoryPrice": 60,
+          "totalFactoryPrice": 12000,
+          "factoryDrinkAdjustment": 4
         }
       ],
       "totalMealsCount": 200,
       "totalDistributorPrice": 18000,
-      "totalFactoryPrice": 11600,
-      "profitMargin": 6400,
+      "totalFactoryPrice": 12000,
+      "profitMargin": 6000,
       "paidAmount": 0,
       "remainingAmount": 18000,
       "status": "CONFIRMED",
@@ -444,8 +542,262 @@
       "createdAt": "2026-11-05T08:49:52.179Z"
     }
   ],
-  "factoryOrders": [],
+  "factoryOrders": [
+    {
+      "id": "fo-1793968099674-528",
+      "orderNumber": "FO-2026-109",
+      "bookingId": "bk-1793362871199-5131",
+      "bookingCode": "CLB-2026-5131",
+      "version": 2,
+      "status": "READY_TO_SEND",
+      "eventDate": "2026-11-07",
+      "deliveryTime": "16:00",
+      "deliveryLocation": "الجيزة - الجيزة – مسجد الدجوي بجوار جامعة MSA",
+      "factoryCostTotal": 12000,
+      "paidToFactoryAmount": 0,
+      "remainingToFactoryAmount": 12000,
+      "paymentStatus": "UNPAID",
+      "payments": [],
+      "items": [
+        {
+          "mealCode": "Sale-05",
+          "mealName": "ميكس بوكس 05 - جاتوه وكفتة وبانية فرنساوي وسط",
+          "quantity": 200,
+          "drinkOption": "pepsi",
+          "drinkLabel": "استبدال العصير بكانز بيبسي",
+          "orientalSweetOption": "none",
+          "orientalSweetLabel": "بدون قطعة شرقي",
+          "orientalSweetFactoryAdjustment": 0,
+          "ingredients": "قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل",
+          "baseFactoryPrice": 56,
+          "factoryDrinkAdjustment": 4,
+          "unitFactoryPrice": 60,
+          "totalFactoryPrice": 12000,
+          "specialInstructions": "استبدال العصير بكانز بيبسي"
+        }
+      ],
+      "packagingNotes": "العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. كتب كتاب وزفاف.",
+      "createdAt": "2026-11-06T12:28:19.674Z",
+      "updatedAt": "2026-11-06T12:28:19.675Z"
+    }
+  ],
   "auditLogs": [
+    {
+      "id": "log-1793968099675-50",
+      "bookingId": "bk-1793362871199-5131",
+      "bookingCode": "CLB-2026-5131",
+      "action": "إصدار أمر تشغيل المصنع",
+      "performedBy": "الإدارة",
+      "details": "إصدار أمر تشغيل المصنع (الإصدار v2) للحجز CLB-2026-5131: اعتماد سعر المصنع الجديد للصنف Sale-05 (السعر القديم: 58 ج، السعر الجديد: 60 ج). إجمالي المصنع القديم: 11,600 ج، إجمالي المصنع الجديد: 12,000 ج (200 وجبة × 60 ج). إجمالي العميل محفوظ تماماً: 18,000 ج، المدفوع: 0 ج، المتبقي: 18,000 ج.",
+      "timestamp": "2026-11-06T12:28:19.675Z"
+    },
+    {
+      "id": "log-1793966849412-584",
+      "bookingId": "",
+      "bookingCode": "CLB-2026-8811",
+      "action": "حذف حجز تجريبي",
+      "performedBy": "تنظيف بعد انتهاء اختبار Foreign Key",
+      "details": "تم حذف الحجز التجريبي رقم CLB-2026-8811 بكافة بنوده التجريبية بعد التأكيد الصريح.",
+      "timestamp": "2026-11-06T12:07:29.412Z"
+    },
+    {
+      "id": "log-1793966849394-245",
+      "bookingId": "bk-1793966849378-103",
+      "bookingCode": "CLB-2026-8811",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "إدارة الحسابات",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (bank_transfer) للحجز CLB-2026-8811. المسدد الجديد: 2500 ج، المتبقي: 0 ج. مرجع: REC-TEST-B-9363.",
+      "timestamp": "2026-11-06T12:07:29.394Z"
+    },
+    {
+      "id": "log-1793966849385-706",
+      "bookingId": "bk-1793966849378-103",
+      "bookingCode": "CLB-2026-8811",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1500 ج.م بطريقة (instapay) للحجز CLB-2026-8811. المسدد الجديد: 1500 ج، المتبقي: 1000 ج. مرجع: REC-TEST-A-9363.",
+      "timestamp": "2026-11-06T12:07:29.385Z"
+    },
+    {
+      "id": "log-1793966849380-343",
+      "bookingId": "bk-1793966849378-103",
+      "bookingCode": "CLB-2026-8811",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8811 بإجمالي 50 وجبة وقيمة 2500 جنيه.",
+      "timestamp": "2026-11-06T12:07:29.380Z"
+    },
+    {
+      "id": "log-1793966848147-340",
+      "bookingId": "",
+      "bookingCode": "CLB-2026-4488",
+      "action": "حذف حجز تجريبي",
+      "performedBy": "تنظيف الاختبار الشامل",
+      "details": "تم حذف الحجز التجريبي رقم CLB-2026-4488 بكافة بنوده التجريبية بعد التأكيد الصريح.",
+      "timestamp": "2026-11-06T12:07:28.147Z"
+    },
+    {
+      "id": "log-1793966848124-11",
+      "bookingId": "bk-1793966848098-515",
+      "bookingCode": "CLB-2026-4488",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (bank_transfer) للحجز CLB-2026-4488. المسدد الجديد: 2500 ج، المتبقي: 1000 ج. مرجع: REC-TEST-SWEET-2-8088.",
+      "timestamp": "2026-11-06T12:07:28.124Z"
+    },
+    {
+      "id": "log-1793966848118-908",
+      "bookingId": "bk-1793966848098-515",
+      "bookingCode": "CLB-2026-4488",
+      "action": "تعديل الحجز",
+      "performedBy": "المشرف",
+      "details": "تم تحديث الحجز (الإصدار v3)",
+      "timestamp": "2026-11-06T12:07:28.118Z"
+    },
+    {
+      "id": "log-1793966848108-504",
+      "bookingId": "bk-1793966848098-515",
+      "bookingCode": "CLB-2026-4488",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1500 ج.م بطريقة (instapay) للحجز CLB-2026-4488. المسدد الجديد: 1500 ج، المتبقي: 2000 ج. مرجع: REC-TEST-SWEET-8088.",
+      "timestamp": "2026-11-06T12:07:28.108Z"
+    },
+    {
+      "id": "log-1793966848100-83",
+      "bookingId": "bk-1793966848098-515",
+      "bookingCode": "CLB-2026-4488",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4488 بإجمالي 50 وجبة وقيمة 3500 جنيه.",
+      "timestamp": "2026-11-06T12:07:28.100Z"
+    },
+    {
+      "id": "log-1793966842030-94",
+      "bookingId": "",
+      "bookingCode": "SYSTEM_CLEANUP",
+      "action": "تنظيف نهائي لقاعدة البيانات",
+      "performedBy": "تنظيف الاختبار الآلي",
+      "details": "تم حذف (2) سجل تجريبي نهائياً بواسطة (تنظيف الاختبار الآلي). تم تخطي (0) سجل. الأكواد المحذوفة: [CLB-2026-6544, CLB-2026-4462]. الحجز CLB-2026-5131 محمي بنجاح.",
+      "timestamp": "2026-11-06T12:07:22.030Z"
+    },
+    {
+      "id": "log-1793966842013-969",
+      "bookingId": "bk-1793966842012-191",
+      "bookingCode": "CLB-2026-4462",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4462 بإجمالي 50 وجبة وقيمة 3750 جنيه.",
+      "timestamp": "2026-11-06T12:07:22.013Z"
+    },
+    {
+      "id": "log-1793966841999-993",
+      "bookingId": "bk-1793966841997-204",
+      "bookingCode": "CLB-2026-6544",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-6544 بإجمالي 200 وجبة وقيمة 18000 جنيه.",
+      "timestamp": "2026-11-06T12:07:21.999Z"
+    },
+    {
+      "id": "log-1793966826581-549",
+      "bookingId": "bk-1793966826579-585",
+      "bookingCode": "CLB-2026-8924",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-8924 بإجمالي 50 وجبة وقيمة 3750 جنيه.",
+      "timestamp": "2026-11-06T12:07:06.581Z"
+    },
+    {
+      "id": "log-1793966826563-750",
+      "bookingId": "bk-1793966826561-101",
+      "bookingCode": "CLB-2026-4009",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4009 بإجمالي 200 وجبة وقيمة 18000 جنيه.",
+      "timestamp": "2026-11-06T12:07:06.563Z"
+    },
+    {
+      "id": "log-1793964857150-320",
+      "bookingId": "",
+      "bookingCode": "CLB-2026-4653",
+      "action": "حذف حجز تجريبي",
+      "performedBy": "تنظيف الاختبار الشامل",
+      "details": "تم حذف الحجز التجريبي رقم CLB-2026-4653 بكافة بنوده التجريبية بعد التأكيد الصريح.",
+      "timestamp": "2026-11-06T11:34:17.150Z"
+    },
+    {
+      "id": "log-1793964857135-494",
+      "bookingId": "bk-1793964857110-893",
+      "bookingCode": "CLB-2026-4653",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (bank_transfer) للحجز CLB-2026-4653. المسدد الجديد: 2500 ج، المتبقي: 1000 ج. مرجع: REC-TEST-SWEET-2-7102.",
+      "timestamp": "2026-11-06T11:34:17.135Z"
+    },
+    {
+      "id": "log-1793964857129-393",
+      "bookingId": "bk-1793964857110-893",
+      "bookingCode": "CLB-2026-4653",
+      "action": "تعديل الحجز",
+      "performedBy": "المشرف",
+      "details": "تم تحديث الحجز (الإصدار v3)",
+      "timestamp": "2026-11-06T11:34:17.129Z"
+    },
+    {
+      "id": "log-1793964857118-447",
+      "bookingId": "bk-1793964857110-893",
+      "bookingCode": "CLB-2026-4653",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1500 ج.م بطريقة (instapay) للحجز CLB-2026-4653. المسدد الجديد: 1500 ج، المتبقي: 2000 ج. مرجع: REC-TEST-SWEET-7102.",
+      "timestamp": "2026-11-06T11:34:17.118Z"
+    },
+    {
+      "id": "log-1793964857112-863",
+      "bookingId": "bk-1793964857110-893",
+      "bookingCode": "CLB-2026-4653",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-4653 بإجمالي 50 وجبة وقيمة 3500 جنيه.",
+      "timestamp": "2026-11-06T11:34:17.112Z"
+    },
+    {
+      "id": "log-1793964852551-467",
+      "bookingId": "",
+      "bookingCode": "CLB-2026-9234",
+      "action": "حذف حجز تجريبي",
+      "performedBy": "تنظيف بعد انتهاء اختبار Foreign Key",
+      "details": "تم حذف الحجز التجريبي رقم CLB-2026-9234 بكافة بنوده التجريبية بعد التأكيد الصريح.",
+      "timestamp": "2026-11-06T11:34:12.551Z"
+    },
+    {
+      "id": "log-1793964852533-7",
+      "bookingId": "bk-1793964852521-250",
+      "bookingCode": "CLB-2026-9234",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "إدارة الحسابات",
+      "details": "تم تسجيل دفعة بقيمة 1000 ج.م بطريقة (bank_transfer) للحجز CLB-2026-9234. المسدد الجديد: 2500 ج، المتبقي: 0 ج. مرجع: REC-TEST-B-2511.",
+      "timestamp": "2026-11-06T11:34:12.533Z"
+    },
+    {
+      "id": "log-1793964852528-674",
+      "bookingId": "bk-1793964852521-250",
+      "bookingCode": "CLB-2026-9234",
+      "action": "تسجيل دفعة مالية",
+      "performedBy": "المحاسب الآلي",
+      "details": "تم تسجيل دفعة بقيمة 1500 ج.م بطريقة (instapay) للحجز CLB-2026-9234. المسدد الجديد: 1500 ج، المتبقي: 1000 ج. مرجع: REC-TEST-A-2511.",
+      "timestamp": "2026-11-06T11:34:12.528Z"
+    },
+    {
+      "id": "log-1793964852523-54",
+      "bookingId": "bk-1793964852521-250",
+      "bookingCode": "CLB-2026-9234",
+      "action": "إنشاء حجز مبدئي",
+      "performedBy": "العميل (الموقع الإلكتروني)",
+      "details": "تم إنشاء الحجز رقم CLB-2026-9234 بإجمالي 50 وجبة وقيمة 2500 جنيه.",
+      "timestamp": "2026-11-06T11:34:12.523Z"
+    },
     {
       "id": "log-1793882040638-581",
       "bookingId": "",

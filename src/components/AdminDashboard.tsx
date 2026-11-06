@@ -6020,8 +6020,8 @@ APP_URL="https://celebre-eg.com"`}
                   if (it.orientalSweetOption === 'replace_juice') {
                     drinkDelta = 0;
                   } else if (it.hasJuice) {
-                    if (it.drinkOption === 'pepsi') drinkDelta = 5;
-                    else if (it.drinkOption === 'no_juice') drinkDelta = -5;
+                    if (it.drinkOption === 'pepsi') drinkDelta = 4; // -5 juice -1 package +10 can = +4 EGP net
+                    else if (it.drinkOption === 'no_juice') drinkDelta = -6; // -5 juice -1 package = -6 EGP
                   }
 
                   let sweetDelta = 0;
@@ -6130,8 +6130,8 @@ APP_URL="https://celebre-eg.com"`}
                               className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 font-medium text-slate-700 focus:ring-1 focus:ring-[#7A0C2E]"
                             >
                               <option value="standard">عصير قياسي (0 ج)</option>
-                              <option value="no_juice">بدون عصير (-5 ج)</option>
-                              <option value="pepsi">بيبسي (+5 ج صافي)</option>
+                              <option value="no_juice">بدون عصير (-6 ج: -5 عصير -1 عبوة)</option>
+                              <option value="pepsi">بيبسي (+4 ج صافي: -5 عصير -1 عبوة +10 كانز)</option>
                             </select>
                           )}
                         </div>
@@ -6164,8 +6164,8 @@ APP_URL="https://celebre-eg.com"`}
                   if (it.orientalSweetOption === 'replace_juice') {
                     drinkDelta = 0;
                   } else if (it.hasJuice) {
-                    if (it.drinkOption === 'pepsi') drinkDelta = 5;
-                    else if (it.drinkOption === 'no_juice') drinkDelta = -5;
+                    if (it.drinkOption === 'pepsi') drinkDelta = 4; // -5 juice -1 package +10 can = +4 EGP net
+                    else if (it.drinkOption === 'no_juice') drinkDelta = -6; // -5 juice -1 package = -6 EGP
                   }
 
                   let sweetDelta = 0;

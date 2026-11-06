@@ -52,7 +52,7 @@ export const INITIAL_MEALS: Omit<Meal, 'id' | 'updatedAt' | 'version'>[] = [
     category: 'mix_box',
     ingredients: 'قطعة جاتوة مغلفة + سندوتش فرنساوي وسط كفتة مشوية + سندوتش فرنساوي وسط فراخ بانية + عصير بخيرة + شوكة ومنديل',
     distributorPrice: 80,
-    factoryPrice: 53,
+    factoryPrice: 56,
     hasJuice: true,
     isActive: true,
     image: '/assets/aistudio/________________7b046020.jpg',
@@ -221,7 +221,10 @@ export const CELEBRE_CONFIG = {
   },
   drinkAdjustments: {
     noJuiceDiscount: 5,
+    juicePackageCost: 1, // 1 EGP package cost deduction
+    factoryNoJuiceDiscount: 6, // 5 EGP juice + 1 EGP package = -6 EGP from factory
     pepsiExtra: 10,
+    factoryPepsiAddition: 10,
   },
   orientalSweetAdjustments: {
     addWithJuiceCustomer: 20,
