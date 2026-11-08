@@ -249,6 +249,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Mobile Navigation Drawer & Confirmation State
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isConfirmingBookingId, setIsConfirmingBookingId] = useState<string | null>(null);
+  // Delete Any Booking from Edit Modal
+  const [deleteAnyBookingModal, setDeleteAnyBookingModal] = useState<Booking | null>(null);
+  const [isDeletingAnyBooking, setIsDeletingAnyBooking] = useState(false);
+  const [deleteAnyBookingReason, setDeleteAnyBookingReason] = useState('');
+  const [deleteAnyBookingError, setDeleteAnyBookingError] = useState<string | null>(null);
   const [copiedBookingCode, setCopiedBookingCode] = useState<string | null>(null);
 
   const copyBookingCode = (code: string) => {
@@ -1311,6 +1316,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setEditBookingError(err.message || 'خطأ أثناء حفظ التعديلات');
     } finally {
       setIsSavingBookingEdits(false);
+    }
+  };
+
+  const handleDeleteAnyBooking = async () => {
+    if (!deleteAnyBookingModal) return;
+    setIsDeletingAnyBooking(true);
+    setDeleteAnyBookingError(null);
+
+    try {
+      const res = await fetch(`/api/admin/bookings/${deleteAnyBookingModal.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          reason: deleteAnyBookingReason.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (handleAuthError(res.status, data)) return;
+        throw new Error(data.error || 'فشل حذف الحجز');
+      }
+
+      // Close both modals
+      setDeleteAnyBookingModal(null);
+      setDeleteAnyBookingReason('');
+      setIsEditBookingModalOpen(false);
+      if (selectedBooking?.id === deleteAnyBookingModal.id) {
+        setSelectedBooking(null);
+      }
+      loadAllData();
+    } catch (err: any) {
+      setDeleteAnyBookingError(err.message || 'حدث خطأ أثناء تنفيذ الحذف');
+    } finally {
+      setIsDeletingAnyBooking(false);
     }
   };
 
@@ -4650,34 +4693,156 @@ APP_URL="https://celebre-eg.com"`}
                   </div>
                 </div>
 
-                <div className="flex flex-col-reverse sm:flex-row justify-end gap-2.5 pt-3 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setIsEditBookingModalOpen(false)}
-                    className="min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl transition-colors"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingBookingEdits}
-                    className="min-h-[44px] px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow transition-colors disabled:opacity-50"
-                  >
-                    {isSavingBookingEdits ? 'جاري الحفظ...' : 'حفظ التعديلات فقط'}
-                  </button>
-                  {(selectedBooking?.status === 'INITIAL' || selectedBooking?.status === 'PENDING_CONFIRMATION') && (
+                <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-2.5 pt-3 border-t">
+                  {/* Delete Button on Left (RTL layout) */}
+                  <div>
+                    {selectedBooking && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteAnyBookingModal(selectedBooking);
+                          setDeleteAnyBookingReason('');
+                          setDeleteAnyBookingError(null);
+                        }}
+                        disabled={isSavingBookingEdits}
+                        className="min-h-[44px] px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                        title="حذف هذا الحجز نهائياً من قاعدة البيانات مع أرشفة سجلاته"
+                      >
+                        <Trash2 className="w-4 h-4 text-rose-600" />
+                        <span>حذف الحجز نهائياً</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Actions on Right */}
+                  <div className="flex flex-wrap items-center justify-end gap-2.5 w-full sm:w-auto">
                     <button
                       type="button"
-                      onClick={(e) => handleSaveBookingEdits(e, true)}
-                      disabled={isSavingBookingEdits}
-                      className="min-h-[44px] px-6 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                      onClick={() => setIsEditBookingModalOpen(false)}
+                      className="min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl transition-colors"
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>حفظ واعتماد الحجز (تأكيد)</span>
+                      إلغاء
                     </button>
-                  )}
+                    <button
+                      type="submit"
+                      disabled={isSavingBookingEdits}
+                      className="min-h-[44px] px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow transition-colors disabled:opacity-50"
+                    >
+                      {isSavingBookingEdits ? 'جاري الحفظ...' : 'حفظ التعديلات فقط'}
+                    </button>
+                    {(selectedBooking?.status === 'INITIAL' || selectedBooking?.status === 'PENDING_CONFIRMATION') && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleSaveBookingEdits(e, true)}
+                        disabled={isSavingBookingEdits}
+                        className="min-h-[44px] px-6 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>حفظ واعتماد الحجز (تأكيد)</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Any Booking Confirmation Modal with Strict Safety & Financial Archiving */}
+        {deleteAnyBookingModal && (
+          <div className="fixed inset-0 z-80 bg-black/70 flex items-center justify-center p-3">
+            <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-4 text-right" dir="rtl">
+              <div className="flex items-center gap-3 border-b pb-3">
+                <div className="p-3 bg-rose-100 text-rose-700 rounded-2xl">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-black text-lg text-rose-950">تأكيد حذف الحجز نهائياً وأرشفته</h4>
+                  <p className="text-xs text-slate-500 font-mono">رقم الحجز: {deleteAnyBookingModal.bookingCode}</p>
+                </div>
+              </div>
+
+              {deleteAnyBookingError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{deleteAnyBookingError}</span>
+                </div>
+              )}
+
+              {/* Booking Details Card */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-slate-500">اسم العميل:</span>
+                  <strong className="text-slate-900 font-bold">{deleteAnyBookingModal.customerName}</strong>
+                </div>
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-slate-500">رقم الهاتف:</span>
+                  <span className="font-mono font-bold text-slate-800" dir="ltr">{deleteAnyBookingModal.customerPhone}</span>
+                </div>
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-slate-500">حالة الحجز الحالية:</span>
+                  <span className={`px-2.5 py-0.5 rounded-full font-bold border ${getStatusInfo(deleteAnyBookingModal.status).bg}`}>
+                    {getStatusInfo(deleteAnyBookingModal.status).label}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-slate-500">إجمالي الحجز:</span>
+                  <strong className="text-[#7A0C2E] font-black text-sm">{deleteAnyBookingModal.totalDistributorPrice.toLocaleString('ar-EG')} ج.م</strong>
+                </div>
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-slate-500">المسدد / الدفعات:</span>
+                  <span className="font-bold text-slate-800">{deleteAnyBookingModal.paidAmount.toLocaleString('ar-EG')} ج.م ({deleteAnyBookingModal.payments?.length || 0} دفعات)</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">أوامر المصنع المرتبطة:</span>
+                  <span className="font-bold text-slate-800">{deleteAnyBookingModal.factoryOrders?.length || 0} أوامر تشغيل</span>
+                </div>
+              </div>
+
+              {/* Archiving & Audit Guarantee Notice */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+                <strong>ضمان الأرشفة الرقابية:</strong>
+                <p>
+                  سيتم حذف الحجز من القوائم النشطة وإزالة ارتباطاته في قاعدة البيانات، مع الاحتفاظ بلقطة أرشيفية كاملة لبيانات الحجز والمعاملات المالية في سجل التدقيق (Audit Log) للمراجعة المحاسبية.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سبب الحذف النهائي (يوثق في سجل المراجعة):</label>
+                <input
+                  type="text"
+                  value={deleteAnyBookingReason}
+                  onChange={(e) => setDeleteAnyBookingReason(e.target.value)}
+                  placeholder="مثال: إلغاء بطلب من العميل، خطأ في الإدخال، حجز مكرر..."
+                  className="w-full px-3 py-2 bg-[#FAF8F5] border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2.5 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setDeleteAnyBookingModal(null)}
+                  disabled={isDeletingAnyBooking}
+                  className="min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold rounded-xl transition-colors"
+                >
+                  تراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAnyBooking}
+                  disabled={isDeletingAnyBooking}
+                  className="min-h-[44px] px-6 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isDeletingAnyBooking ? (
+                    <span>جاري الحذف والأرشفة...</span>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>تأكيد الحذف النهائي</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

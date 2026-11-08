@@ -989,7 +989,26 @@ apiRouter.post('/admin/test-bookings/clean', requireAuth, requireRole(['super_ad
   }
 });
 
-// Single Permanent Delete of a Test Booking
+// Generic Permanent Delete of Any Booking (Initial, Confirmed, In Production, Delivered, Cancelled)
+apiRouter.delete('/admin/bookings/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const performer = req.user?.name || req.user?.username || 'الإدارة';
+    const auditPerformer = reason ? `${performer} (السبب: ${reason.trim()})` : performer;
+
+    const result = await db.deleteBookingsPermanently([id], auditPerformer);
+    if (result.skipped.length > 0 && result.deletedCount === 0) {
+      res.status(400).json({ error: result.skipped[0].reason });
+      return;
+    }
+    res.json({ success: true, message: `تم حذف الحجز وأرشفة سجلاته بنجاح`, deletedCodes: result.deletedCodes });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Single Permanent Delete of a Test Booking (backward compatibility)
 apiRouter.delete('/admin/bookings/:id/force-test', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;

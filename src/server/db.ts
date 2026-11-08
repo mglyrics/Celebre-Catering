@@ -1088,6 +1088,40 @@ export const db = {
     };
   },
 
+  /**
+   * Universal, resilient resolver for any booking identifier:
+   * Accepts internal ID (UUID/timestamp ID) or external visible bookingCode (e.g. CLB-2026-XXXX).
+   * Searches PostgreSQL primary key first, then unique bookingCode, then memoryDB,
+   * guaranteeing consistent resolution across all admin operations without failing.
+   */
+  async resolveBookingAnyIdentifier(rawIdentifier: string): Promise<Booking | null> {
+    if (!rawIdentifier || typeof rawIdentifier !== 'string') return null;
+    const clean = rawIdentifier.trim();
+    if (!clean) return null;
+
+    // 1. Try direct primary ID lookup
+    const byPrimary = await this.getBookingByPrimaryId(clean);
+    if (byPrimary) return byPrimary;
+
+    // 2. Try general lookup (supports bookingCode as well)
+    const byCodeOrId = await this.getBookingById(clean);
+    if (byCodeOrId) return byCodeOrId;
+
+    // 3. Fallback check memoryDB
+    memoryDB = loadLocalDB();
+    const mem = memoryDB.bookings.find(b => b.id === clean || b.bookingCode === clean);
+    if (mem) {
+      return {
+        ...mem,
+        payments: memoryDB.payments.filter(p => p.bookingId === mem.id),
+        factoryOrders: memoryDB.factoryOrders.filter(fo => fo.bookingId === mem.id),
+        auditLogs: memoryDB.auditLogs.filter(al => al.bookingId === mem.id),
+      };
+    }
+
+    return null;
+  },
+
   async trackBooking(bookingCode: string, verificationCode?: string): Promise<Booking | null> {
     if (!bookingCode || typeof bookingCode !== 'string' || !bookingCode.trim()) {
       return null;
@@ -1864,15 +1898,12 @@ export const db = {
 
     const cleanId = (id || '').trim();
     if (!cleanId) {
-      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
-    }
-    if (cleanId.startsWith('CLB-')) {
-      throw new Error('عمليات تعديل حالة الحجز تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode لمنع تداخل السجلات.');
+      throw new Error('يرجى تحديد معرف الحجز أو كود الحجز');
     }
 
-    const booking = await this.getBookingByPrimaryId(cleanId);
+    const booking = await this.resolveBookingAnyIdentifier(cleanId);
     if (!booking) {
-      throw new Error('الحجز غير موجود');
+      throw new Error(`تعذر العثور على سجل الحجز في قاعدة البيانات (المعرّف أو الكود: "${cleanId}")`);
     }
 
     if (newStatus === 'CONFIRMED' && booking.totalMealsCount < 50) {
@@ -1894,15 +1925,26 @@ export const db = {
       updatedAt: now,
     };
 
-    // Update memoryDB
+    // Update memoryDB (gracefully upsert if missing in local cache)
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id);
+    const memIdx = memoryDB.bookings.findIndex(b => b.id === booking.id || b.bookingCode === booking.bookingCode);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
-      saveLocalDB(memoryDB);
     } else {
-      throw new Error(`تعذر العثور على سجل الحجز بالمعرف الفريد ${booking.id} لتحديث الحالة`);
+      memoryDB.bookings.unshift(updatedBooking);
     }
+
+    // If booking is CANCELLED, synchronize and suspend active factory orders
+    if (newStatus === 'CANCELLED') {
+      const activeOrders = (memoryDB.factoryOrders || []).filter(
+        fo => (fo.bookingId === booking.id || fo.bookingCode === booking.bookingCode) && fo.status !== 'CANCELLED' && fo.status !== 'COMPLETED'
+      );
+      for (const fo of activeOrders) {
+        fo.status = 'CANCELLED';
+        fo.updatedAt = now;
+      }
+    }
+    saveLocalDB(memoryDB);
 
     // Update PostgreSQL
     if (databaseUrl) {
@@ -1918,6 +1960,20 @@ export const db = {
               updatedAt: new Date(),
             },
           });
+
+          // Sync factory order status if cancelled
+          if (newStatus === 'CANCELLED') {
+            await client.factoryOrder.updateMany({
+              where: {
+                bookingId: booking.id,
+                status: { notIn: ['CANCELLED', 'COMPLETED'] },
+              },
+              data: {
+                status: 'CANCELLED',
+                updatedAt: new Date(),
+              },
+            }).catch(() => {});
+          }
         }
       } catch (err: any) {
         logServerError(err, 'db.updateBookingStatus.prisma');
@@ -3594,17 +3650,13 @@ export const db = {
     const skipped: { id: string; code?: string; reason: string }[] = [];
     const idsToDelete: string[] = [];
 
-    // 1. Strict pre-validation for each booking
+    // 1. Strict pre-validation and resolution for each booking
+    const bookingsToDelete: Booking[] = [];
     for (const rawId of bookingIds) {
       const cleanId = (rawId || '').trim();
       if (!cleanId) continue;
 
-      if (cleanId.startsWith('CLB-')) {
-        skipped.push({ id: rawId, reason: 'يجب تمرير المعرف الأساسي bookingId وليس bookingCode لمنع تداخل السجلات' });
-        continue;
-      }
-
-      const booking = await this.getBookingByPrimaryId(cleanId);
+      const booking = await this.resolveBookingAnyIdentifier(cleanId);
       if (!booking) {
         skipped.push({ id: cleanId, reason: 'الحجز غير موجود في قاعدة البيانات' });
         continue;
@@ -3613,15 +3665,19 @@ export const db = {
       // STRICT SACRED CHECK: Absolute Protection for CLB-2026-5131
       if (isStrictlyProtectedBooking(booking)) {
         skipped.push({
-          id: cleanId,
+          id: booking.id,
           code: booking.bookingCode,
           reason: 'محظور تماماً: الحجز CLB-2026-5131 هو حجز حقيقي معتمد للعميل أحمد عصام الدين ومحمي نهائياً من أي حذف أو تعديل.'
         });
         continue;
       }
 
-      idsToDelete.push(cleanId);
-      deletedCodes.push(booking.bookingCode);
+      // Ensure no duplicate IDs in deletion list
+      if (!idsToDelete.includes(booking.id)) {
+        idsToDelete.push(booking.id);
+        deletedCodes.push(booking.bookingCode);
+        bookingsToDelete.push(booking);
+      }
     }
 
     if (idsToDelete.length === 0) {
@@ -3636,17 +3692,39 @@ export const db = {
       };
     }
 
-    // 2. Cascade delete from PostgreSQL if configured
+    // 2. Archive financial snapshot & audit log for each booking prior to removal
+    for (const b of bookingsToDelete) {
+      const activePayments = (b.payments || []).filter(p => p.status === 'VALID');
+      const paidTotal = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+      const ordersCount = (b.factoryOrders || []).length;
+      
+      const archiveSummary = `[أرشفة وتوثيق قبل الحذف النهائي]: تم حذف الحجز (${b.bookingCode}) نهائياً بواسطة (${performedBy}). تفاصيل العميل: ${b.customerName} (${b.customerPhone})، الحالة: ${b.status}، إجمالي الوجبات: ${b.totalMealsCount} وجبة، إجمالي القيمة: ${b.totalDistributorPrice} ج، المسدد: ${paidTotal} ج (${activePayments.length} دفعات)، أوامر المصنع: ${ordersCount}. سجل المراجعة محفوظ بالكامل للأغراض المحاسبية.`;
+
+      await this.addAuditLog({
+        bookingId: '',
+        bookingCode: b.bookingCode,
+        action: 'حذف حجز نهائياً وأرشفته',
+        performedBy,
+        details: archiveSummary,
+      });
+    }
+
+    // 3. Cascade delete from PostgreSQL in a single atomic transaction
+    // CRITICAL: We preserve audit_logs table (only set bookingId to null or keep bookingCode) to ensure auditability!
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
           await client.$transaction(async (tx) => {
+            // First unlink audit logs so audit history is never erased
+            await tx.auditLog.updateMany({
+              where: { bookingId: { in: idsToDelete } },
+              data: { bookingId: null },
+            });
             await tx.bookingItem.deleteMany({ where: { bookingId: { in: idsToDelete } } });
             await tx.payment.deleteMany({ where: { bookingId: { in: idsToDelete } } });
             await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: { in: idsToDelete } } } });
             await tx.factoryOrder.deleteMany({ where: { bookingId: { in: idsToDelete } } });
-            await tx.auditLog.deleteMany({ where: { bookingId: { in: idsToDelete } } });
             await tx.booking.deleteMany({ where: { id: { in: idsToDelete } } });
           });
         }
@@ -3655,7 +3733,7 @@ export const db = {
       }
     }
 
-    // 3. Delete from memoryDB & save to data/db.json
+    // 4. Delete from memoryDB & save to data/db.json
     memoryDB = loadLocalDB();
     const idSet = new Set(idsToDelete);
     memoryDB.bookings = memoryDB.bookings.filter(b => !idSet.has(b.id));
@@ -3667,16 +3745,13 @@ export const db = {
     if (memoryDB.factoryPayments) {
       memoryDB.factoryPayments = memoryDB.factoryPayments.filter(fp => !removedOrderIds.has(fp.factoryOrderId));
     }
+    // Unlink bookingId in memory audit logs
+    for (const log of memoryDB.auditLogs) {
+      if (log.bookingId && idSet.has(log.bookingId)) {
+        log.bookingId = '';
+      }
+    }
     saveLocalDB(memoryDB);
-
-    // 4. Record Audit Log
-    await this.addAuditLog({
-      bookingId: '',
-      bookingCode: 'SYSTEM_CLEANUP',
-      action: 'تنظيف نهائي لقاعدة البيانات',
-      performedBy,
-      details: `تم حذف (${deletedCodes.length}) سجل تجريبي نهائياً بواسطة (${performedBy}). تم تخطي (${skipped.length}) سجل. الأكواد المحذوفة: [${deletedCodes.join(', ')}]. الحجز CLB-2026-5131 محمي بنجاح.`,
-    });
 
     const remaining = (await this.getBookings()).length;
     return {
@@ -3715,15 +3790,12 @@ export const db = {
   ): Promise<Booking> {
     const cleanId = (id || '').trim();
     if (!cleanId) {
-      throw new Error('يرجى تحديد المعرف الأساسي للحجز (bookingId)');
-    }
-    if (cleanId.startsWith('CLB-')) {
-      throw new Error('عمليات تعديل الحجز بواسطة الإدارة تتطلب المعرف الأساسي bookingId فقط ولا تقبل bookingCode.');
+      throw new Error('يرجى تحديد معرف الحجز أو كود الحجز');
     }
 
-    const booking = await this.getBookingByPrimaryId(cleanId);
+    const booking = await this.resolveBookingAnyIdentifier(cleanId);
     if (!booking) {
-      throw new Error('الحجز غير موجود');
+      throw new Error(`تعذر العثور على سجل الحجز في قاعدة البيانات (المعرّف أو الكود: "${cleanId}")`);
     }
 
     const meals = await this.getMeals(true);

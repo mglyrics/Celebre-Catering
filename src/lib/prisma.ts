@@ -1,7 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { PrismaClient } from '@prisma/client';
+import { createRequire } from 'module';
+import type { PrismaClient } from '@prisma/client';
 import { logServerError } from '../server/safeLogger';
+
+const require = createRequire(import.meta.url);
 
 export const SUPABASE_ROOT_CA = `-----BEGIN CERTIFICATE-----
 MIIDzzCCAregAwIBAgIUBhalAwMQ7BA1NH7td4msPPwxHzowDQYJKoZIhvcNAQEL
@@ -71,7 +74,7 @@ export function getCaCertPath(): string {
 }
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+  prisma: PrismaClient | null | undefined;
 };
 
 let prismaInstance: PrismaClient | null = null;
@@ -166,8 +169,20 @@ export function getPrismaClient(): PrismaClient | null {
   }
 
   try {
+    let PrismaClientClass: any;
+    try {
+      const clientModule = require('@prisma/client');
+      PrismaClientClass = clientModule?.PrismaClient;
+    } catch {
+      return null;
+    }
+
+    if (!PrismaClientClass) {
+      return null;
+    }
+
     const formattedUrl = formatDatabaseUrl(rawUrl);
-    prismaInstance = new PrismaClient({
+    prismaInstance = new PrismaClientClass({
       datasources: {
         db: {
           url: formattedUrl,
