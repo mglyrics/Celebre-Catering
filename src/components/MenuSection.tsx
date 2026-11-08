@@ -63,8 +63,9 @@ export const MenuSection: React.FC<MenuSectionProps> = ({
               <Coffee className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-[#7A0C2E]">شروط وخيارات تعديل المشروبات:</h4>
+              <h4 className="text-sm font-bold text-[#7A0C2E]">إرشادات الحجز وتعديل المشروبات:</h4>
               <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-relaxed">
+                • <strong>موعد الحجز:</strong> لابد أن يكون الحجز قبل موعد المناسبة <span className="font-bold text-[#7A0C2E]">بأسبوع على الأقل</span> لضمان جدولة الإنتاج الفندقي وضبط مواعيد التسليم.<br className="hidden sm:inline" />
                 • <strong>استبعاد العصير:</strong> يخصم <span className="text-emerald-700 font-bold">5 جنيه</span> من سعر كل وجبة. <br className="hidden sm:inline" />
                 • <strong>استبدال العصير ببيبسي:</strong> يضيف <span className="text-blue-700 font-bold">10 جنيه</span> لسعر كل وجبة.
               </p>

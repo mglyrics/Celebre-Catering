@@ -583,6 +583,19 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
           {step === 2 && (
             <div className="space-y-4 text-xs sm:text-sm">
               
+              {/* Booking Guidelines Alert Banner */}
+              <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-3">
+                <div className="p-2 rounded-xl bg-amber-100 text-amber-800 flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-amber-900">إرشادات موعد الحجز والتشغيل المعتمد:</h4>
+                  <p className="text-[11px] sm:text-xs text-amber-800 mt-0.5 leading-relaxed">
+                    • <strong>تنبيه هام:</strong> لابد أن يكون الحجز قبل موعد المناسبة <strong>بأسبوع على الأقل</strong> لضمان جدولة خطوط الإنتاج وتجهيز المكونات الطازجة وضبط خط سير سيارات التوصيل بأعلى معايير الجودة الفندقية.
+                  </p>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Customer Name */}
                 <div className="space-y-1">
@@ -684,6 +697,9 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                     onChange={(e) => setEventDate(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#E8DCC0] rounded-xl focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
                   />
+                  <p className="text-[11px] text-amber-700 font-semibold mt-1">
+                    ⚠️ إرشادات الحجز: يجب تسجيل الطلب وتأكيده قبل موعد المناسبة بأسبوع على الأقل.
+                  </p>
                 </div>
 
                 {/* Delivery Time */}

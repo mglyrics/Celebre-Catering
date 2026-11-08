@@ -3,7 +3,7 @@
  * Creates missing tables if they do not exist without touching existing data.
  * Dual-engine execution: Uses Prisma and direct pg connection as resilient fallback.
  */
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import pg from 'pg';
 import { logServerError } from './safeLogger';
 import { INITIAL_MEALS } from '../data/defaultMeals';
