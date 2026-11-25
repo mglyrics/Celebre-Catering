@@ -81,6 +81,8 @@ export type FactoryOrderStatus =
 
 export type FactoryPaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'FULLY_PAID' | 'OVERPAID';
 
+export type FactoryPaymentType = 'DEPOSIT' | 'INSTALLMENT' | 'FINAL_SETTLEMENT' | 'GENERAL';
+
 export interface FactoryPayment {
   id: string;
   factoryOrderId: string;
@@ -89,6 +91,7 @@ export interface FactoryPayment {
   bookingCode: string;
   amount: number;
   method: 'instapay' | 'bank_transfer' | 'cash' | 'vodafone_cash' | 'other' | string;
+  paymentType?: FactoryPaymentType;
   date: string;
   notes?: string;
   receiptNumber?: string;

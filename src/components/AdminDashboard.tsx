@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Meal, Booking, FactoryOrder, FactoryPayment, FactoryPaymentStatus, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification, OrientalSweetOption } from '../types';
+import { Meal, Booking, FactoryOrder, FactoryPayment, FactoryPaymentStatus, FactoryPaymentType, AdminUser, BookingStatus, PaymentRecord, AuditLog, DrinkModification, OrientalSweetOption } from '../types';
 import { CELEBRE_CONFIG } from '../data/defaultMeals';
 import {
   Lock,
@@ -151,6 +151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [factoryPaymentAmount, setFactoryPaymentAmount] = useState('');
   const [factoryPaymentDate, setFactoryPaymentDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [factoryPaymentMethod, setFactoryPaymentMethod] = useState<'instapay' | 'bank_transfer' | 'cash' | 'vodafone_cash' | 'other'>('instapay');
+  const [factoryPaymentType, setFactoryPaymentType] = useState<FactoryPaymentType>('DEPOSIT');
   const [factoryPaymentReceipt, setFactoryPaymentReceipt] = useState('');
   const [factoryPaymentNotes, setFactoryPaymentNotes] = useState('');
   const [editingFactoryPayment, setEditingFactoryPayment] = useState<FactoryPayment | null>(null);
@@ -249,8 +250,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [cleanupFilterType, setCleanupFilterType] = useState<'all' | 'confirmed_test' | 'legacy_demo'>('all');
   const [cleanupSearchQuery, setCleanupSearchQuery] = useState('');
 
-  // Factory Order Revision Modal
+  // Factory Order Revision Modal (with Logistics, Meals, and Factory Payments / Deposit editing)
   const [editingFactoryOrder, setEditingFactoryOrder] = useState<FactoryOrder | null>(null);
+  const [editFactoryOrderEventDate, setEditFactoryOrderEventDate] = useState('');
+  const [editFactoryOrderDeliveryTime, setEditFactoryOrderDeliveryTime] = useState('');
+  const [editFactoryOrderDeliveryLocation, setEditFactoryOrderDeliveryLocation] = useState('');
   const [editFactoryOrderItems, setEditFactoryOrderItems] = useState<{
     mealCode: string;
     mealName: string;
@@ -261,6 +265,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     hasJuice: boolean;
   }[]>([]);
   const [editFactoryOrderPackagingNotes, setEditFactoryOrderPackagingNotes] = useState('');
+  const [editFactoryPaymentsDraft, setEditFactoryPaymentsDraft] = useState<{
+    tempKey: string;
+    existingId?: string;
+    isNew?: boolean;
+    isDeleted?: boolean;
+    amount: number;
+    method: 'instapay' | 'bank_transfer' | 'cash' | 'vodafone_cash' | 'other';
+    paymentType: FactoryPaymentType;
+    date: string;
+    receiptNumber: string;
+    notes: string;
+    recordedBy: string;
+    status: 'VALID' | 'CANCELLED';
+  }[]>([]);
+  const [draftPayEditingKey, setDraftPayEditingKey] = useState<string | null>(null);
+  const [draftPayType, setDraftPayType] = useState<FactoryPaymentType>('DEPOSIT');
+  const [draftPayAmount, setDraftPayAmount] = useState('');
+  const [draftPayMethod, setDraftPayMethod] = useState<'instapay' | 'bank_transfer' | 'cash' | 'vodafone_cash' | 'other'>('instapay');
+  const [draftPayDate, setDraftPayDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [draftPayReceipt, setDraftPayReceipt] = useState('');
+  const [draftPayNotes, setDraftPayNotes] = useState('');
+  const [draftPayError, setDraftPayError] = useState<string | null>(null);
   const [isSavingFactoryOrder, setIsSavingFactoryOrder] = useState(false);
   const [saveFactoryOrderError, setSaveFactoryOrderError] = useState<string | null>(null);
 
@@ -759,12 +785,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
   };
 
+  const getFactoryPaymentTypeLabel = (type?: FactoryPaymentType | string): string => {
+    switch ((type || '').toUpperCase()) {
+      case 'DEPOSIT':
+        return 'عربون تشغيل';
+      case 'INSTALLMENT':
+        return 'دفعة مالية';
+      case 'FINAL_SETTLEMENT':
+        return 'تسوية ختامية';
+      default:
+        return 'دفعة للمصنع';
+    }
+  };
+
+  const getFactoryPaymentMethodLabel = (method?: string): string => {
+    switch ((method || '').toLowerCase()) {
+      case 'instapay':
+        return 'إنستاباي';
+      case 'bank_transfer':
+        return 'تحويل بنكي';
+      case 'cash':
+        return 'نقدي';
+      case 'vodafone_cash':
+        return 'فودافون كاش';
+      default:
+        return 'أخرى';
+    }
+  };
+
   const handleOpenFactoryPaymentsModal = (fo: FactoryOrder) => {
     setSelectedFactoryOrderForPayments(fo);
     setEditingFactoryPayment(null);
     setFactoryPaymentAmount('');
     setFactoryPaymentDate(new Date().toISOString().split('T')[0]);
     setFactoryPaymentMethod('instapay');
+    setFactoryPaymentType((fo.payments && fo.payments.some(p => p.status === 'VALID')) ? 'INSTALLMENT' : 'DEPOSIT');
     setFactoryPaymentReceipt('');
     setFactoryPaymentNotes('');
     setFactoryPaymentError(null);
@@ -774,7 +829,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingFactoryPayment(payment);
     setFactoryPaymentAmount(String(payment.amount));
     setFactoryPaymentDate(payment.date || new Date().toISOString().split('T')[0]);
-    setFactoryPaymentMethod(payment.method as any || 'instapay');
+    setFactoryPaymentMethod((payment.method as any) || 'instapay');
+    setFactoryPaymentType(payment.paymentType || 'GENERAL');
     setFactoryPaymentReceipt(payment.receiptNumber || '');
     setFactoryPaymentNotes(payment.notes || '');
     setFactoryPaymentError(null);
@@ -785,6 +841,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setFactoryPaymentAmount('');
     setFactoryPaymentDate(new Date().toISOString().split('T')[0]);
     setFactoryPaymentMethod('instapay');
+    setFactoryPaymentType((selectedFactoryOrderForPayments?.payments?.some(p => p.status === 'VALID')) ? 'INSTALLMENT' : 'DEPOSIT');
     setFactoryPaymentReceipt('');
     setFactoryPaymentNotes('');
     setFactoryPaymentError(null);
@@ -817,6 +874,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           body: JSON.stringify({
             amount: numAmount,
             method: factoryPaymentMethod,
+            paymentType: factoryPaymentType,
             date: factoryPaymentDate,
             receiptNumber: factoryPaymentReceipt.trim() || undefined,
             notes: factoryPaymentNotes.trim() || undefined,
@@ -829,6 +887,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           body: JSON.stringify({
             amount: numAmount,
             method: factoryPaymentMethod,
+            paymentType: factoryPaymentType,
             date: factoryPaymentDate,
             receiptNumber: factoryPaymentReceipt.trim() || undefined,
             notes: factoryPaymentNotes.trim() || undefined,
@@ -893,8 +952,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const resetDraftPaymentForm = (hasPriorPayments: boolean) => {
+    setDraftPayEditingKey(null);
+    setDraftPayType(hasPriorPayments ? 'INSTALLMENT' : 'DEPOSIT');
+    setDraftPayAmount('');
+    setDraftPayMethod('instapay');
+    setDraftPayDate(new Date().toISOString().split('T')[0]);
+    setDraftPayReceipt('');
+    setDraftPayNotes('');
+    setDraftPayError(null);
+  };
+
   const handleOpenEditFactoryOrder = (fo: FactoryOrder) => {
     setEditingFactoryOrder(fo);
+    setEditFactoryOrderEventDate(fo.eventDate || '');
+    setEditFactoryOrderDeliveryTime(fo.deliveryTime || '');
+    setEditFactoryOrderDeliveryLocation(fo.deliveryLocation || '');
     setEditFactoryOrderPackagingNotes(fo.packagingNotes || '');
     setSaveFactoryOrderError(null);
     const mealsMap = new Map(meals.map(m => [m.code, m]));
@@ -912,12 +985,139 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         };
       })
     );
+    const existingPayments = (fo.payments || []).map((p, idx) => ({
+      tempKey: p.id || `existing-${idx}`,
+      existingId: p.id,
+      isNew: false,
+      isDeleted: false,
+      amount: Number(p.amount) || 0,
+      method: (p.method as any) || 'cash',
+      paymentType: (p.paymentType as FactoryPaymentType) || 'GENERAL',
+      date: p.date || new Date().toISOString().split('T')[0],
+      receiptNumber: p.receiptNumber || '',
+      notes: p.notes || '',
+      recordedBy: p.recordedBy || 'الإدارة',
+      status: p.status || 'VALID',
+    }));
+    setEditFactoryPaymentsDraft(existingPayments);
+    resetDraftPaymentForm(existingPayments.some(p => p.status === 'VALID'));
+  };
+
+  const handleApplyDraftPayment = (): typeof editFactoryPaymentsDraft | null => {
+    setDraftPayError(null);
+    const numAmount = parseFloat(draftPayAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setDraftPayError('يرجى إدخال قيمة صحيحة أكبر من الصفر');
+      return null;
+    }
+
+    const cleanReceipt = draftPayReceipt.trim();
+    if (cleanReceipt) {
+      const dup = editFactoryPaymentsDraft.find(
+        p =>
+          !p.isDeleted &&
+          p.status === 'VALID' &&
+          p.tempKey !== draftPayEditingKey &&
+          p.receiptNumber.trim().toLowerCase() === cleanReceipt.toLowerCase()
+      );
+      if (dup) {
+        setDraftPayError(`رقم الإيصال / المرجع (${cleanReceipt}) مستخدم بالفعل في دفعة أخرى لنفس أمر المصنع.`);
+        return null;
+      }
+    }
+
+    let nextDraft: typeof editFactoryPaymentsDraft;
+    if (draftPayEditingKey) {
+      nextDraft = editFactoryPaymentsDraft.map(p =>
+        p.tempKey === draftPayEditingKey
+          ? {
+              ...p,
+              amount: numAmount,
+              method: draftPayMethod,
+              paymentType: draftPayType,
+              date: draftPayDate || new Date().toISOString().split('T')[0],
+              receiptNumber: cleanReceipt,
+              notes: draftPayNotes.trim(),
+            }
+          : p
+      );
+    } else {
+      const newEntry = {
+        tempKey: `new-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        isNew: true,
+        isDeleted: false,
+        amount: numAmount,
+        method: draftPayMethod,
+        paymentType: draftPayType,
+        date: draftPayDate || new Date().toISOString().split('T')[0],
+        receiptNumber: cleanReceipt,
+        notes: draftPayNotes.trim(),
+        recordedBy: currentUser?.name || currentUser?.username || 'الإدارة',
+        status: 'VALID' as const,
+      };
+      nextDraft = [newEntry, ...editFactoryPaymentsDraft];
+    }
+
+    setEditFactoryPaymentsDraft(nextDraft);
+    resetDraftPaymentForm(nextDraft.some(p => !p.isDeleted && p.status === 'VALID'));
+    return nextDraft;
   };
 
   const handleSaveFactoryOrder = async () => {
     if (!editingFactoryOrder) return;
-    setIsSavingFactoryOrder(true);
     setSaveFactoryOrderError(null);
+
+    let effectiveDraft = editFactoryPaymentsDraft;
+    // If user typed a payment/deposit in the inline form without clicking the add button first, apply it cleanly
+    if (draftPayAmount.trim() !== '') {
+      const applied = handleApplyDraftPayment();
+      if (!applied) {
+        return;
+      }
+      effectiveDraft = applied;
+    }
+
+    const originalPaymentsMap = new Map((editingFactoryOrder.payments || []).map(p => [p.id, p]));
+    const deleteIds = effectiveDraft
+      .filter(p => p.existingId && p.isDeleted)
+      .map(p => p.existingId!);
+
+    const add = effectiveDraft
+      .filter(p => p.isNew && !p.isDeleted)
+      .map(p => ({
+        amount: p.amount,
+        method: p.method,
+        paymentType: p.paymentType,
+        date: p.date,
+        notes: p.notes || undefined,
+        receiptNumber: p.receiptNumber || undefined,
+      }));
+
+    const update = effectiveDraft
+      .filter(p => {
+        if (!p.existingId || p.isDeleted) return false;
+        const orig = originalPaymentsMap.get(p.existingId);
+        if (!orig) return false;
+        return (
+          Number(orig.amount) !== Number(p.amount) ||
+          orig.method !== p.method ||
+          (orig.paymentType || 'GENERAL') !== p.paymentType ||
+          orig.date !== p.date ||
+          (orig.receiptNumber || '') !== p.receiptNumber ||
+          (orig.notes || '') !== p.notes
+        );
+      })
+      .map(p => ({
+        id: p.existingId!,
+        amount: p.amount,
+        method: p.method,
+        paymentType: p.paymentType,
+        date: p.date,
+        notes: p.notes || undefined,
+        receiptNumber: p.receiptNumber || undefined,
+      }));
+
+    setIsSavingFactoryOrder(true);
     try {
       const res = await fetch(`/api/admin/factory-orders/${editingFactoryOrder.id}`, {
         method: 'PUT',
@@ -926,6 +1126,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          eventDate: editFactoryOrderEventDate.trim() || undefined,
+          deliveryTime: editFactoryOrderDeliveryTime.trim() || undefined,
+          deliveryLocation: editFactoryOrderDeliveryLocation.trim() || undefined,
           items: editFactoryOrderItems.map(it => ({
             mealCode: it.mealCode,
             quantity: it.quantity,
@@ -933,12 +1136,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             orientalSweetOption: it.orientalSweetOption,
           })),
           packagingNotes: editFactoryOrderPackagingNotes,
+          paymentChanges: (add.length > 0 || update.length > 0 || deleteIds.length > 0)
+            ? { add, update, deleteIds }
+            : undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
         if (handleAuthError(res.status, data)) return;
         throw new Error(data.error || 'فشل تحديث أمر المصنع');
+      }
+      if (data.factoryOrder) {
+        setFactoryOrders(prev => prev.map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o));
       }
       setEditingFactoryOrder(null);
       loadAllData();
@@ -3692,6 +3901,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </strong>
                             </div>
                           </div>
+                          {fo.payments && fo.payments.filter(p => p.status === 'VALID').length > 0 && (
+                            <div className="pt-1.5 border-t border-[#EBDDC3]/70 space-y-1">
+                              {fo.payments.filter(p => p.status === 'VALID').slice(0, 3).map((p) => (
+                                <div key={p.id} className="flex items-center justify-between text-[11px] text-slate-600">
+                                  <span className="flex items-center gap-1.5">
+                                    <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                                      p.paymentType === 'DEPOSIT' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-700'
+                                    }`}>
+                                      {getFactoryPaymentTypeLabel(p.paymentType)}
+                                    </span>
+                                    <span>{getFactoryPaymentMethodLabel(p.method)}</span>
+                                    <span className="font-mono text-slate-400">{p.date}</span>
+                                  </span>
+                                  <strong className="font-mono text-emerald-800">{p.amount.toLocaleString('ar-EG')} ج</strong>
+                                </div>
+                              ))}
+                              {fo.payments.filter(p => p.status === 'VALID').length > 3 && (
+                                <div className="text-[10px] text-slate-400">
+                                  + {fo.payments.filter(p => p.status === 'VALID').length - 3} دفعات أخرى...
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -3711,10 +3943,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             type="button"
                             onClick={() => handleOpenEditFactoryOrder(fo)}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-xs rounded-lg border border-blue-300 transition-colors shadow-2xs"
-                            title="تعديل كميات أو أصناف أو خيارات أمر المصنع"
+                            title="تعديل أصناف وبيانات أمر المصنع والدفعات (العربون والدفعات)"
                           >
                             <Edit className="w-3.5 h-3.5 text-blue-700" />
-                            <span>تعديل أمر المصنع (v{fo.version})</span>
+                            <span>تعديل الأمر والدفعات (v{fo.version})</span>
                           </button>
                         )}
                         <button
@@ -5458,6 +5690,49 @@ APP_URL="https://celebre-eg.com"`}
                 </div>
               )}
 
+              {currentUser?.role !== 'factory' && (
+                <div className="bg-[#FAF8F5] p-3 rounded-xl border border-[#EBDDC3] space-y-2 text-xs">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-white p-2 rounded-lg border">
+                      <span className="text-[10px] text-slate-500 block">إجمالي تكلفة المصنع</span>
+                      <strong className="font-mono font-bold text-slate-900">
+                        {(printingFactoryOrder.factoryCostTotal || 0).toLocaleString('ar-EG')} ج.م
+                      </strong>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-emerald-200">
+                      <span className="text-[10px] text-emerald-700 block">المدفوع للمصنع (العربون)</span>
+                      <strong className="font-mono font-bold text-emerald-800">
+                        {(printingFactoryOrder.paidToFactoryAmount || 0).toLocaleString('ar-EG')} ج.م
+                      </strong>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border">
+                      <span className="text-[10px] text-slate-500 block">
+                        {(printingFactoryOrder.remainingToFactoryAmount ?? 0) < 0 ? 'رصيد دائن' : 'المتبقي للمصنع'}
+                      </span>
+                      <strong className={`font-mono font-bold ${(printingFactoryOrder.remainingToFactoryAmount ?? 0) < 0 ? 'text-purple-700' : (printingFactoryOrder.remainingToFactoryAmount ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {(printingFactoryOrder.remainingToFactoryAmount ?? 0) < 0
+                          ? `+${Math.abs(printingFactoryOrder.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج.م`
+                          : `${(printingFactoryOrder.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج.م`}
+                      </strong>
+                    </div>
+                  </div>
+                  {printingFactoryOrder.payments && printingFactoryOrder.payments.filter(p => p.status === 'VALID').length > 0 && (
+                    <div className="pt-1.5 border-t border-slate-200/70 space-y-1 text-[11px]">
+                      <div className="font-bold text-slate-700">تفاصيل دفعات المصنع المسددة:</div>
+                      {printingFactoryOrder.payments.filter(p => p.status === 'VALID').map((p, idx) => (
+                        <div key={p.id} className="flex justify-between text-slate-600">
+                          <span>
+                            {idx + 1}. {getFactoryPaymentTypeLabel(p.paymentType)} ({getFactoryPaymentMethodLabel(p.method)}) — {p.date}
+                            {p.receiptNumber ? ` • مرجع: ${p.receiptNumber}` : ''}
+                          </span>
+                          <strong className="font-mono text-emerald-800">{p.amount.toLocaleString('ar-EG')} ج.م</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex justify-end items-center pt-2 border-t no-print">
                 <div className="flex gap-2">
                   <button
@@ -5957,7 +6232,67 @@ APP_URL="https://celebre-eg.com"`}
                 )}
 
                 <form onSubmit={handleSaveFactoryPayment} className="space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Quick deposit / settlement percentage helpers */}
+                  {!editingFactoryPayment && (selectedFactoryOrderForPayments.factoryCostTotal || 0) > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="text-slate-500 font-bold ml-1">تعبئة سريعة:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amt = Math.round(((selectedFactoryOrderForPayments.factoryCostTotal || 0) * 0.25) * 100) / 100;
+                          setFactoryPaymentType('DEPOSIT');
+                          setFactoryPaymentAmount(String(amt));
+                          if (!factoryPaymentNotes) setFactoryPaymentNotes('عربون تشغيل 25%');
+                        }}
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold"
+                      >
+                        عربون 25% ({Math.round((selectedFactoryOrderForPayments.factoryCostTotal || 0) * 0.25).toLocaleString('ar-EG')} ج)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amt = Math.round(((selectedFactoryOrderForPayments.factoryCostTotal || 0) * 0.5) * 100) / 100;
+                          setFactoryPaymentType('DEPOSIT');
+                          setFactoryPaymentAmount(String(amt));
+                          if (!factoryPaymentNotes) setFactoryPaymentNotes('عربون تشغيل 50%');
+                        }}
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold"
+                      >
+                        عربون 50% ({Math.round((selectedFactoryOrderForPayments.factoryCostTotal || 0) * 0.5).toLocaleString('ar-EG')} ج)
+                      </button>
+                      {(selectedFactoryOrderForPayments.remainingToFactoryAmount ?? 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFactoryPaymentType('FINAL_SETTLEMENT');
+                            setFactoryPaymentAmount(String(selectedFactoryOrderForPayments.remainingToFactoryAmount));
+                            if (!factoryPaymentNotes) setFactoryPaymentNotes('سداد المتبقي للمصنع');
+                          }}
+                          className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg font-bold"
+                        >
+                          المتبقي بالكامل ({(selectedFactoryOrderForPayments.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج)
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-bold mb-1">
+                        تصنيف الدفعة <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={factoryPaymentType}
+                        onChange={(e) => setFactoryPaymentType(e.target.value as FactoryPaymentType)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#7A0C2E]"
+                      >
+                        <option value="DEPOSIT">عربون تشغيل (DEPOSIT)</option>
+                        <option value="INSTALLMENT">دفعة مالية (INSTALLMENT)</option>
+                        <option value="FINAL_SETTLEMENT">تسوية ختامية</option>
+                        <option value="GENERAL">دفعة عامة</option>
+                      </select>
+                    </div>
+
                     <div>
                       <label className="block text-slate-700 font-bold mb-1">
                         المبلغ المدفوع (بالجنيه) <span className="text-red-500">*</span>
@@ -6083,6 +6418,7 @@ APP_URL="https://celebre-eg.com"`}
                       <thead>
                         <tr className="bg-[#FAF8F5] border-b border-slate-200 text-slate-600 text-[11px] font-bold">
                           <th className="p-3">تاريخ السداد</th>
+                          <th className="p-3">التصنيف</th>
                           <th className="p-3">المبلغ المدفوع</th>
                           <th className="p-3">طريقة السداد</th>
                           <th className="p-3">رقم الإيصال / المرجع</th>
@@ -6096,12 +6432,23 @@ APP_URL="https://celebre-eg.com"`}
                             <td className="p-3 font-mono font-bold text-slate-800 whitespace-nowrap">
                               {p.date}
                             </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                                p.paymentType === 'DEPOSIT'
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : p.paymentType === 'FINAL_SETTLEMENT'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {getFactoryPaymentTypeLabel(p.paymentType)}
+                              </span>
+                            </td>
                             <td className="p-3 font-mono font-black text-emerald-800 text-sm whitespace-nowrap">
                               {p.amount.toLocaleString('ar-EG')} ج.م
                             </td>
                             <td className="p-3 whitespace-nowrap">
                               <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px]">
-                                {p.method === 'instapay' ? 'إنستاباي' : p.method === 'bank_transfer' ? 'تحويل بنكي' : p.method === 'cash' ? 'نقدي' : p.method === 'vodafone_cash' ? 'فودافون كاش' : p.method}
+                                {getFactoryPaymentMethodLabel(p.method)}
                               </span>
                             </td>
                             <td className="p-3 font-mono text-slate-600 text-[11px]">
@@ -6509,10 +6856,51 @@ APP_URL="https://celebre-eg.com"`}
           </div>
         )}
 
-        {/* Factory Order Revision Modal */}
-        {editingFactoryOrder && (
+        {/* Factory Order Revision & Payments Modal */}
+        {editingFactoryOrder && (() => {
+          const linkedBooking = bookings.find(
+            b => b.id === editingFactoryOrder.bookingId || b.bookingCode === editingFactoryOrder.bookingCode
+          );
+
+          let calcCost = 0;
+          let totalBoxes = 0;
+          editFactoryOrderItems.forEach(it => {
+            let drinkDelta = 0;
+            if (it.orientalSweetOption === 'replace_juice') {
+              drinkDelta = 0;
+            } else if (it.hasJuice) {
+              if (it.drinkOption === 'pepsi') drinkDelta = 4;
+              else if (it.drinkOption === 'no_juice') drinkDelta = -6;
+            }
+
+            let sweetDelta = 0;
+            if (it.orientalSweetOption === 'add_with_juice') sweetDelta = 10;
+            else if (it.orientalSweetOption === 'replace_juice') sweetDelta = 5;
+
+            const unitFact = Math.max(0, it.baseFactoryPrice + drinkDelta + sweetDelta);
+            calcCost += unitFact * it.quantity;
+            totalBoxes += it.quantity;
+          });
+
+          const activeDraftPayments = editFactoryPaymentsDraft.filter(p => !p.isDeleted && p.status === 'VALID');
+          const pendingInlineAmount = draftPayAmount.trim() !== '' && !isNaN(parseFloat(draftPayAmount)) && parseFloat(draftPayAmount) > 0
+            ? parseFloat(draftPayAmount)
+            : 0;
+
+          const paidFromDraft = activeDraftPayments.reduce((sum, p) => {
+            if (draftPayEditingKey && p.tempKey === draftPayEditingKey && pendingInlineAmount > 0) {
+              return sum + pendingInlineAmount;
+            }
+            return sum + p.amount;
+          }, 0) + (!draftPayEditingKey && pendingInlineAmount > 0 ? pendingInlineAmount : 0);
+
+          const prevCost = editingFactoryOrder.factoryCostTotal || 0;
+          const newRemaining = calcCost - paidFromDraft;
+          const isOverpaid = paidFromDraft > calcCost;
+
+          return (
           <div className="fixed inset-0 z-80 bg-black/70 flex items-center justify-center p-3">
-            <div className="bg-white w-full max-w-3xl rounded-3xl p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-4 text-right text-xs">
+            <div className="bg-white w-full max-w-4xl rounded-3xl p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-4 text-right text-xs">
               <div className="flex items-center justify-between border-b pb-3">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 bg-blue-50 text-blue-700 rounded-xl">
@@ -6520,7 +6908,7 @@ APP_URL="https://celebre-eg.com"`}
                   </div>
                   <div>
                     <h4 className="text-base font-black text-slate-900">
-                      تعديل أمر تشغيل المصنع ({editingFactoryOrder.orderNumber} - v{editingFactoryOrder.version})
+                      تعديل أمر تشغيل المصنع بالدفعات ({editingFactoryOrder.orderNumber} - v{editingFactoryOrder.version})
                     </h4>
                     <p className="text-[11px] text-slate-500">
                       حجز مرجعي: <strong className="font-mono text-[#7A0C2E]">{editingFactoryOrder.bookingCode}</strong> • ستتم ترقية رقم الإصدار إلى v{(editingFactoryOrder.version || 1) + 1}
@@ -6543,19 +6931,100 @@ APP_URL="https://celebre-eg.com"`}
                 </div>
               )}
 
-              {/* Items editing list */}
-              <div className="space-y-3">
-                <label className="font-bold text-slate-800 text-xs block">
-                  أصناف ووجبات أمر التشغيل وخيارات المشروبات والقطعة الشرقي:
-                </label>
+              {/* Customer Reference Banner (Admin-only financial context) */}
+              {linkedBooking && (
+                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-950">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>
+                      <strong>مرجع حجز العميل ({linkedBooking.customerName}):</strong> إجمالي الحجز للعميل{' '}
+                      <strong className="font-mono">{(linkedBooking.totalDistributorPrice || 0).toLocaleString('ar-EG')} ج</strong>{' '}
+                      • العربون والمدفوع من العميل حتى الآن:{' '}
+                      <strong className="font-mono text-emerald-800">{(linkedBooking.paidAmount || 0).toLocaleString('ar-EG')} ج</strong>
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-amber-700">
+                    (مرجع داخلي للإدارة ولا يظهر في تذكرة المصنع)
+                  </span>
+                </div>
+              )}
+
+              {/* Section 1: Logistics & Delivery Schedule */}
+              <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#E8DCC0] space-y-2.5">
+                <span className="font-bold text-slate-800 text-xs block border-b border-slate-200 pb-1">
+                  أولاً: موعد ومكان التسليم للمصنع
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">تاريخ المناسبة / التسليم</label>
+                    <input
+                      type="date"
+                      value={editFactoryOrderEventDate}
+                      onChange={(e) => setEditFactoryOrderEventDate(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">وقت التسليم</label>
+                    <input
+                      type="text"
+                      value={editFactoryOrderDeliveryTime}
+                      onChange={(e) => setEditFactoryOrderDeliveryTime(e.target.value)}
+                      placeholder="مثال: 15:00"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">مكان التسليم</label>
+                    <input
+                      type="text"
+                      value={editFactoryOrderDeliveryLocation}
+                      onChange={(e) => setEditFactoryOrderDeliveryLocation(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Items editing list (Add / Remove / Change Meal / Qty / Options) */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 text-xs block">
+                    ثانياً: أصناف ووجبات أمر التشغيل وخيارات المشروبات والقطعة الشرقي:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (meals.length > 0) {
+                        const m = meals[0];
+                        setEditFactoryOrderItems([
+                          ...editFactoryOrderItems,
+                          {
+                            mealCode: m.code,
+                            mealName: m.name,
+                            quantity: 10,
+                            drinkOption: 'standard',
+                            orientalSweetOption: 'none',
+                            baseFactoryPrice: m.factoryPrice || 0,
+                            hasJuice: m.hasJuice,
+                          },
+                        ]);
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-[#7A0C2E] hover:bg-[#560820] text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>إضافة وجبة لأمر المصنع</span>
+                  </button>
+                </div>
 
                 {editFactoryOrderItems.map((it, idx) => {
                   let drinkDelta = 0;
                   if (it.orientalSweetOption === 'replace_juice') {
                     drinkDelta = 0;
                   } else if (it.hasJuice) {
-                    if (it.drinkOption === 'pepsi') drinkDelta = 4; // -5 juice -1 package +10 can = +4 EGP net
-                    else if (it.drinkOption === 'no_juice') drinkDelta = -6; // -5 juice -1 package = -6 EGP
+                    if (it.drinkOption === 'pepsi') drinkDelta = 4;
+                    else if (it.drinkOption === 'no_juice') drinkDelta = -6;
                   }
 
                   let sweetDelta = 0;
@@ -6568,17 +7037,45 @@ APP_URL="https://celebre-eg.com"`}
                   return (
                     <div key={idx} className="p-3 bg-[#FAF8F5] rounded-xl border border-slate-200 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-black text-xs text-[#7A0C2E] bg-white px-2 py-0.5 rounded border">
-                            {it.mealCode}
-                          </span>
-                          <span className="font-bold text-slate-800">{it.mealName}</span>
-                          <span className="text-[10px] text-slate-500">
-                            (سعر المصنع الأساسي: {it.baseFactoryPrice} ج)
-                          </span>
+                        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                          <select
+                            value={it.mealCode}
+                            onChange={(e) => {
+                              const nextMeal = meals.find(m => m.code === e.target.value);
+                              if (!nextMeal) return;
+                              const updated = [...editFactoryOrderItems];
+                              updated[idx] = {
+                                ...updated[idx],
+                                mealCode: nextMeal.code,
+                                mealName: nextMeal.name,
+                                baseFactoryPrice: nextMeal.factoryPrice || 0,
+                                hasJuice: nextMeal.hasJuice,
+                              };
+                              setEditFactoryOrderItems(updated);
+                            }}
+                            className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-[#7A0C2E]"
+                          >
+                            {meals.map(m => (
+                              <option key={m.code} value={m.code}>
+                                {m.code} - {m.name} (سعر المصنع: {m.factoryPrice ?? 0} ج)
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <div className="font-bold font-mono text-slate-900">
-                          {unitFact} ج × {it.quantity} = <span className="text-[#7A0C2E] font-black">{totalFact.toLocaleString('ar-EG')} ج</span>
+                        <div className="flex items-center gap-2">
+                          <div className="font-bold font-mono text-slate-900">
+                            {unitFact} ج × {it.quantity} = <span className="text-[#7A0C2E] font-black">{totalFact.toLocaleString('ar-EG')} ج</span>
+                          </div>
+                          {editFactoryOrderItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setEditFactoryOrderItems(editFactoryOrderItems.filter((_, i) => i !== idx))}
+                              className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                              title="حذف هذا الصنف من أمر المصنع"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -6675,91 +7172,333 @@ APP_URL="https://celebre-eg.com"`}
                 })}
               </div>
 
-              {/* Packaging Notes */}
+              {/* Section 3: Factory Order Notes */}
               <div>
                 <label className="font-bold text-slate-800 text-xs block mb-1">
-                  تعليمات التعبئة والتغليف للمصنع:
+                  ملاحظات التشغيل للمصنع:
                 </label>
                 <textarea
                   rows={2}
                   value={editFactoryOrderPackagingNotes}
                   onChange={(e) => setEditFactoryOrderPackagingNotes(e.target.value)}
                   className="w-full px-3 py-2 border rounded-xl bg-[#FAF8F5] focus:outline-none focus:border-[#7A0C2E]"
-                  placeholder="تعليمات التجهيز والتغليف..."
+                  placeholder="ملاحظات خاصة بالطلب..."
                 />
               </div>
 
-              {/* Live Accounting Calculation & Balance Review */}
-              {(() => {
-                let calcCost = 0;
-                let totalBoxes = 0;
-                editFactoryOrderItems.forEach(it => {
-                  let drinkDelta = 0;
-                  if (it.orientalSweetOption === 'replace_juice') {
-                    drinkDelta = 0;
-                  } else if (it.hasJuice) {
-                    if (it.drinkOption === 'pepsi') drinkDelta = 4; // -5 juice -1 package +10 can = +4 EGP net
-                    else if (it.drinkOption === 'no_juice') drinkDelta = -6; // -5 juice -1 package = -6 EGP
-                  }
+              {/* Section 4: Factory Payments & Deposits Management (العربون والدفعات للمصنع) */}
+              <div className="p-4 bg-[#FCFBF9] rounded-2xl border-2 border-[#EBDDC3] space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EBDDC3] pb-2">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-[#7A0C2E]" />
+                    <span className="font-black text-slate-900 text-xs">
+                      ثالثاً: مدفوعات المصنع (العربون والدفعات المسددة للمصنع)
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    يمكنك إضافة عربون أو تعديل أو حذف أي دفعة وسيتم حفظها مع الأمر في خطوة واحدة
+                  </span>
+                </div>
 
-                  let sweetDelta = 0;
-                  if (it.orientalSweetOption === 'add_with_juice') sweetDelta = 10;
-                  else if (it.orientalSweetOption === 'replace_juice') sweetDelta = 5;
+                {/* Inline Add / Edit Deposit or Payment Sub-form */}
+                <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-[11px] text-[#7A0C2E] flex items-center gap-1">
+                      {draftPayEditingKey ? (
+                        <>
+                          <Edit className="w-3.5 h-3.5 text-blue-600" />
+                          <span>تعديل الدفعة المحددة</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>إضافة عربون أو دفعة جديدة للمصنع</span>
+                        </>
+                      )}
+                    </span>
 
-                  const unitFact = Math.max(0, it.baseFactoryPrice + drinkDelta + sweetDelta);
-                  calcCost += unitFact * it.quantity;
-                  totalBoxes += it.quantity;
-                });
-
-                const prevCost = editingFactoryOrder.factoryCostTotal || 0;
-                const paidToFact = editingFactoryOrder.paidToFactoryAmount || 0;
-                const newRemaining = calcCost - paidToFact;
-                const isOverpaid = paidToFact > calcCost;
-
-                return (
-                  <div className="space-y-2 pt-2 border-t">
-                    <div className="grid grid-cols-4 gap-2 text-center">
-                      <div className="bg-[#FAF8F5] p-2.5 rounded-xl border border-slate-200">
-                        <span className="text-[10px] text-slate-500 block">إجمالي البوكسات</span>
-                        <strong className="font-black text-slate-900 text-sm">{totalBoxes} بوكس</strong>
-                      </div>
-                      <div className="bg-[#FAF8F5] p-2.5 rounded-xl border border-slate-200">
-                        <span className="text-[10px] text-slate-500 block">التكلفة الجديدة للمصنع</span>
-                        <strong className="font-black text-[#7A0C2E] text-sm">{calcCost.toLocaleString('ar-EG')} ج</strong>
-                        <span className="text-[10px] text-slate-400 block mt-0.5">كانت {prevCost.toLocaleString('ar-EG')} ج</span>
-                      </div>
-                      <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
-                        <span className="text-[10px] text-emerald-800 block">المسدد الفعلي للمصنع</span>
-                        <strong className="font-black text-emerald-800 text-sm">{paidToFact.toLocaleString('ar-EG')} ج</strong>
-                        <span className="text-[10px] text-emerald-600 block mt-0.5">{editingFactoryOrder.payments?.length || 0} دفعات سابقة</span>
-                      </div>
-                      <div className={`p-2.5 rounded-xl border ${isOverpaid ? 'bg-purple-50 border-purple-300 text-purple-900' : newRemaining === 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
-                        <span className="text-[10px] block opacity-80">
-                          {isOverpaid ? 'سداد بالزيادة (دائن)' : 'الرصيد المتبقي للمصنع'}
-                        </span>
-                        <strong className={`font-black text-sm ${isOverpaid ? 'text-purple-800' : newRemaining === 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
-                          {isOverpaid 
-                            ? `+${Math.abs(newRemaining).toLocaleString('ar-EG')} ج` 
-                            : `${newRemaining.toLocaleString('ar-EG')} ج`}
-                        </strong>
-                        <span className="text-[10px] block mt-0.5 font-bold">
-                          {isOverpaid ? 'OVERPAID' : newRemaining === 0 ? 'FULLY_PAID' : paidToFact > 0 ? 'PARTIALLY_PAID' : 'UNPAID'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {isOverpaid && (
-                      <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-purple-900 text-xs flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-purple-700 flex-shrink-0" />
-                        <div>
-                          <strong>تنبيه محاسبي (OVERPAID): </strong>
-                          المبلغ المسدد للمصنع ({paidToFact.toLocaleString('ar-EG')} ج) أكبر من تكلفة التشغيل المعدلة ({calcCost.toLocaleString('ar-EG')} ج). تظل سجلات الدفعات التاريخية محفوظة بالكامل دون حذف، ويظهر رصيد دائن للمصنع بقيمة (+{(paidToFact - calcCost).toLocaleString('ar-EG')} ج) لأغراض التسوية المحاسبية.
-                        </div>
+                    {!draftPayEditingKey && calcCost > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span className="text-slate-400">تعبئة سريعة:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftPayType('DEPOSIT');
+                            setDraftPayAmount(String(Math.round(calcCost * 0.25)));
+                            if (!draftPayNotes) setDraftPayNotes('عربون تشغيل 25%');
+                          }}
+                          className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded font-bold"
+                        >
+                          عربون 25% ({Math.round(calcCost * 0.25).toLocaleString('ar-EG')} ج)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftPayType('DEPOSIT');
+                            setDraftPayAmount(String(Math.round(calcCost * 0.5)));
+                            if (!draftPayNotes) setDraftPayNotes('عربون تشغيل 50%');
+                          }}
+                          className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded font-bold"
+                        >
+                          عربون 50% ({Math.round(calcCost * 0.5).toLocaleString('ar-EG')} ج)
+                        </button>
+                        {calcCost - activeDraftPayments.reduce((s, p) => s + p.amount, 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rem = calcCost - activeDraftPayments.reduce((s, p) => s + p.amount, 0);
+                              setDraftPayType('FINAL_SETTLEMENT');
+                              setDraftPayAmount(String(rem));
+                              if (!draftPayNotes) setDraftPayNotes('سداد المتبقي للمصنع');
+                            }}
+                            className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-bold"
+                          >
+                            المتبقي ({(calcCost - activeDraftPayments.reduce((s, p) => s + p.amount, 0)).toLocaleString('ar-EG')} ج)
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
-                );
-              })()}
+
+                  {draftPayError && (
+                    <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-700 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{draftPayError}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">نوع الدفعة</label>
+                      <select
+                        value={draftPayType}
+                        onChange={(e) => setDraftPayType(e.target.value as FactoryPaymentType)}
+                        className="w-full px-2.5 py-1.5 bg-[#FAF8F5] border border-slate-300 rounded-lg text-xs font-bold"
+                      >
+                        <option value="DEPOSIT">عربون تشغيل (DEPOSIT)</option>
+                        <option value="INSTALLMENT">دفعة مالية / قسط</option>
+                        <option value="FINAL_SETTLEMENT">تسوية ختامية</option>
+                        <option value="GENERAL">دفعة عامة</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">المبلغ (ج.م)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="any"
+                        placeholder="مثال: 6000"
+                        value={draftPayAmount}
+                        onChange={(e) => setDraftPayAmount(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">طريقة السداد</label>
+                      <select
+                        value={draftPayMethod}
+                        onChange={(e) => setDraftPayMethod(e.target.value as any)}
+                        className="w-full px-2.5 py-1.5 bg-[#FAF8F5] border border-slate-300 rounded-lg text-xs font-bold"
+                      >
+                        <option value="instapay">إنستاباي (InstaPay)</option>
+                        <option value="bank_transfer">تحويل بنكي</option>
+                        <option value="cash">نقدي (كاش)</option>
+                        <option value="vodafone_cash">فودافون كاش</option>
+                        <option value="other">أخرى</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">تاريخ السداد</label>
+                      <input
+                        type="date"
+                        value={draftPayDate}
+                        onChange={(e) => setDraftPayDate(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">رقم الإيصال / المرجع</label>
+                      <input
+                        type="text"
+                        placeholder="اختياري: INSTA-1234"
+                        value={draftPayReceipt}
+                        onChange={(e) => setDraftPayReceipt(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">ملاحظات الدفعة</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: عربون تشغيل متفق عليه"
+                        value={draftPayNotes}
+                        onChange={(e) => setDraftPayNotes(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div className="flex gap-1.5 justify-end">
+                      {draftPayEditingKey && (
+                        <button
+                          type="button"
+                          onClick={() => resetDraftPaymentForm(activeDraftPayments.length > 0)}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[11px]"
+                        >
+                          إلغاء
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleApplyDraftPayment}
+                        className="px-3.5 py-1.5 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold rounded-lg text-[11px] flex items-center gap-1"
+                      >
+                        {draftPayEditingKey ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                        <span>{draftPayEditingKey ? 'تطبيق تعديل الدفعة' : 'إضافة الدفعة للقائمة'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Staged & Existing Payments List */}
+                {editFactoryPaymentsDraft.length === 0 ? (
+                  <div className="p-4 text-center text-slate-400 bg-white rounded-xl border border-dashed border-slate-200 text-[11px]">
+                    لا توجد دفعات أو عربون مسجل لأمر المصنع هذا بعد. أضف العربون أو الدفعة أعلاه ثم احفظ.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {editFactoryPaymentsDraft.map((p) => (
+                      <div
+                        key={p.tempKey}
+                        className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-[11px] ${
+                          p.isDeleted
+                            ? 'bg-rose-50/70 border-rose-200 opacity-60 line-through'
+                            : p.isNew
+                              ? 'bg-emerald-50/60 border-emerald-300'
+                              : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                            p.paymentType === 'DEPOSIT'
+                              ? 'bg-amber-100 text-amber-900'
+                              : p.paymentType === 'FINAL_SETTLEMENT'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {getFactoryPaymentTypeLabel(p.paymentType)}
+                          </span>
+                          <strong className="font-mono text-sm text-emerald-800">{p.amount.toLocaleString('ar-EG')} ج.م</strong>
+                          <span className="text-slate-600">{getFactoryPaymentMethodLabel(p.method)}</span>
+                          <span className="font-mono text-slate-500">{p.date}</span>
+                          {p.receiptNumber && (
+                            <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                              مرجع: {p.receiptNumber}
+                            </span>
+                          )}
+                          {p.notes && <span className="text-slate-500">({p.notes})</span>}
+                          {p.isNew && !p.isDeleted && (
+                            <span className="px-1.5 py-0.5 bg-emerald-600 text-white rounded text-[9px] font-bold">جديدة</span>
+                          )}
+                          {p.isDeleted && (
+                            <span className="px-1.5 py-0.5 bg-rose-600 text-white rounded text-[9px] font-bold">سيتم حذفها</span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {!p.isDeleted && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDraftPayEditingKey(p.tempKey);
+                                setDraftPayType(p.paymentType);
+                                setDraftPayAmount(String(p.amount));
+                                setDraftPayMethod(p.method);
+                                setDraftPayDate(p.date);
+                                setDraftPayReceipt(p.receiptNumber);
+                                setDraftPayNotes(p.notes);
+                                setDraftPayError(null);
+                              }}
+                              className="p-1 text-blue-600 hover:bg-blue-50 rounded-lg"
+                              title="تعديل هذه الدفعة"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (p.isNew) {
+                                setEditFactoryPaymentsDraft(prev => prev.filter(item => item.tempKey !== p.tempKey));
+                              } else {
+                                setEditFactoryPaymentsDraft(prev =>
+                                  prev.map(item =>
+                                    item.tempKey === p.tempKey ? { ...item, isDeleted: !item.isDeleted } : item
+                                  )
+                                );
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-lg font-bold text-[10px] ${
+                              p.isDeleted
+                                ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                                : 'text-rose-600 hover:bg-rose-50'
+                            }`}
+                            title={p.isDeleted ? 'تراجع عن الحذف' : 'حذف هذه الدفعة'}
+                          >
+                            {p.isDeleted ? 'تراجع' : <Trash2 className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Live Accounting Calculation & Balance Review */}
+              <div className="space-y-2 pt-2 border-t">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                  <div className="bg-[#FAF8F5] p-2.5 rounded-xl border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block">إجمالي البوكسات</span>
+                    <strong className="font-black text-slate-900 text-sm">{totalBoxes} بوكس</strong>
+                  </div>
+                  <div className="bg-[#FAF8F5] p-2.5 rounded-xl border border-slate-200">
+                    <span className="text-[10px] text-slate-500 block">التكلفة الجديدة للمصنع</span>
+                    <strong className="font-black text-[#7A0C2E] text-sm">{calcCost.toLocaleString('ar-EG')} ج</strong>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">كانت {prevCost.toLocaleString('ar-EG')} ج</span>
+                  </div>
+                  <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-emerald-800 block">المسدد للمصنع (بعد التعديل)</span>
+                    <strong className="font-black text-emerald-800 text-sm">{paidFromDraft.toLocaleString('ar-EG')} ج</strong>
+                    <span className="text-[10px] text-emerald-600 block mt-0.5">
+                      {activeDraftPayments.length + (!draftPayEditingKey && pendingInlineAmount > 0 ? 1 : 0)} دفعة نشطة
+                    </span>
+                  </div>
+                  <div className={`p-2.5 rounded-xl border ${isOverpaid ? 'bg-purple-50 border-purple-300 text-purple-900' : newRemaining === 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
+                    <span className="text-[10px] block opacity-80">
+                      {isOverpaid ? 'سداد بالزيادة (دائن)' : 'الرصيد المتبقي للمصنع'}
+                    </span>
+                    <strong className={`font-black text-sm ${isOverpaid ? 'text-purple-800' : newRemaining === 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
+                      {isOverpaid
+                        ? `+${Math.abs(newRemaining).toLocaleString('ar-EG')} ج`
+                        : `${newRemaining.toLocaleString('ar-EG')} ج`}
+                    </strong>
+                    <span className="text-[10px] block mt-0.5 font-bold">
+                      {isOverpaid ? 'OVERPAID' : newRemaining === 0 ? 'FULLY_PAID' : paidFromDraft > 0 ? 'PARTIALLY_PAID' : 'UNPAID'}
+                    </span>
+                  </div>
+                </div>
+
+                {isOverpaid && (
+                  <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-purple-900 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-purple-700 flex-shrink-0" />
+                    <div>
+                      <strong>تنبيه محاسبي (OVERPAID): </strong>
+                      المبلغ المسدد للمصنع ({paidFromDraft.toLocaleString('ar-EG')} ج) أكبر من تكلفة التشغيل المعدلة ({calcCost.toLocaleString('ar-EG')} ج). تظل سجلات الدفعات التاريخية محفوظة بالكامل دون حذف، ويظهر رصيد دائن للمصنع بقيمة (+{(paidFromDraft - calcCost).toLocaleString('ar-EG')} ج) لأغراض التسوية المحاسبية.
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t">
                 <button
@@ -6777,12 +7516,13 @@ APP_URL="https://celebre-eg.com"`}
                   className="px-6 py-2 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <Check className="w-4 h-4 text-[#DFC066]" />
-                  <span>{isSavingFactoryOrder ? 'جاري حفظ وترقية الإصدار...' : `حفظ وتحديث أمر المصنع (v${(editingFactoryOrder.version || 1) + 1})`}</span>
+                  <span>{isSavingFactoryOrder ? 'جاري حفظ وترقية الإصدار...' : `حفظ وتحديث أمر المصنع والدفعات (v${(editingFactoryOrder.version || 1) + 1})`}</span>
                 </button>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
       </div>
     </div>

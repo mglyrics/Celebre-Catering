@@ -130,6 +130,7 @@ export const TABLE_DDL_QUERIES: Record<string, string> = {
       "bookingCode" TEXT NOT NULL,
       "amount" DOUBLE PRECISION NOT NULL,
       "method" TEXT NOT NULL,
+      "paymentType" TEXT NOT NULL DEFAULT 'GENERAL',
       "date" TEXT NOT NULL,
       "notes" TEXT,
       "receiptNumber" TEXT,
@@ -196,6 +197,8 @@ export const SCHEMA_COLUMN_MIGRATIONS = [
   'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT \'UNPAID\';',
 
   // 5. factory_payments columns
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "paymentType" TEXT NOT NULL DEFAULT \'GENERAL\';',
+  'UPDATE "factory_payments" SET "paymentType" = \'GENERAL\' WHERE "paymentType" IS NULL;',
   'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "notes" TEXT;',
   'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "receiptNumber" TEXT;',
   'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "recordedBy" TEXT DEFAULT \'الإدارة\';',

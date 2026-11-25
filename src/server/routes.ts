@@ -1284,11 +1284,18 @@ apiRouter.get('/admin/factory-orders', requireAuth, async (req: AuthenticatedReq
   }
 });
 
-// Update / Revise Factory Order (recalculates authoritative factory prices, increments version, handles OVERPAID balance)
+// Update / Revise Factory Order (recalculates authoritative factory prices, increments version, manages factory payments atomically, handles OVERPAID balance)
 apiRouter.put('/admin/factory-orders/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const updated = await db.updateFactoryOrder(id, req.body, req.user?.name || req.user?.username || 'الإدارة');
+    const body = req.body || {};
+
+    if (body.paymentChanges !== undefined && (typeof body.paymentChanges !== 'object' || body.paymentChanges === null)) {
+      res.status(400).json({ error: 'صيغة تعديلات الدفعات (paymentChanges) غير صالحة' });
+      return;
+    }
+
+    const updated = await db.updateFactoryOrder(id, body, req.user?.name || req.user?.username || 'الإدارة');
     res.json({ success: true, factoryOrder: updated });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -1350,9 +1357,10 @@ apiRouter.get('/admin/factory-orders/:id/payments', requireAuth, requireRole(['s
 apiRouter.post('/admin/factory-orders/:id/payments', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, date, notes, receiptNumber } = req.body || {};
+    const { amount, method, paymentType, date, notes, receiptNumber } = req.body || {};
 
-    if (!amount || Number(amount) <= 0) {
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
       res.status(400).json({ error: 'قيمة دفعة المصنع يجب أن تكون رقماً أكبر من الصفر' });
       return;
     }
@@ -1360,8 +1368,9 @@ apiRouter.post('/admin/factory-orders/:id/payments', requireAuth, requireRole(['
     const result = await db.addFactoryPayment(
       {
         factoryOrderId: id,
-        amount: Number(amount),
+        amount: numAmount,
         method: method || 'cash',
+        paymentType,
         date,
         notes,
         receiptNumber,
@@ -1379,13 +1388,23 @@ apiRouter.post('/admin/factory-orders/:id/payments', requireAuth, requireRole(['
 apiRouter.put('/admin/factory-payments/:id', requireAuth, requireRole(['super_admin', 'admin']), async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, date, notes, receiptNumber } = req.body || {};
+    const { amount, method, paymentType, date, notes, receiptNumber } = req.body || {};
+
+    let parsedAmount: number | undefined;
+    if (amount !== undefined) {
+      parsedAmount = Number(amount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        res.status(400).json({ error: 'قيمة الدفعة المعدلة يجب أن تكون رقماً أكبر من الصفر' });
+        return;
+      }
+    }
 
     const result = await db.updateFactoryPayment(
       id,
       {
-        amount: amount !== undefined ? Number(amount) : undefined,
+        amount: parsedAmount,
         method,
+        paymentType,
         date,
         notes,
         receiptNumber,

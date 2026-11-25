@@ -132,6 +132,7 @@ model FactoryPayment {
   bookingCode        String
   amount             Float
   method             String       // instapay, bank_transfer, cash, vodafone_cash, other
+  paymentType        String       @default("GENERAL") // DEPOSIT, INSTALLMENT, FINAL_SETTLEMENT, GENERAL
   date               String
   notes              String?
   receiptNumber      String?
