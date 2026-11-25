@@ -2120,6 +2120,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   >
                     {isLoggingIn ? 'جاري التحقق...' : 'تسجيل الدخول'}
                   </button>
+
+                  <div className="pt-2 border-t border-slate-200/80">
+                    <button
+                      type="button"
+                      onClick={openForgotPasswordMode}
+                      className="w-full py-2.5 px-3 bg-[#7A0C2E]/5 hover:bg-[#7A0C2E]/10 text-[#7A0C2E] border border-[#7A0C2E]/25 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Key className="w-4 h-4 flex-shrink-0" />
+                      <span>نسيت كلمة المرور؟ (استعادة حساب السوبر أدمن والإدارة)</span>
+                    </button>
+                  </div>
                 </form>
               </>
             ) : (
@@ -2129,7 +2140,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     استعادة كلمة المرور
                   </h4>
                   <p className="text-xs text-slate-500">
-                    إعادة تعيين كلمة مرور الإدارة بشكل آمن ومشفر
+                    إعادة تعيين كلمة مرور السوبر أدمن أو الإدارة أو المصنع بشكل آمن ومشفر
                   </p>
                 </div>
 
