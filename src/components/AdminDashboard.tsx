@@ -3587,7 +3587,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {factoryOrders.map(fo => (
+                  {factoryOrders.map(fo => {
+                    const linkedBooking = bookings.find(b => b.id === fo.bookingId || b.bookingCode === fo.bookingCode);
+                    const legacyBoilerplate = 'العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة.';
+                    const customOrderNote = (fo.packagingNotes || '').replace(legacyBoilerplate, '').trim();
+
+                    return (
                     <div key={fo.id} className="p-4 bg-white rounded-2xl border-2 border-[#EBDDC3] shadow-xs space-y-3">
                       
                       <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -3608,18 +3613,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </select>
                       </div>
 
-                      <div className="text-xs space-y-1 text-slate-700">
-                        <div>موعد التسليم: <strong className="text-slate-900">{fo.eventDate} ({fo.deliveryTime})</strong></div>
-                        <div>المكان: <span>{fo.deliveryLocation}</span></div>
+                      <div className="text-xs space-y-1 text-slate-700 bg-[#FAF8F5] p-3 rounded-xl border border-slate-200/70">
+                        {linkedBooking && (
+                          <div>
+                            بيانات العميل: <strong className="text-slate-900">{linkedBooking.customerName}</strong>
+                            <span className="text-slate-600 mr-1" dir="ltr">({linkedBooking.customerPhone})</span>
+                          </div>
+                        )}
+                        {linkedBooking?.eventName && (
+                          <div>المناسبة: <strong className="text-slate-900">{linkedBooking.eventName}</strong></div>
+                        )}
+                        <div>التاريخ: <strong className="text-slate-900">{fo.eventDate}</strong> <span className="mx-1">•</span> الوقت: <strong className="text-slate-900">{fo.deliveryTime}</strong></div>
+                        <div>مكان التسليم: <strong className="text-slate-900">{fo.deliveryLocation}</strong></div>
                       </div>
 
                       {/* Items checklist */}
                       <div className="bg-[#FAF8F5] p-3 rounded-xl border border-slate-200 text-xs space-y-2">
-                        <span className="font-bold text-slate-700 block text-[11px]">قائمة الوجبات والمكونات المطلوبة:</span>
+                        <span className="font-bold text-slate-700 block text-[11px]">
+                          تفاصيل الطلب ({fo.items.length} {fo.items.length > 1 ? 'أصناف' : 'صنف'}):
+                        </span>
                         {fo.items.map((it, idx) => (
                           <div key={idx} className="border-b border-slate-200/60 pb-1.5 last:border-none">
                             <div className="flex justify-between font-bold text-slate-900">
-                              <span>• {it.mealCode} - {it.quantity} وجبة</span>
+                              <span>• {it.mealName || it.mealCode} ({it.mealCode}) - {it.quantity} وجبة</span>
                               <span className="text-[#7A0C2E]">{it.specialInstructions}</span>
                             </div>
                             <p className="text-[11px] text-slate-600 mt-0.5">{it.ingredients}</p>
@@ -3627,9 +3643,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         ))}
                       </div>
 
-                      <div className="text-[11px] text-slate-500 bg-amber-50/60 p-2 rounded-lg border border-amber-200">
-                        <strong>تعليمات التعبئة: </strong> {fo.packagingNotes}
-                      </div>
+                      {customOrderNote && (
+                        <div className="text-[11px] text-slate-700 bg-amber-50/60 p-2 rounded-lg border border-amber-200">
+                          <strong>ملاحظات الطلب: </strong> {customOrderNote}
+                        </div>
+                      )}
 
                       {/* Factory Financial Account & Status (admin only) */}
                       {currentUser?.role !== 'factory' && (
@@ -3710,7 +3728,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                     </div>
-                  ))}
+                    );
+                  })}
 
                   {factoryOrders.length === 0 && (
                     <div className="col-span-2 text-center py-12 text-slate-400 text-xs">
@@ -5383,7 +5402,15 @@ APP_URL="https://celebre-eg.com"`}
         )}
 
         {/* Printable Factory Order Ticket Modal */}
-        {printingFactoryOrder && (
+        {printingFactoryOrder && (() => {
+          const linkedBooking = bookings.find(
+            b => b.id === printingFactoryOrder.bookingId || b.bookingCode === printingFactoryOrder.bookingCode
+          );
+          const legacyBoilerplate = 'العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة.';
+          const customOrderNote = (printingFactoryOrder.packagingNotes || '').replace(legacyBoilerplate, '').trim();
+          const totalBoxes = printingFactoryOrder.items.reduce((sum, it) => sum + (it.quantity || 0), 0);
+
+          return (
           <div className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-3 print:static print:p-0 print:bg-white">
             <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4 text-slate-900 print:shadow-none print:border-none print:p-0 printable-factory-ticket">
               <div className="text-center border-b pb-3">
@@ -5391,22 +5418,33 @@ APP_URL="https://celebre-eg.com"`}
                   أمر تشغيل مطبخ ومصنع Celebre Catering
                 </span>
                 <p className="text-xs text-slate-500 mt-1">
-                  رقم الأمر: {printingFactoryOrder.orderNumber} (الإصدار {printingFactoryOrder.version})
+                  رقم الأمر: {printingFactoryOrder.orderNumber} (الإصدار {printingFactoryOrder.version}) • رقم الحجز: <span className="font-mono font-bold">{printingFactoryOrder.bookingCode}</span>
                 </p>
               </div>
 
-              <div className="text-xs space-y-1.5 bg-[#FAF8F5] p-3 rounded-xl border">
-                <div>تاريخ التسليم: <strong>{printingFactoryOrder.eventDate} ({printingFactoryOrder.deliveryTime})</strong></div>
+              <div className="text-xs space-y-1.5 bg-[#FAF8F5] p-3.5 rounded-xl border">
+                {linkedBooking && (
+                  <div>
+                    بيانات العميل: <strong>{linkedBooking.customerName}</strong>
+                    <span className="mr-1 text-slate-600" dir="ltr">({linkedBooking.customerPhone})</span>
+                  </div>
+                )}
+                {linkedBooking?.eventName && (
+                  <div>المناسبة: <strong>{linkedBooking.eventName}</strong></div>
+                )}
+                <div>التاريخ: <strong>{printingFactoryOrder.eventDate}</strong> <span className="mx-1">•</span> الوقت: <strong>{printingFactoryOrder.deliveryTime}</strong></div>
                 <div>مكان التسليم: <strong>{printingFactoryOrder.deliveryLocation}</strong></div>
-                <div>رقم الحجز: <span className="font-mono">{printingFactoryOrder.bookingCode}</span></div>
               </div>
 
               <div className="space-y-2 text-xs">
-                <span className="font-bold text-slate-800">بيان الوجبات والمكونات (فحص الجودة):</span>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800">تفاصيل الطلب ({printingFactoryOrder.items.length} {printingFactoryOrder.items.length > 1 ? 'أصناف' : 'صنف'}):</span>
+                  <span className="font-bold text-[#7A0C2E]">الإجمالي: {totalBoxes} بوكس</span>
+                </div>
                 {printingFactoryOrder.items.map((it, idx) => (
                   <div key={idx} className="p-2.5 bg-slate-50 rounded-lg border">
                     <div className="flex justify-between font-bold">
-                      <span>• {it.mealCode} ({it.quantity} بوكس)</span>
+                      <span>• {it.mealName || it.mealCode} ({it.mealCode}) — {it.quantity} بوكس</span>
                       <span className="text-[#7A0C2E]">{it.specialInstructions}</span>
                     </div>
                     <p className="text-[11px] text-slate-700 mt-1">{it.ingredients}</p>
@@ -5414,12 +5452,13 @@ APP_URL="https://celebre-eg.com"`}
                 ))}
               </div>
 
-              <div className="text-[11px] bg-amber-50 p-2.5 rounded-lg border border-amber-200">
-                <strong>التعبئة: </strong> {printingFactoryOrder.packagingNotes}
-              </div>
+              {customOrderNote && (
+                <div className="text-[11px] bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                  <strong>ملاحظات الطلب: </strong> {customOrderNote}
+                </div>
+              )}
 
-              <div className="flex justify-between items-center pt-2 border-t no-print">
-                <span className="text-[10px] text-slate-400">Celebre Factory Order • السعر وهامش الربح محجوب تماماً</span>
+              <div className="flex justify-end items-center pt-2 border-t no-print">
                 <div className="flex gap-2">
                   <button
                     onClick={() => setPrintingFactoryOrder(null)}
@@ -5437,7 +5476,8 @@ APP_URL="https://celebre-eg.com"`}
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* Factory Order Review Modal (Strictly factory costs, server-calculated, duplicate prevention) */}
         {isFactoryReviewOpen && factoryPreviewData && (

@@ -2086,7 +2086,7 @@ export const db = {
       items: previewItems,
       existingOrdersCount: uniqueExisting.length,
       existingOrders: uniqueExisting,
-      packagingNotes: `العلبة البيضاء الرسمية المعتمدة لـ Celebre Catering. وضع شوكة ومنديل معطر مع كل وجبة. فحص الجودة وتاريخ التعبئة. ${booking.notes || ''}`.trim(),
+      packagingNotes: (booking.notes || '').trim(),
     };
   },
 
@@ -4172,7 +4172,7 @@ export const db = {
 };
 
 export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking: Booking, factoryPhone?: string): { messageText: string; whatsappUrl: string } {
-  const itemsText = factoryOrder.items.map((it) => {
+  const itemsText = factoryOrder.items.map((it, idx) => {
     let drinkText = 'عصير بخيرة القياسي';
     if (it.orientalSweetOption === 'replace_juice') {
       drinkText = 'العصير مستبدل بقطعة شرقي';
@@ -4193,8 +4193,9 @@ export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking:
       sweetText = it.orientalSweetLabel;
     }
 
+    const itemHeader = factoryOrder.items.length > 1 ? `*طلب (${idx + 1}):* ` : '';
     const row = [
-      `• *الوجبة:* ${it.mealName} (${it.mealCode})`,
+      `• ${itemHeader}*الوجبة:* ${it.mealName} (${it.mealCode})`,
       `  - *خيار المشروب:* ${drinkText}`,
     ];
     if (sweetText) {
@@ -4211,24 +4212,30 @@ export function buildFactoryWhatsAppMessage(factoryOrder: FactoryOrder, booking:
   }).join('\n\n');
 
   const totalCost = factoryOrder.factoryCostTotal || 0;
+  const totalBoxes = factoryOrder.items.reduce((sum, it) => sum + (it.quantity || 0), 0) || booking.totalMealsCount;
 
   const lines = [
     `*أمر تشغيل مطبخ ومصنع CÉLÈBRE CATERING*`,
     `-----------------------------------------`,
     `*رقم أمر التشغيل:* ${factoryOrder.orderNumber} (الإصدار v${factoryOrder.version})`,
     `*رقم الحجز المرجعي:* ${booking.bookingCode}`,
-    `*تاريخ وموعد التسليم:* ${factoryOrder.eventDate} الساعة ${factoryOrder.deliveryTime}`,
+    `*بيانات العميل:* ${booking.customerName} | هاتف: ${booking.customerPhone}`,
+    ...(booking.customerWhatsapp && booking.customerWhatsapp !== booking.customerPhone
+      ? [`*واتساب العميل:* ${booking.customerWhatsapp}`]
+      : []),
+    ...(booking.eventName ? [`*المناسبة:* ${booking.eventName}`] : []),
+    `*التاريخ:* ${factoryOrder.eventDate}`,
+    `*الوقت:* ${factoryOrder.deliveryTime}`,
     `*مكان التسليم:* ${factoryOrder.deliveryLocation}`,
-    `*العميل / المستلم:* ${booking.customerName} (${booking.customerPhone})`,
     `-----------------------------------------`,
-    `*بيان الوجبات وتكلفة التشغيل للمصنع:*`,
+    `*تفاصيل الطلب (${factoryOrder.items.length} ${factoryOrder.items.length > 1 ? 'أصناف' : 'صنف'}):*`,
     itemsText,
+    ...(booking.notes && booking.notes.trim()
+      ? [`\n*ملاحظات العميل على الطلب:* ${booking.notes.trim()}`]
+      : []),
     `-----------------------------------------`,
-    `*إجمالي عدد البوكسات:* ${booking.totalMealsCount} بوكس`,
-    `*إجمالي تكلفة أمر المصنع بعد التعديل:* ${totalCost.toLocaleString('ar-EG')} جنيه مصري`,
-    `*تعليمات التعبئة والتغليف:* ${factoryOrder.packagingNotes}`,
-    `-----------------------------------------`,
-    `*تنبيه تشغيلي:* هذه وثيقة تشغيل وتكلفة مصنع رسمية صادرة من إدارة سيليبري (تتضمن أسعار المصنع المعدّلة فقط وخالية تماماً من أسعار وهوامش ربح الموزع).`
+    `*إجمالي عدد البوكسات:* ${totalBoxes} بوكس`,
+    `*إجمالي تكلفة أمر المصنع:* ${totalCost.toLocaleString('ar-EG')} جنيه مصري`,
   ];
 
   const messageText = lines.join('\n');
