@@ -62,7 +62,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Forgot Password / Recovery State
+  const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
+  const [recoveryUsername, setRecoveryUsername] = useState('');
+  const [recoveryMethod, setRecoveryMethod] = useState<'server_otp' | 'recovery_key'>('server_otp');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [recoveryChallengeToken, setRecoveryChallengeToken] = useState('');
+  const [recoveryNewPassword, setRecoveryNewPassword] = useState('');
+  const [recoveryConfirmPassword, setRecoveryConfirmPassword] = useState('');
+  const [isRequestingReset, setIsRequestingReset] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoveryInfo, setRecoveryInfo] = useState<string | null>(null);
+  const [recoveryOptions, setRecoveryOptions] = useState<{
+    recoveryKeyConfigured: boolean;
+    metaWhatsAppConfigured: boolean;
+  } | null>(null);
 
   // Tabs
   const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'cancelled_bookings' | 'db_cleanup' | 'factory_orders' | 'menu' | 'audit' | 'system' | 'password'>('overview');
@@ -348,6 +366,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     setIsLoggingIn(true);
     setLoginError(null);
+    setLoginSuccess(null);
     setSessionNotice(null);
 
     try {
@@ -376,6 +395,117 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setLoginError(err.message || 'بيانات الدخول غير صحيحة');
     } finally {
       setIsLoggingIn(false);
+    }
+  };
+
+  const openForgotPasswordMode = async () => {
+    setIsForgotPasswordMode(true);
+    setRecoveryUsername(username || 'admin');
+    setRecoveryCode('');
+    setRecoveryChallengeToken('');
+    setRecoveryNewPassword('');
+    setRecoveryConfirmPassword('');
+    setRecoveryError(null);
+    setRecoveryInfo(null);
+    setLoginError(null);
+    setLoginSuccess(null);
+
+    try {
+      const res = await fetch('/api/admin/auth/recovery-options');
+      if (res.ok) {
+        const data = await res.json();
+        setRecoveryOptions(data);
+        if (data.recoveryKeyConfigured) {
+          setRecoveryMethod('recovery_key');
+        } else {
+          setRecoveryMethod('server_otp');
+        }
+      }
+    } catch {
+      // Ignore capability check failure and default to server_otp
+    }
+  };
+
+  const handleRequestResetCode = async () => {
+    const targetUser = recoveryUsername.trim();
+    if (!targetUser) {
+      setRecoveryError('يرجى إدخال اسم المستخدم أو البريد الإلكتروني أولاً');
+      return;
+    }
+
+    setIsRequestingReset(true);
+    setRecoveryError(null);
+    setRecoveryInfo(null);
+
+    try {
+      const res = await fetch('/api/admin/auth/request-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: targetUser }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'تعذر إصدار رمز الاسترداد');
+      }
+      setRecoveryChallengeToken(data.challengeToken || '');
+      setRecoveryInfo(
+        data.message ||
+          'تم إصدار رمز الاسترداد المؤقت لمدة 10 دقائق في سجل الخادم الآمن (Server Logs).'
+      );
+    } catch (err: any) {
+      setRecoveryError(err.message || 'حدث خطأ أثناء طلب رمز الاسترداد');
+    } finally {
+      setIsRequestingReset(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryError(null);
+
+    if (recoveryNewPassword !== recoveryConfirmPassword) {
+      setRecoveryError('كلمة المرور الجديدة غير متطابقة مع التأكيد');
+      return;
+    }
+
+    if (recoveryNewPassword.length < 8) {
+      setRecoveryError('يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل');
+      return;
+    }
+
+    if (recoveryMethod === 'server_otp' && !recoveryChallengeToken) {
+      setRecoveryError('يرجى الضغط على زر «إصدار رمز التحقق المؤقت» أولاً ثم إدخال الرمز');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const res = await fetch('/api/admin/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: recoveryUsername.trim(),
+          method: recoveryMethod,
+          recoveryCode: recoveryCode.trim(),
+          challengeToken: recoveryChallengeToken,
+          newPassword: recoveryNewPassword,
+          confirmPassword: recoveryConfirmPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'فشل إعادة تعيين كلمة المرور');
+      }
+
+      setUsername(data.username || recoveryUsername.trim());
+      setPassword('');
+      setIsForgotPasswordMode(false);
+      setLoginSuccess(data.message || 'تم تعيين كلمة المرور الجديدة بنجاح. يمكنك تسجيل الدخول الآن.');
+      setLoginError(null);
+    } catch (err: any) {
+      setRecoveryError(err.message || 'حدث خطأ أثناء إعادة تعيين كلمة المرور');
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -1701,69 +1831,268 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {!token ? (
           <div className="p-8 sm:p-12 max-w-md mx-auto my-auto w-full text-center space-y-6">
             <div className="w-16 h-16 bg-[#7A0C2E]/10 text-[#7A0C2E] rounded-full flex items-center justify-center mx-auto border border-[#7A0C2E]/20">
-              <Lock className="w-8 h-8" />
+              {isForgotPasswordMode ? <Key className="w-8 h-8" /> : <Lock className="w-8 h-8" />}
             </div>
 
-            <div className="space-y-1">
-              <h4 className="text-2xl font-black text-[#560820]">
-                تسجيل الدخول للنظام
-              </h4>
-              <p className="text-xs text-slate-500">
-                أدخل بيانات حساب الإدارة أو مسؤول تشغيل المصنع
-              </p>
-            </div>
+            {!isForgotPasswordMode ? (
+              <>
+                <div className="space-y-1">
+                  <h4 className="text-2xl font-black text-[#560820]">
+                    تسجيل الدخول للنظام
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    أدخل بيانات حساب الإدارة أو مسؤول تشغيل المصنع
+                  </p>
+                </div>
 
-            {sessionNotice && (
-              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-center gap-2 text-right">
-                <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-600" />
-                <span>{sessionNotice}</span>
-              </div>
+                {sessionNotice && (
+                  <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-center gap-2 text-right">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-600" />
+                    <span>{sessionNotice}</span>
+                  </div>
+                )}
+
+                {loginSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2 text-right">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                    <span>{loginSuccess}</span>
+                  </div>
+                )}
+
+                {loginError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2 text-right">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{loginError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleLogin} className="space-y-4 text-right">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      اسم المستخدم أو البريد
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="اسم المستخدم..."
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-slate-700">
+                        كلمة المرور
+                      </label>
+                      <button
+                        type="button"
+                        onClick={openForgotPasswordMode}
+                        className="text-xs font-bold text-[#7A0C2E] hover:text-[#560820] hover:underline transition-colors"
+                      >
+                        نسيت كلمة السر؟
+                      </button>
+                    </div>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn}
+                    className="w-full py-3 bg-[#7A0C2E] hover:bg-[#560820] text-white font-black text-sm rounded-xl shadow-md transition-all disabled:opacity-50"
+                  >
+                    {isLoggingIn ? 'جاري التحقق...' : 'تسجيل الدخول'}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <h4 className="text-2xl font-black text-[#560820]">
+                    استعادة كلمة المرور
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    إعادة تعيين كلمة مرور الإدارة بشكل آمن ومشفر
+                  </p>
+                </div>
+
+                {recoveryError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2 text-right">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{recoveryError}</span>
+                  </div>
+                )}
+
+                {recoveryInfo && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2 text-right">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                    <span>{recoveryInfo}</span>
+                  </div>
+                )}
+
+                {/* Recovery Method Selector */}
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl text-xs">
+                  <button
+                    type="button"
+                    onClick={() => { setRecoveryMethod('server_otp'); setRecoveryError(null); }}
+                    className={`py-2 px-2 rounded-lg font-bold transition-all ${
+                      recoveryMethod === 'server_otp'
+                        ? 'bg-white text-[#7A0C2E] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    رمز مؤقت (سجل الخادم)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRecoveryMethod('recovery_key'); setRecoveryError(null); }}
+                    className={`py-2 px-2 rounded-lg font-bold transition-all ${
+                      recoveryMethod === 'recovery_key'
+                        ? 'bg-white text-[#7A0C2E] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    مفتاح الاسترداد السري
+                  </button>
+                </div>
+
+                <form onSubmit={handleResetPassword} className="space-y-3.5 text-right">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      اسم المستخدم أو البريد الإلكتروني
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="admin أو management@celebre-eg.com"
+                      value={recoveryUsername}
+                      onChange={(e) => setRecoveryUsername(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                    />
+                  </div>
+
+                  {recoveryMethod === 'server_otp' ? (
+                    <div className="space-y-2.5">
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 space-y-2">
+                        <p className="leading-relaxed">
+                          اضغط الزر بالأسفل لإصدار رمز تحقق مؤقت لمرة واحدة في <strong>سجل الخادم الآمن (Server / Vercel Logs)</strong>
+                          {recoveryOptions?.metaWhatsAppConfigured ? ' وفي واتساب الإدارة' : ''}، ثم أدخل الرمز هنا.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleRequestResetCode}
+                          disabled={isRequestingReset}
+                          className="w-full py-2 px-3 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded-lg text-xs transition-colors disabled:opacity-50"
+                        >
+                          {isRequestingReset
+                            ? 'جاري إصدار الرمز...'
+                            : recoveryChallengeToken
+                            ? 'إعادة إصدار رمز تحقق مؤقت جديد'
+                            : 'إصدار رمز التحقق المؤقت الآن'}
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          رمز التحقق المؤقت
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="أدخل الرمز المكون من 10 أحرف/أرقام..."
+                          value={recoveryCode}
+                          onChange={(e) => setRecoveryCode(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm font-mono uppercase focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                          dir="ltr"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600">
+                        أدخل قيمة المتغير <code className="font-mono font-bold text-[#7A0C2E]">ADMIN_RECOVERY_KEY</code> المضبوط في إعدادات الخادم (Vercel Environment Variables).
+                        {recoveryOptions && !recoveryOptions.recoveryKeyConfigured && (
+                          <span className="block text-amber-700 font-bold mt-1">
+                            ملاحظة: المتغير ADMIN_RECOVERY_KEY غير مفعّل حالياً على هذا الخادم؛ يمكنك استخدام خيار «رمز مؤقت (سجل الخادم)».
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          مفتاح الاسترداد السري
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          placeholder="أدخل مفتاح الاسترداد..."
+                          value={recoveryCode}
+                          onChange={(e) => setRecoveryCode(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      كلمة المرور الجديدة
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      placeholder="8 أحرف على الأقل..."
+                      value={recoveryNewPassword}
+                      onChange={(e) => setRecoveryNewPassword(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      تأكيد كلمة المرور الجديدة
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      placeholder="أعد كتابة كلمة المرور الجديدة..."
+                      value={recoveryConfirmPassword}
+                      onChange={(e) => setRecoveryConfirmPassword(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isResettingPassword}
+                    className="w-full py-3 bg-[#7A0C2E] hover:bg-[#560820] text-white font-black text-sm rounded-xl shadow-md transition-all disabled:opacity-50"
+                  >
+                    {isResettingPassword ? 'جاري حفظ كلمة المرور...' : 'تعيين كلمة المرور الجديدة'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsForgotPasswordMode(false);
+                      setRecoveryError(null);
+                      setRecoveryInfo(null);
+                    }}
+                    className="w-full py-2 text-xs font-bold text-slate-600 hover:text-[#7A0C2E] transition-colors"
+                  >
+                    العودة إلى تسجيل الدخول
+                  </button>
+                </form>
+              </>
             )}
-
-            {loginError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2 text-right">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{loginError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleLogin} className="space-y-4 text-right">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  اسم المستخدم أو البريد
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="اسم المستخدم..."
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  كلمة المرور
-                </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#7A0C2E] focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoggingIn}
-                className="w-full py-3 bg-[#7A0C2E] hover:bg-[#560820] text-white font-black text-sm rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                {isLoggingIn ? 'جاري التحقق...' : 'تسجيل الدخول'}
-              </button>
-            </form>
 
             <div className="pt-2 text-xs text-slate-400 text-center">
               <span>نظام محمي ومشفر بالكامل لشركة CÉLÈBRE للضيافة والحفلات.</span>

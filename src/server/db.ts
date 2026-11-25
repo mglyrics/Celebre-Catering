@@ -3232,37 +3232,104 @@ export const db = {
     return safeUser;
   },
 
-  async updateAdminPassword(username: string, newPasswordHash: string, performedBy = 'الإدارة'): Promise<boolean> {
-    // 1. Update memoryDB
-    memoryDB = loadLocalDB();
-    const user = memoryDB.adminUsers.find(
-      u => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
-    );
-    if (user) {
-      user.passwordHash = newPasswordHash;
-      saveLocalDB(memoryDB);
-    }
+  async findAdminUser(usernameOrEmail: string): Promise<AdminUser | null> {
+    const clean = (usernameOrEmail || '').trim();
+    if (!clean) return null;
 
-    // 2. Update PostgreSQL
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
-          await client.adminUser.updateMany({
+          const dbUser = await client.adminUser.findFirst({
             where: {
               OR: [
-                { username: { equals: username, mode: 'insensitive' } },
-                { email: { equals: username, mode: 'insensitive' } },
+                { username: { equals: clean, mode: 'insensitive' } },
+                { email: { equals: clean, mode: 'insensitive' } },
+              ],
+            },
+          });
+          if (dbUser) {
+            return {
+              id: dbUser.id,
+              username: dbUser.username,
+              email: dbUser.email,
+              name: dbUser.name,
+              role: dbUser.role as any,
+            };
+          }
+        }
+      } catch (err: any) {
+        logServerError(err, 'db.findAdminUser.prisma');
+      }
+    }
+
+    memoryDB = loadLocalDB();
+    const user = memoryDB.adminUsers.find(
+      u => u.username.toLowerCase() === clean.toLowerCase() || u.email.toLowerCase() === clean.toLowerCase()
+    );
+    if (!user) return null;
+    const { passwordHash: _ph, ...safeUser } = user;
+    return safeUser;
+  },
+
+  async updateAdminPassword(username: string, newPasswordHash: string, performedBy = 'الإدارة'): Promise<boolean> {
+    const clean = (username || '').trim();
+    if (!clean) return false;
+
+    // 1. Update memoryDB
+    memoryDB = loadLocalDB();
+    const user = memoryDB.adminUsers.find(
+      u => u.username.toLowerCase() === clean.toLowerCase() || u.email.toLowerCase() === clean.toLowerCase()
+    );
+    let updatedLocal = false;
+    if (user) {
+      user.passwordHash = newPasswordHash;
+      saveLocalDB(memoryDB);
+      updatedLocal = true;
+    }
+
+    // 2. Update PostgreSQL
+    let updatedPg = false;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const result = await client.adminUser.updateMany({
+            where: {
+              OR: [
+                { username: { equals: clean, mode: 'insensitive' } },
+                { email: { equals: clean, mode: 'insensitive' } },
               ],
             },
             data: {
               passwordHash: newPasswordHash,
             },
           });
+          if (result.count > 0) {
+            updatedPg = true;
+          } else if (user) {
+            await client.adminUser.upsert({
+              where: { username: user.username },
+              update: { passwordHash: newPasswordHash },
+              create: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                passwordHash: newPasswordHash,
+              },
+            });
+            updatedPg = true;
+          }
         }
       } catch (err: any) {
         logServerError(err, 'db.updateAdminPassword.prisma');
       }
+    }
+
+    if (!updatedLocal && !updatedPg) {
+      return false;
     }
 
     // 3. Log audit event
@@ -3271,7 +3338,7 @@ export const db = {
       bookingCode: 'ADMIN_AUTH',
       action: 'تغيير كلمة مرور الإداري',
       performedBy,
-      details: `تم تغيير كلمة المرور للمستخدم (${username}) بنجاح، وتشفيرها عبر bcrypt وإلغاء جميع الجلسات القديمة فوراً.`,
+      details: `تم تغيير كلمة المرور للمستخدم (${user?.username || clean}) بنجاح، وتشفيرها عبر bcrypt وإلغاء جميع الجلسات القديمة فوراً.`,
     });
 
     return true;

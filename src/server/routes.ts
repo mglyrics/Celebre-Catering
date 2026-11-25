@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { db, buildFactoryWhatsAppMessage } from './db';
@@ -10,6 +11,8 @@ import {
   getMetaDiagnosticStatus,
   buildBookingWhatsAppMessage,
   notifyBookingViaMeta,
+  isMetaAutomatedConfigured,
+  sendAdminRecoveryOtpViaMeta,
   META_CONFIG,
 } from './metaService';
 import { generateMenuPdfHtml } from './menuPdfGenerator';
@@ -24,12 +27,11 @@ import {
   revokeAdminSession,
   revokeAllUserSessions,
   INACTIVITY_TIMEOUT_MS,
+  JWT_SECRET,
 } from './authSession';
 import pg from 'pg';
 
 export const apiRouter = Router();
-
-const JWT_SECRET = process.env.JWT_SECRET || 'celebre-catering-jwt-super-secret-key-2026';
 
 // Middleware for authentication with 15-minute inactivity timeout enforcement
 interface AuthenticatedRequest extends Request {
@@ -560,6 +562,238 @@ apiRouter.post('/admin/auth/change-password', requireAuth, async (req: Authentic
 
 apiRouter.get('/admin/auth/me', requireAuth, (req: AuthenticatedRequest, res) => {
   res.json({ user: req.user });
+});
+
+// Rate limiter and replay protection state for password recovery
+const recoveryRateBuckets = new Map<string, { count: number; resetAt: number }>();
+const usedRecoveryTokens = new Set<string>();
+const recoveryOtpAttempts = new Map<string, number>();
+
+function checkRecoveryRateLimit(key: string, maxRequests: number, windowMs = 15 * 60 * 1000): boolean {
+  const now = Date.now();
+  const bucket = recoveryRateBuckets.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    recoveryRateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= maxRequests) {
+    return false;
+  }
+  bucket.count += 1;
+  return true;
+}
+
+function timingSafeHashEqual(a: string, b: string): boolean {
+  const hashA = crypto.createHash('sha256').update(a).digest();
+  const hashB = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+// Public capability check for recovery UI (returns booleans only, never exposes secrets)
+apiRouter.get('/admin/auth/recovery-options', (_req, res) => {
+  const configuredKey = (process.env.ADMIN_RECOVERY_KEY || '').trim();
+  res.json({
+    recoveryKeyConfigured: configuredKey.length >= 8,
+    metaWhatsAppConfigured: isMetaAutomatedConfigured(),
+  });
+});
+
+// Step 1 of Server OTP recovery: Issue a time-limited one-time code to server logs / admin WhatsApp
+apiRouter.post('/admin/auth/request-reset', async (req, res) => {
+  try {
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    if (!rawUsername || rawUsername.length > 120) {
+      res.status(400).json({ error: 'يرجى إدخال اسم المستخدم أو البريد الإلكتروني أولاً' });
+      return;
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+    if (!checkRecoveryRateLimit(`req:${clientIp}:${rawUsername.toLowerCase()}`, 5, 15 * 60 * 1000)) {
+      res.status(429).json({ error: 'تم تجاوز الحد الأقصى لطلبات الاسترداد. يرجى المحاولة بعد 15 دقيقة.' });
+      return;
+    }
+
+    const user = await db.findAdminUser(rawUsername);
+    const jti = crypto.randomUUID();
+    const otp = crypto.randomBytes(5).toString('hex').toUpperCase(); // 10-char high-entropy one-time code
+    const otpHmac = crypto
+      .createHmac('sha256', JWT_SECRET)
+      .update(`${otp}:${jti}`)
+      .digest('hex');
+
+    let deliveredViaWhatsApp = false;
+    if (user) {
+      // Log exclusively to server console (never returned in HTTP response)
+      console.info(
+        `[ADMIN_PASSWORD_RESET] Username: ${user.username} | One-Time Recovery Code: ${otp} | Valid for 10 minutes (jti=${jti})`
+      );
+
+      deliveredViaWhatsApp = await sendAdminRecoveryOtpViaMeta(user.username, otp);
+
+      await db.addAuditLog({
+        bookingId: '',
+        bookingCode: 'ADMIN_AUTH',
+        action: 'طلب استرداد كلمة مرور الإداري',
+        performedBy: user.username,
+        details: `تم إصدار رمز تحقق مؤقت لاسترداد كلمة مرور الحساب (${user.username})${deliveredViaWhatsApp ? ' وإرساله عبر WhatsApp API' : ' في سجل الخادم الآمن'}.`,
+      });
+    }
+
+    // Always issue a signed challengeToken (even for unknown users) to prevent user enumeration
+    const challengeToken = jwt.sign(
+      {
+        purpose: 'admin_password_reset',
+        username: user ? user.username : rawUsername,
+        jti,
+        otpHmac,
+      },
+      JWT_SECRET,
+      { expiresIn: '10m' }
+    );
+
+    res.json({
+      success: true,
+      challengeToken,
+      expiresInSeconds: 600,
+      deliveredViaWhatsApp,
+      message:
+        'إذا كان الحساب مسجلاً، فقد تم إصدار رمز استرداد صالح لمدة 10 دقائق في سجل الخادم الآمن (Server Logs)' +
+        (isMetaAutomatedConfigured() ? ' وإرساله إلى واتساب الإدارة.' : '.'),
+    });
+  } catch (err: any) {
+    logServerError(err, 'admin.auth.requestReset');
+    res.status(500).json({ error: 'تعذر معالجة طلب استرداد كلمة المرور' });
+  }
+});
+
+// Step 2: Verify recovery credential (ADMIN_RECOVERY_KEY or One-Time Server OTP) and reset password
+apiRouter.post('/admin/auth/reset-password', async (req, res) => {
+  try {
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const method = req.body?.method === 'recovery_key' ? 'recovery_key' : 'server_otp';
+    const recoveryCode = typeof req.body?.recoveryCode === 'string' ? req.body.recoveryCode.trim() : '';
+    const challengeToken = typeof req.body?.challengeToken === 'string' ? req.body.challengeToken.trim() : '';
+    const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+    const confirmPassword = typeof req.body?.confirmPassword === 'string' ? req.body.confirmPassword : '';
+
+    if (!rawUsername || !recoveryCode || !newPassword || !confirmPassword) {
+      res.status(400).json({ error: 'يرجى استكمال جميع الحقول المطلوبة' });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({ error: 'كلمة المرور الجديدة غير متطابقة مع التأكيد' });
+      return;
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      res.status(400).json({ error: 'يجب أن تتكون كلمة المرور الجديدة من 8 إلى 128 حرفاً' });
+      return;
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+    if (!checkRecoveryRateLimit(`reset:${clientIp}`, 10, 15 * 60 * 1000)) {
+      res.status(429).json({ error: 'تم تجاوز عدد محاولات إعادة التعيين المسموح بها. يرجى الانتظار 15 دقيقة.' });
+      return;
+    }
+
+    if (method === 'recovery_key') {
+      const configuredKey = (process.env.ADMIN_RECOVERY_KEY || '').trim();
+      if (configuredKey.length < 8) {
+        res.status(400).json({
+          error: 'مفتاح الاسترداد السري (ADMIN_RECOVERY_KEY) غير مضبوط على الخادم. استخدم خيار رمز التحقق المؤقت من سجل الخادم.',
+        });
+        return;
+      }
+
+      if (!timingSafeHashEqual(recoveryCode, configuredKey)) {
+        res.status(401).json({ error: 'مفتاح الاسترداد السري غير صحيح' });
+        return;
+      }
+    } else {
+      if (!challengeToken) {
+        res.status(400).json({ error: 'يرجى طلب رمز الاسترداد المؤقت أولاً قبل إعادة التعيين' });
+        return;
+      }
+
+      let decoded: any;
+      try {
+        decoded = jwt.verify(challengeToken, JWT_SECRET);
+      } catch {
+        res.status(401).json({ error: 'انتهت صلاحية رمز الاسترداد أو أنه غير صالح، يرجى طلب رمز جديد' });
+        return;
+      }
+
+      if (!decoded || decoded.purpose !== 'admin_password_reset' || !decoded.jti || !decoded.otpHmac) {
+        res.status(401).json({ error: 'طلب استرداد غير صالح' });
+        return;
+      }
+
+      if (usedRecoveryTokens.has(decoded.jti)) {
+        res.status(401).json({ error: 'تم استخدام رمز الاسترداد هذا مسبقاً أو تم إبطاله، يرجى طلب رمز جديد' });
+        return;
+      }
+
+      const attempts = recoveryOtpAttempts.get(decoded.jti) || 0;
+      if (attempts >= 5) {
+        usedRecoveryTokens.add(decoded.jti);
+        res.status(429).json({ error: 'تم استنفاد محاولات إدخال الرمز، يرجى طلب رمز استرداد جديد' });
+        return;
+      }
+
+      const expectedHmac = crypto
+        .createHmac('sha256', JWT_SECRET)
+        .update(`${recoveryCode.toUpperCase()}:${decoded.jti}`)
+        .digest('hex');
+
+      if (!timingSafeHashEqual(expectedHmac, String(decoded.otpHmac))) {
+        recoveryOtpAttempts.set(decoded.jti, attempts + 1);
+        res.status(401).json({ error: 'رمز الاسترداد المؤقت غير صحيح' });
+        return;
+      }
+
+      // Check username matches the challenged account
+      const userCheck = await db.findAdminUser(rawUsername);
+      if (!userCheck || userCheck.username.toLowerCase() !== String(decoded.username).toLowerCase()) {
+        res.status(401).json({ error: 'بيانات الحساب لا تطابق طلب الاسترداد' });
+        return;
+      }
+
+      usedRecoveryTokens.add(decoded.jti);
+    }
+
+    const user = await db.findAdminUser(rawUsername);
+    if (!user) {
+      res.status(404).json({ error: 'تعذر العثور على حساب الإدارة المطلوب' });
+      return;
+    }
+
+    const salt = bcrypt.genSaltSync(10);
+    const newPasswordHash = bcrypt.hashSync(newPassword, salt);
+
+    const updated = await db.updateAdminPassword(
+      user.username,
+      newPasswordHash,
+      `استرداد كلمة المرور (${method === 'recovery_key' ? 'مفتاح الاسترداد' : 'رمز التحقق المؤقت'})`
+    );
+
+    if (!updated) {
+      res.status(500).json({ error: 'تعذر تحديث كلمة المرور في قاعدة البيانات' });
+      return;
+    }
+
+    // Revoke all active sessions for this user immediately
+    revokeAllUserSessions(user.id, res);
+
+    res.json({
+      success: true,
+      username: user.username,
+      message: 'تم إعادة تعيين كلمة المرور بنجاح وإلغاء جميع الجلسات السابقة. يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة.',
+    });
+  } catch (err: any) {
+    logServerError(err, 'admin.auth.resetPassword');
+    res.status(500).json({ error: err.message || 'حدث خطأ أثناء إعادة تعيين كلمة المرور' });
+  }
 });
 
 // -----------------------------------------------------------------------------

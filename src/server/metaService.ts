@@ -261,3 +261,31 @@ export async function notifyBookingViaMeta(booking: Booking): Promise<{
     };
   }
 }
+
+export async function sendAdminRecoveryOtpViaMeta(username: string, otp: string): Promise<boolean> {
+  if (!isMetaAutomatedConfigured()) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`https://graph.facebook.com/${META_CONFIG.apiVersion}/me/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${META_CONFIG.pageAccessToken}`,
+      },
+      body: JSON.stringify({
+        messaging_type: 'UPDATE',
+        recipient: {
+          phone_number: META_CONFIG.officialWhatsAppNumber,
+        },
+        message: {
+          text: `رمز استرداد كلمة مرور لوحة الإدارة لحساب (${username}) هو: ${otp} (صالح لمدة 10 دقائق وللمرة الواحدة فقط).`,
+        },
+      }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

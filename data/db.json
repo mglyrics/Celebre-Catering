@@ -583,6 +583,15 @@
   ],
   "auditLogs": [
     {
+      "id": "log-1795632291129-175",
+      "bookingId": "",
+      "bookingCode": "ADMIN_AUTH",
+      "action": "طلب استرداد كلمة مرور الإداري",
+      "performedBy": "admin",
+      "details": "تم إصدار رمز تحقق مؤقت لاسترداد كلمة مرور الحساب (admin) في سجل الخادم الآمن.",
+      "timestamp": "2026-11-25T18:44:51.129Z"
+    },
+    {
       "id": "log-1794127512733-326",
       "bookingId": "",
       "bookingCode": "CLB-2026-2752",
