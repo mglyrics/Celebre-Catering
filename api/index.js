@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 
 // src/server/routes.ts
 import { Router } from "express";
+import crypto2 from "crypto";
 import jwt2 from "jsonwebtoken";
 import bcrypt2 from "bcryptjs";
 
@@ -66,7 +67,7 @@ var INITIAL_MEALS = [
     category: "mix_box",
     ingredients: "\u0642\u0637\u0639\u0629 \u062C\u0627\u062A\u0648\u0629 \u0645\u063A\u0644\u0641\u0629 + \u0633\u0646\u062F\u0648\u062A\u0634 \u0641\u0631\u0646\u0633\u0627\u0648\u064A \u0648\u0633\u0637 \u0643\u0641\u062A\u0629 \u0645\u0634\u0648\u064A\u0629 + \u0633\u0646\u062F\u0648\u062A\u0634 \u0641\u0631\u0646\u0633\u0627\u0648\u064A \u0648\u0633\u0637 \u0641\u0631\u0627\u062E \u0628\u0627\u0646\u064A\u0629 + \u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 + \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644",
     distributorPrice: 80,
-    factoryPrice: 53,
+    factoryPrice: 56,
     hasJuice: true,
     isActive: true,
     image: "/assets/aistudio/________________7b046020.jpg"
@@ -233,14 +234,25 @@ var CELEBRE_CONFIG = {
   },
   drinkAdjustments: {
     noJuiceDiscount: 5,
-    pepsiExtra: 10
+    juicePackageCost: 1,
+    // 1 EGP package cost deduction
+    factoryNoJuiceDiscount: 6,
+    // 5 EGP juice + 1 EGP package = -6 EGP from factory
+    pepsiExtra: 10,
+    factoryPepsiAddition: 10
+  },
+  orientalSweetAdjustments: {
+    addWithJuiceCustomer: 20,
+    addWithJuiceFactory: 10,
+    replaceJuiceCustomer: 15,
+    replaceJuiceFactory: 5
   }
 };
 
 // src/lib/prisma.ts
 import fs from "fs";
 import path from "path";
-import { PrismaClient } from "@prisma/client";
+import { createRequire } from "module";
 
 // src/server/safeLogger.ts
 function sanitizeText(text) {
@@ -300,6 +312,7 @@ function logServerError(err, context) {
 }
 
 // src/lib/prisma.ts
+var require2 = createRequire(import.meta.url);
 var SUPABASE_ROOT_CA = `-----BEGIN CERTIFICATE-----
 MIIDzzCCAregAwIBAgIUBhalAwMQ7BA1NH7td4msPPwxHzowDQYJKoZIhvcNAQEL
 BQAwazELMAkGA1UEBhMCVVMxEDAOBgNVBAgMB0RlbHdhcmUxEzARBgNVBAcMCk5l
@@ -434,8 +447,18 @@ function getPrismaClient() {
     return null;
   }
   try {
+    let PrismaClientClass;
+    try {
+      const clientModule = require2("@prisma/client");
+      PrismaClientClass = clientModule?.PrismaClient;
+    } catch {
+      return null;
+    }
+    if (!PrismaClientClass) {
+      return null;
+    }
     const formattedUrl = formatDatabaseUrl(rawUrl);
-    prismaInstance = new PrismaClient({
+    prismaInstance = new PrismaClientClass({
       datasources: {
         db: {
           url: formattedUrl
@@ -476,13 +499,600 @@ var prisma = new Proxy({}, {
   }
 });
 
+// src/server/schemaInit.ts
+import pg from "pg";
+var REQUIRED_TABLES = [
+  "meals",
+  "bookings",
+  "booking_items",
+  "payments",
+  "factory_orders",
+  "factory_payments",
+  "audit_logs",
+  "admin_users"
+];
+var TABLE_DDL_QUERIES = {
+  meals: `
+    CREATE TABLE IF NOT EXISTS "meals" (
+      "id" TEXT PRIMARY KEY,
+      "code" TEXT UNIQUE NOT NULL,
+      "name" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "ingredients" TEXT NOT NULL,
+      "distributorPrice" DOUBLE PRECISION NOT NULL,
+      "factoryPrice" DOUBLE PRECISION NOT NULL,
+      "hasJuice" BOOLEAN NOT NULL DEFAULT true,
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "image" TEXT,
+      "version" INTEGER NOT NULL DEFAULT 1,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  bookings: `
+    CREATE TABLE IF NOT EXISTS "bookings" (
+      "id" TEXT PRIMARY KEY,
+      "bookingCode" TEXT UNIQUE NOT NULL,
+      "securityCode" TEXT NOT NULL,
+      "customerName" TEXT NOT NULL,
+      "customerPhone" TEXT NOT NULL,
+      "customerWhatsapp" TEXT,
+      "preferredContact" TEXT NOT NULL DEFAULT 'whatsapp',
+      "eventName" TEXT NOT NULL,
+      "eventDate" TEXT NOT NULL,
+      "deliveryTime" TEXT NOT NULL,
+      "deliveryGovernorate" TEXT NOT NULL,
+      "deliveryAddress" TEXT NOT NULL,
+      "notes" TEXT,
+      "totalMealsCount" INTEGER NOT NULL,
+      "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "totalFactoryPrice" DOUBLE PRECISION,
+      "profitMargin" DOUBLE PRECISION,
+      "paidAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+      "remainingAmount" DOUBLE PRECISION NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'INITIAL',
+      "statusNotes" TEXT,
+      "isTest" BOOLEAN NOT NULL DEFAULT false,
+      "version" INTEGER NOT NULL DEFAULT 1,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  booking_items: `
+    CREATE TABLE IF NOT EXISTS "booking_items" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
+      "mealId" TEXT,
+      "mealCode" TEXT NOT NULL,
+      "mealName" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "ingredients" TEXT NOT NULL,
+      "quantity" INTEGER NOT NULL,
+      "drinkOption" TEXT NOT NULL DEFAULT 'standard',
+      "orientalSweetOption" TEXT DEFAULT 'none',
+      "baseDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "unitDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
+      "baseFactoryPrice" DOUBLE PRECISION,
+      "unitFactoryPrice" DOUBLE PRECISION,
+      "totalFactoryPrice" DOUBLE PRECISION,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  payments: `
+    CREATE TABLE IF NOT EXISTS "payments" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
+      "amount" DOUBLE PRECISION NOT NULL,
+      "method" TEXT NOT NULL,
+      "date" TEXT NOT NULL,
+      "notes" TEXT,
+      "receiptNumber" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  factory_orders: `
+    CREATE TABLE IF NOT EXISTS "factory_orders" (
+      "id" TEXT PRIMARY KEY,
+      "orderNumber" TEXT UNIQUE NOT NULL,
+      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
+      "bookingCode" TEXT NOT NULL,
+      "version" INTEGER NOT NULL DEFAULT 1,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "eventDate" TEXT NOT NULL,
+      "deliveryTime" TEXT NOT NULL,
+      "deliveryLocation" TEXT NOT NULL,
+      "itemsJson" TEXT NOT NULL,
+      "packagingNotes" TEXT,
+      "factoryCostTotal" DOUBLE PRECISION DEFAULT 0,
+      "paidAmount" DOUBLE PRECISION DEFAULT 0,
+      "remainingAmount" DOUBLE PRECISION DEFAULT 0,
+      "paymentStatus" TEXT DEFAULT 'UNPAID',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  factory_payments: `
+    CREATE TABLE IF NOT EXISTS "factory_payments" (
+      "id" TEXT PRIMARY KEY,
+      "factoryOrderId" TEXT NOT NULL REFERENCES "factory_orders"("id") ON DELETE CASCADE,
+      "factoryOrderNumber" TEXT NOT NULL,
+      "bookingId" TEXT NOT NULL,
+      "bookingCode" TEXT NOT NULL,
+      "amount" DOUBLE PRECISION NOT NULL,
+      "method" TEXT NOT NULL,
+      "paymentType" TEXT NOT NULL DEFAULT 'GENERAL',
+      "date" TEXT NOT NULL,
+      "notes" TEXT,
+      "receiptNumber" TEXT,
+      "recordedBy" TEXT NOT NULL DEFAULT '\u0627\u0644\u0625\u062F\u0627\u0631\u0629',
+      "status" TEXT NOT NULL DEFAULT 'VALID',
+      "cancelledBy" TEXT,
+      "cancelledAt" TIMESTAMP(3),
+      "cancelReason" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  audit_logs: `
+    CREATE TABLE IF NOT EXISTS "audit_logs" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT REFERENCES "bookings"("id") ON DELETE SET NULL,
+      "bookingCode" TEXT NOT NULL,
+      "action" TEXT NOT NULL,
+      "performedBy" TEXT NOT NULL,
+      "details" TEXT NOT NULL,
+      "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `,
+  admin_users: `
+    CREATE TABLE IF NOT EXISTS "admin_users" (
+      "id" TEXT PRIMARY KEY,
+      "username" TEXT UNIQUE NOT NULL,
+      "email" TEXT UNIQUE NOT NULL,
+      "name" TEXT NOT NULL,
+      "passwordHash" TEXT NOT NULL,
+      "role" TEXT NOT NULL DEFAULT 'admin',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `
+};
+var SCHEMA_COLUMN_MIGRATIONS = [
+  // 1. booking_items: Oriental sweet option and prices (critical for CLB-2026-5131 & all bookings)
+  `ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "orientalSweetOption" TEXT DEFAULT 'none';`,
+  `UPDATE "booking_items" SET "orientalSweetOption" = 'none' WHERE "orientalSweetOption" IS NULL;`,
+  `ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "drinkOption" TEXT DEFAULT 'standard';`,
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "mealId" TEXT;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "baseFactoryPrice" DOUBLE PRECISION;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "unitFactoryPrice" DOUBLE PRECISION;',
+  'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "totalFactoryPrice" DOUBLE PRECISION;',
+  // 2. bookings columns
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "customerWhatsapp" TEXT;',
+  `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "preferredContact" TEXT NOT NULL DEFAULT 'whatsapp';`,
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "statusNotes" TEXT;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "totalFactoryPrice" DOUBLE PRECISION;',
+  'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "profitMargin" DOUBLE PRECISION;',
+  // 3. payments columns
+  'ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "notes" TEXT;',
+  'ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "receiptNumber" TEXT;',
+  // 4. factory_orders columns
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "packagingNotes" TEXT;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "factoryCostTotal" DOUBLE PRECISION DEFAULT 0;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paidAmount" DOUBLE PRECISION DEFAULT 0;',
+  'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "remainingAmount" DOUBLE PRECISION DEFAULT 0;',
+  `ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT 'UNPAID';`,
+  // 5. factory_payments columns
+  `ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "paymentType" TEXT NOT NULL DEFAULT 'GENERAL';`,
+  `UPDATE "factory_payments" SET "paymentType" = 'GENERAL' WHERE "paymentType" IS NULL;`,
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "notes" TEXT;',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "receiptNumber" TEXT;',
+  `ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "recordedBy" TEXT DEFAULT '\u0627\u0644\u0625\u062F\u0627\u0631\u0629';`,
+  `ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "status" TEXT DEFAULT 'VALID';`,
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "cancelledBy" TEXT;',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "cancelledAt" TIMESTAMP(3);',
+  'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "cancelReason" TEXT;',
+  // 6. meals columns
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "hasJuice" BOOLEAN NOT NULL DEFAULT true;',
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN NOT NULL DEFAULT true;',
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "image" TEXT;',
+  'ALTER TABLE "meals" ADD COLUMN IF NOT EXISTS "version" INTEGER NOT NULL DEFAULT 1;'
+];
+async function checkTablesStatus(client) {
+  try {
+    const rawTables = await client.$queryRaw`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+    `;
+    const existing = rawTables.map((t) => t.table_name);
+    const existingRequired = REQUIRED_TABLES.filter((t) => existing.includes(t));
+    const missing = REQUIRED_TABLES.filter((t) => !existing.includes(t));
+    return {
+      allReady: missing.length === 0,
+      existingTables: existingRequired,
+      missingTables: missing
+    };
+  } catch (err) {
+    logServerError(err, "SchemaInit.CheckTables");
+    return {
+      allReady: false,
+      existingTables: [],
+      missingTables: REQUIRED_TABLES
+    };
+  }
+}
+async function ensureSchemaReady(client) {
+  const status = await checkTablesStatus(client);
+  const created = [];
+  const errors = [];
+  if (!status.allReady) {
+    for (const tableName of status.missingTables) {
+      const ddl = TABLE_DDL_QUERIES[tableName];
+      if (ddl) {
+        try {
+          await client.$executeRawUnsafe(ddl);
+          created.push(tableName);
+        } catch (err) {
+          logServerError(err, `SchemaInit.Prisma.${tableName}`);
+          errors.push(`Prisma ${tableName}: ${err?.message?.slice(0, 100)}`);
+        }
+      }
+    }
+    const midCheck = await checkTablesStatus(client);
+    if (!midCheck.allReady && process.env.DATABASE_URL) {
+      const rawUrl = process.env.DATABASE_URL;
+      const formattedUrl = formatDatabaseUrl(rawUrl);
+      const pgUrl = new URL(formattedUrl);
+      pgUrl.searchParams.delete("sslmode");
+      const pgClient = new pg.Client({
+        connectionString: pgUrl.toString(),
+        connectionTimeoutMillis: 7e3,
+        ssl: {
+          rejectUnauthorized: true,
+          ca: SUPABASE_ROOT_CA,
+          servername: pgUrl.hostname
+        }
+      });
+      try {
+        await pgClient.connect();
+        for (const tableName of midCheck.missingTables) {
+          const ddl = TABLE_DDL_QUERIES[tableName];
+          if (ddl) {
+            try {
+              await pgClient.query(ddl);
+              if (!created.includes(tableName)) {
+                created.push(tableName);
+              }
+            } catch (pgErr) {
+              logServerError(pgErr, `SchemaInit.pgClient.${tableName}`);
+              errors.push(`pg ${tableName}: ${pgErr?.message?.slice(0, 100)}`);
+            }
+          }
+        }
+      } catch (connErr) {
+        errors.push(`pg connection: ${connErr?.message?.slice(0, 100)}`);
+      } finally {
+        try {
+          await pgClient.end();
+        } catch {
+        }
+      }
+    }
+  }
+  let columnsEnsured = true;
+  for (const alterQuery of SCHEMA_COLUMN_MIGRATIONS) {
+    try {
+      await client.$executeRawUnsafe(alterQuery);
+    } catch (colErr) {
+      logServerError(colErr, "SchemaInit.ColumnMigration");
+      columnsEnsured = false;
+      errors.push(`Column migration: ${colErr?.message?.slice(0, 100)}`);
+    }
+  }
+  try {
+    const mealCount = await client.meal.count();
+    if (mealCount === 0) {
+      for (const m of INITIAL_MEALS) {
+        await client.meal.create({
+          data: {
+            id: `meal-${m.code}`,
+            code: m.code,
+            name: m.name,
+            category: m.category,
+            ingredients: m.ingredients,
+            distributorPrice: m.distributorPrice,
+            factoryPrice: m.factoryPrice ?? 0,
+            hasJuice: m.hasJuice ?? true,
+            isActive: m.isActive ?? true,
+            image: m.image
+          }
+        }).catch(() => {
+        });
+      }
+    } else {
+      await client.meal.updateMany({
+        where: { code: "Sale-12" },
+        data: {
+          name: "\u0628\u0627\u062A\u064A\u0629",
+          ingredients: "\u0642\u0637\u0639\u0629 \u062C\u0627\u062A\u0648\u0629 \u0645\u063A\u0644\u0641\u0629 + \u0628\u0627\u062A\u064A\u0629 + \u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 + \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644"
+        }
+      }).catch(() => {
+      });
+      await client.meal.updateMany({
+        where: { code: "Sale-05" },
+        data: {
+          factoryPrice: 56
+        }
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
+  const postCheck = await checkTablesStatus(client);
+  let rlsEnforced = false;
+  if (postCheck.allReady) {
+    try {
+      await ensureRlsSecurity(client);
+      rlsEnforced = true;
+    } catch (rlsErr) {
+      logServerError(rlsErr, "SchemaInit.RLS");
+      errors.push(`RLS init error: ${rlsErr?.message?.slice(0, 100)}`);
+    }
+  }
+  return {
+    success: postCheck.allReady,
+    created,
+    tablesFound: postCheck.existingTables,
+    columnsEnsured,
+    rlsEnforced,
+    errors
+  };
+}
+var columnsMigrationRun = false;
+async function ensureColumnsReady(client) {
+  if (columnsMigrationRun) return { applied: 0, errors: [] };
+  let applied = 0;
+  const errors = [];
+  for (const alterQuery of SCHEMA_COLUMN_MIGRATIONS) {
+    try {
+      await client.$executeRawUnsafe(alterQuery);
+      applied++;
+    } catch (colErr) {
+      errors.push(colErr?.message || "Error");
+    }
+  }
+  columnsMigrationRun = true;
+  return { applied, errors };
+}
+var SUPABASE_RLS_QUERIES = [
+  // 1. Roles verification for standard pg environments
+  `DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
+      CREATE ROLE anon NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+      CREATE ROLE authenticated NOLOGIN;
+    END IF;
+  END $$;`,
+  // 2. Enable RLS on all 8 tables
+  "ALTER TABLE IF EXISTS public.meals ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.bookings ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.booking_items ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.payments ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.factory_orders ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.factory_payments ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.admin_users ENABLE ROW LEVEL SECURITY;",
+  "ALTER TABLE IF EXISTS public.audit_logs ENABLE ROW LEVEL SECURITY;",
+  // 3. Revoke direct access from anon and authenticated
+  "REVOKE ALL ON TABLE public.bookings FROM anon, authenticated;",
+  "REVOKE ALL ON TABLE public.booking_items FROM anon, authenticated;",
+  "REVOKE ALL ON TABLE public.payments FROM anon, authenticated;",
+  "REVOKE ALL ON TABLE public.factory_orders FROM anon, authenticated;",
+  "REVOKE ALL ON TABLE public.factory_payments FROM anon, authenticated;",
+  "REVOKE ALL ON TABLE public.admin_users FROM anon, authenticated;",
+  "REVOKE ALL ON TABLE public.audit_logs FROM anon, authenticated;",
+  // 4. Meals: Read-only SELECT for active meals
+  "REVOKE ALL ON TABLE public.meals FROM anon, authenticated;",
+  "GRANT SELECT ON TABLE public.meals TO anon, authenticated;",
+  // 5. Clean and set policies
+  'DROP POLICY IF EXISTS "meals_public_select_active" ON public.meals;',
+  'DROP POLICY IF EXISTS "bookings_deny_direct_anon_authenticated" ON public.bookings;',
+  'DROP POLICY IF EXISTS "booking_items_deny_direct_anon_authenticated" ON public.booking_items;',
+  'DROP POLICY IF EXISTS "payments_deny_direct_anon_authenticated" ON public.payments;',
+  'DROP POLICY IF EXISTS "factory_orders_deny_direct_anon_authenticated" ON public.factory_orders;',
+  'DROP POLICY IF EXISTS "factory_payments_deny_direct_anon_authenticated" ON public.factory_payments;',
+  'DROP POLICY IF EXISTS "admin_users_deny_direct_anon_authenticated" ON public.admin_users;',
+  'DROP POLICY IF EXISTS "audit_logs_deny_direct_anon_authenticated" ON public.audit_logs;',
+  'CREATE POLICY "meals_public_select_active" ON public.meals FOR SELECT TO anon, authenticated USING ("isActive" = true);',
+  'CREATE POLICY "bookings_deny_direct_anon_authenticated" ON public.bookings FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "booking_items_deny_direct_anon_authenticated" ON public.booking_items FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "payments_deny_direct_anon_authenticated" ON public.payments FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "factory_orders_deny_direct_anon_authenticated" ON public.factory_orders FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "factory_payments_deny_direct_anon_authenticated" ON public.factory_payments FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "admin_users_deny_direct_anon_authenticated" ON public.admin_users FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  'CREATE POLICY "audit_logs_deny_direct_anon_authenticated" ON public.audit_logs FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);',
+  "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;"
+];
+async function ensureRlsSecurity(client) {
+  let appliedCount = 0;
+  const errors = [];
+  for (const query of SUPABASE_RLS_QUERIES) {
+    try {
+      await client.$executeRawUnsafe(query);
+      appliedCount++;
+    } catch (err) {
+      errors.push(err?.message?.slice(0, 100) || "Unknown error");
+    }
+  }
+  return {
+    success: errors.length === 0,
+    appliedCount,
+    errors
+  };
+}
+async function getRlsStatusReport(client) {
+  try {
+    const rawRls = await client.$queryRaw`
+      SELECT tablename, rowsecurity
+      FROM pg_tables
+      WHERE schemaname = 'public'
+    `;
+    const rawPolicies = await client.$queryRaw`
+      SELECT tablename, policyname
+      FROM pg_policies
+      WHERE schemaname = 'public'
+    `;
+    const tables = {};
+    let securedCount = 0;
+    for (const tableName of REQUIRED_TABLES) {
+      const match = rawRls.find((t) => t.tablename === tableName);
+      const isRls = match ? Boolean(match.rowsecurity) : false;
+      const policies = rawPolicies.filter((p) => p.tablename === tableName).map((p) => p.policyname);
+      tables[tableName] = {
+        tableName,
+        rlsEnabled: isRls,
+        policiesCount: policies.length,
+        policies
+      };
+      if (isRls) {
+        securedCount++;
+      }
+    }
+    return {
+      allSecured: securedCount === REQUIRED_TABLES.length,
+      totalTables: REQUIRED_TABLES.length,
+      securedTablesCount: securedCount,
+      tables
+    };
+  } catch (err) {
+    logServerError(err, "GetRlsStatusReport");
+    return {
+      allSecured: false,
+      totalTables: REQUIRED_TABLES.length,
+      securedTablesCount: 0,
+      tables: {}
+    };
+  }
+}
+
 // src/server/db.ts
 var FACTORY_PEPSI_ACCOUNTING = {
   juiceCostDeduction: 5,
+  packageCostDeduction: 1,
+  // 1 EGP package cost deduction
+  totalJuiceDeduction: 6,
+  // 5 + 1 = 6 EGP deduction
   pepsiCostAddition: 10,
-  netAdjustment: 5
-  // -5 (juice) + 10 (can) = +5 EGP net
+  netAdjustment: 4
+  // -5 (juice) - 1 (package) + 10 (can) = +4 EGP net
 };
+var VALID_FACTORY_PAYMENT_TYPES = ["DEPOSIT", "INSTALLMENT", "FINAL_SETTLEMENT", "GENERAL"];
+var VALID_FACTORY_PAYMENT_METHODS = ["instapay", "bank_transfer", "cash", "vodafone_cash", "other"];
+function normalizeFactoryPaymentType(val) {
+  const upper = (val || "").trim().toUpperCase();
+  return VALID_FACTORY_PAYMENT_TYPES.includes(upper) ? upper : "GENERAL";
+}
+function normalizeFactoryPaymentMethod(val) {
+  const clean = (val || "").trim().toLowerCase();
+  return VALID_FACTORY_PAYMENT_METHODS.includes(clean) ? clean : "cash";
+}
+function calculateFactoryPaymentStatus(paidAmount, costTotal) {
+  const paid = Math.round((paidAmount || 0) * 100) / 100;
+  const cost = Math.round((costTotal || 0) * 100) / 100;
+  if (paid <= 0) return "UNPAID";
+  if (paid < cost) return "PARTIALLY_PAID";
+  if (paid === cost) return "FULLY_PAID";
+  return "OVERPAID";
+}
+function formatFactoryPaymentTypeLabel(paymentType) {
+  switch (normalizeFactoryPaymentType(paymentType)) {
+    case "DEPOSIT":
+      return "\u0639\u0631\u0628\u0648\u0646 \u062A\u0634\u063A\u064A\u0644";
+    case "INSTALLMENT":
+      return "\u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629";
+    case "FINAL_SETTLEMENT":
+      return "\u062A\u0633\u0648\u064A\u0629 \u062E\u062A\u0627\u0645\u064A\u0629";
+    default:
+      return "\u062F\u0641\u0639\u0629 \u0644\u0644\u0645\u0635\u0646\u0639";
+  }
+}
+function formatFactoryPaymentMethodLabel(method) {
+  switch ((method || "").toLowerCase()) {
+    case "instapay":
+      return "\u0625\u0646\u0633\u062A\u0627\u0628\u0627\u064A";
+    case "bank_transfer":
+      return "\u062A\u062D\u0648\u064A\u0644 \u0628\u0646\u0643\u064A";
+    case "cash":
+      return "\u0646\u0642\u062F\u064A";
+    case "vodafone_cash":
+      return "\u0641\u0648\u062F\u0627\u0641\u0648\u0646 \u0643\u0627\u0634";
+    default:
+      return "\u0623\u062E\u0631\u0649";
+  }
+}
+function mapFactoryPaymentRecord(p) {
+  return {
+    id: p.id,
+    factoryOrderId: p.factoryOrderId,
+    factoryOrderNumber: p.factoryOrderNumber,
+    bookingId: p.bookingId,
+    bookingCode: p.bookingCode,
+    amount: Number(p.amount) || 0,
+    method: p.method || "cash",
+    paymentType: normalizeFactoryPaymentType(p.paymentType),
+    date: p.date,
+    notes: p.notes || void 0,
+    receiptNumber: p.receiptNumber || void 0,
+    recordedBy: p.recordedBy || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629",
+    status: p.status || "VALID",
+    cancelledBy: p.cancelledBy || void 0,
+    cancelledAt: p.cancelledAt instanceof Date ? p.cancelledAt.toISOString() : p.cancelledAt || void 0,
+    cancelReason: p.cancelReason || void 0,
+    createdAt: p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: p.updatedAt instanceof Date ? p.updatedAt.toISOString() : p.updatedAt || void 0
+  };
+}
+function hydrateFactoryOrderFinancials(fo, rawPayments) {
+  let parsedItems = Array.isArray(fo.items) ? fo.items : [];
+  if (!Array.isArray(fo.items) && typeof fo.itemsJson === "string") {
+    try {
+      parsedItems = JSON.parse(fo.itemsJson);
+    } catch {
+    }
+  }
+  const itemsTotal = parsedItems.reduce((acc, item) => acc + (Number(item.totalFactoryPrice) || 0), 0);
+  const costTotal = fo.factoryCostTotal !== void 0 && fo.factoryCostTotal !== null && Number(fo.factoryCostTotal) > 0 ? Number(fo.factoryCostTotal) : itemsTotal;
+  const sourcePayments = rawPayments !== void 0 ? rawPayments : Array.isArray(fo.payments) ? fo.payments : [];
+  const paymentsList = sourcePayments.map(mapFactoryPaymentRecord);
+  const validPayments = paymentsList.filter((p) => p.status === "VALID");
+  const paidAmount = validPayments.reduce((sum, p) => sum + p.amount, 0);
+  const remainingAmount = costTotal - paidAmount;
+  const paymentStatus = calculateFactoryPaymentStatus(paidAmount, costTotal);
+  return {
+    id: fo.id,
+    orderNumber: fo.orderNumber,
+    bookingId: fo.bookingId,
+    bookingCode: fo.bookingCode,
+    version: fo.version || 1,
+    status: fo.status,
+    eventDate: fo.eventDate,
+    deliveryTime: fo.deliveryTime,
+    deliveryLocation: fo.deliveryLocation,
+    factoryCostTotal: costTotal,
+    paidToFactoryAmount: paidAmount,
+    remainingToFactoryAmount: remainingAmount,
+    paymentStatus,
+    payments: paymentsList,
+    items: parsedItems,
+    packagingNotes: fo.packagingNotes || "",
+    sentBy: fo.sentBy || void 0,
+    sentAt: fo.sentAt || void 0,
+    createdAt: fo.createdAt instanceof Date ? fo.createdAt.toISOString() : fo.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: fo.updatedAt instanceof Date ? fo.updatedAt.toISOString() : fo.updatedAt || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
 var IS_SERVERLESS = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT
 );
@@ -592,6 +1202,57 @@ function normalizeBookingCode(str) {
 }
 function normalizePhone(phone) {
   return (phone || "").replace(/\D/g, "").replace(/^20/, "");
+}
+var PROTECTED_BOOKINGS = {
+  codes: Object.freeze(["CLB-2026-5131"]),
+  phones: Object.freeze(["01158855911", "201158855911"]),
+  names: Object.freeze(["\u0623\u062D\u0645\u062F \u0639\u0635\u0627\u0645 \u0627\u0644\u062F\u064A\u0646 \u062D\u0633\u064A\u0646"]),
+  primaryIds: Object.freeze(["bk-1793362871199-5131"])
+};
+function isStrictlyProtectedBooking(booking) {
+  if (!booking) return false;
+  const code = (booking.bookingCode || "").trim().toUpperCase();
+  const phone = normalizePhone(booking.customerPhone || "");
+  const name = (booking.customerName || "").trim();
+  const id = (booking.id || "").trim();
+  if (PROTECTED_BOOKINGS.codes.includes(code)) return true;
+  if (PROTECTED_BOOKINGS.primaryIds.includes(id)) return true;
+  for (const p of PROTECTED_BOOKINGS.phones) {
+    if (phone && normalizePhone(p) === phone) return true;
+  }
+  if (name.includes("\u0623\u062D\u0645\u062F \u0639\u0635\u0627\u0645 \u0627\u0644\u062F\u064A\u0646")) return true;
+  return false;
+}
+function classifyBookingRecord(b) {
+  if (isStrictlyProtectedBooking(b)) return "PROTECTED_REAL";
+  const testNamePatterns = ["\u062A\u062C\u0631\u0628", "\u0641\u062D\u0635", "\u0627\u062E\u062A\u0628\u0627\u0631", "\u062A\u0633\u062A", "test", "\u0634\u0631\u0643\u0629 \u0627\u0644\u0646\u0648\u0631 \u0644\u0644\u0645\u0624\u062A\u0645\u0631\u0627\u062A"];
+  const testPhonePatterns = [
+    "01033334444",
+    "01022223333",
+    "01099887766",
+    "01009988776",
+    "01234567890",
+    "01011223344",
+    "01223344556",
+    "01073746999",
+    "01049462574",
+    "01099864798",
+    "01028338678",
+    "01072714940",
+    "01071088193",
+    "01037906440"
+  ];
+  const name = (b.customerName || "").toLowerCase();
+  const notes = (b.notes || "").toLowerCase();
+  const phone = normalizePhone(b.customerPhone || "");
+  const isExplicitTest = Boolean(b.isTest);
+  const isNameTest = testNamePatterns.some((p) => name.includes(p.toLowerCase()));
+  const isNotesTest = notes.includes("\u0641\u062D\u0635") || notes.includes("\u062A\u062C\u0631\u0628") || notes.includes("test");
+  const isPhoneTest = testPhonePatterns.some((p) => phone === normalizePhone(p));
+  if (isExplicitTest || isNameTest || isNotesTest || isPhoneTest) {
+    return "CONFIRMED_TEST";
+  }
+  return "LEGACY_DEMO";
 }
 function isBookingCodeMatch(storedCode, queryCode) {
   if (!storedCode || !queryCode) return false;
@@ -726,19 +1387,32 @@ var db = {
       totalMealsCount += quantity;
       const baseDistributorPrice = meal.distributorPrice;
       const baseFactoryPrice = meal.factoryPrice || 0;
+      const sweetOpt = item.orientalSweetOption || "none";
+      let orientalSweetDistributorDelta = 0;
+      let orientalSweetFactoryDelta = 0;
+      let sweetLabel = "\u0628\u062F\u0648\u0646 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+      if (sweetOpt === "add_with_juice") {
+        orientalSweetDistributorDelta = 20;
+        orientalSweetFactoryDelta = 10;
+        sweetLabel = "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+20 \u062C)";
+      } else if (sweetOpt === "replace_juice") {
+        orientalSweetDistributorDelta = 15;
+        orientalSweetFactoryDelta = 5;
+        sweetLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15 \u062C)";
+      }
       let distributorDrinkDelta = 0;
       let factoryDrinkDelta = 0;
-      if (meal.hasJuice) {
+      if (sweetOpt !== "replace_juice" && meal.hasJuice) {
         if (item.drinkOption === "no_juice") {
           distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
-          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          factoryDrinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction;
         } else if (item.drinkOption === "pepsi") {
           distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
           factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
         }
       }
-      const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
-      const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
+      const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta + orientalSweetDistributorDelta);
+      const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta + orientalSweetFactoryDelta);
       const itemTotalDistributor = unitDistributorPrice * quantity;
       const itemTotalFactory = unitFactoryPrice * quantity;
       totalDistributorPrice += itemTotalDistributor;
@@ -751,11 +1425,15 @@ var db = {
         category: meal.category,
         quantity,
         drinkOption: item.drinkOption,
+        orientalSweetOption: sweetOpt,
+        orientalSweetLabel: sweetLabel,
+        orientalSweetDistributorAdjustment: orientalSweetDistributorDelta,
         baseDistributorPrice,
         unitDistributorPrice,
         totalDistributorPrice: itemTotalDistributor,
         baseFactoryPrice,
         factoryDrinkAdjustment: factoryDrinkDelta,
+        factoryOrientalSweetAdjustment: orientalSweetFactoryDelta,
         unitFactoryPrice,
         totalFactoryPrice: itemTotalFactory
       };
@@ -842,6 +1520,7 @@ var db = {
                   ingredients: it.ingredients,
                   quantity: it.quantity,
                   drinkOption: it.drinkOption,
+                  orientalSweetOption: it.orientalSweetOption || "none",
                   baseDistributorPrice: it.baseDistributorPrice,
                   unitDistributorPrice: it.unitDistributorPrice,
                   totalDistributorPrice: it.totalDistributorPrice,
@@ -895,7 +1574,12 @@ var db = {
             include: {
               items: true,
               payments: true,
-              factoryOrders: true,
+              factoryOrders: {
+                include: {
+                  payments: { orderBy: { createdAt: "desc" } }
+                },
+                orderBy: { createdAt: "desc" }
+              },
               auditLogs: true
             },
             orderBy: { createdAt: "desc" }
@@ -927,21 +1611,30 @@ var db = {
               version: b.version,
               createdAt: b.createdAt.toISOString(),
               updatedAt: b.updatedAt.toISOString(),
-              items: b.items.map((it) => ({
-                mealId: it.mealId || it.mealCode,
-                mealCode: it.mealCode,
-                mealName: it.mealName,
-                category: it.category,
-                ingredients: it.ingredients,
-                quantity: it.quantity,
-                drinkOption: it.drinkOption || "standard",
-                baseDistributorPrice: it.baseDistributorPrice,
-                unitDistributorPrice: it.unitDistributorPrice,
-                totalDistributorPrice: it.totalDistributorPrice,
-                baseFactoryPrice: it.baseFactoryPrice || 0,
-                unitFactoryPrice: it.unitFactoryPrice || 0,
-                totalFactoryPrice: it.totalFactoryPrice || 0
-              })),
+              items: b.items.map((it) => {
+                const sweetOpt = it.orientalSweetOption || "none";
+                const sweetDist = sweetOpt === "add_with_juice" ? 20 : sweetOpt === "replace_juice" ? 15 : 0;
+                const sweetFact = sweetOpt === "add_with_juice" ? 10 : sweetOpt === "replace_juice" ? 5 : 0;
+                return {
+                  mealId: it.mealId || it.mealCode,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: it.drinkOption || "standard",
+                  orientalSweetOption: sweetOpt,
+                  orientalSweetLabel: sweetOpt === "add_with_juice" ? "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+20 \u062C)" : sweetOpt === "replace_juice" ? "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15 \u062C)" : void 0,
+                  orientalSweetDistributorAdjustment: sweetDist,
+                  factoryOrientalSweetAdjustment: sweetFact,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice || 0,
+                  unitFactoryPrice: it.unitFactoryPrice || 0,
+                  totalFactoryPrice: it.totalFactoryPrice || 0
+                };
+              }),
               payments: b.payments.map((p) => ({
                 id: p.id,
                 bookingId: p.bookingId,
@@ -953,29 +1646,7 @@ var db = {
                 status: p.notes && p.notes.includes("[\u0645\u0644\u063A\u0627\u0629") ? "CANCELLED" : "VALID",
                 createdAt: p.createdAt.toISOString()
               })),
-              factoryOrders: b.factoryOrders.map((fo) => {
-                let parsedItems = [];
-                try {
-                  parsedItems = JSON.parse(fo.itemsJson);
-                } catch {
-                }
-                return {
-                  id: fo.id,
-                  orderNumber: fo.orderNumber,
-                  bookingId: fo.bookingId,
-                  bookingCode: fo.bookingCode,
-                  version: fo.version,
-                  status: fo.status,
-                  eventDate: fo.eventDate,
-                  deliveryTime: fo.deliveryTime,
-                  deliveryLocation: fo.deliveryLocation,
-                  factoryCostTotal: 0,
-                  items: parsedItems,
-                  packagingNotes: fo.packagingNotes || "",
-                  createdAt: fo.createdAt.toISOString(),
-                  updatedAt: fo.updatedAt.toISOString()
-                };
-              }),
+              factoryOrders: (b.factoryOrders || []).map((fo) => hydrateFactoryOrderFinancials(fo)),
               auditLogs: b.auditLogs.map((al) => ({
                 id: al.id,
                 bookingId: al.bookingId || "",
@@ -1007,7 +1678,10 @@ var db = {
       ...b,
       isTest: b.isTest ?? (b.bookingCode === "CLB-2026-1699" || b.customerName.includes("\u062A\u062C\u0631\u064A\u0628")),
       payments: memoryDB.payments.filter((p) => p.bookingId === b.id),
-      factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id),
+      factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id).map((fo) => hydrateFactoryOrderFinancials(
+        fo,
+        (memoryDB.factoryPayments || []).filter((p) => p.factoryOrderId ? p.factoryOrderId === fo.id : p.factoryOrderNumber === fo.orderNumber)
+      )),
       auditLogs: memoryDB.auditLogs.filter((al) => al.bookingId === b.id)
     }));
   },
@@ -1016,20 +1690,53 @@ var db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          const b2 = await client.booking.findFirst({
-            where: {
-              OR: [
-                { id },
-                { bookingCode: id }
-              ]
-            },
-            include: {
-              items: true,
-              payments: true,
-              factoryOrders: true,
-              auditLogs: true
+          let b2 = null;
+          try {
+            b2 = await client.booking.findFirst({
+              where: {
+                OR: [
+                  { id },
+                  { bookingCode: id }
+                ]
+              },
+              include: {
+                items: true,
+                payments: true,
+                factoryOrders: {
+                  include: {
+                    payments: { orderBy: { createdAt: "desc" } }
+                  },
+                  orderBy: { createdAt: "desc" }
+                },
+                auditLogs: true
+              }
+            });
+          } catch (findErr) {
+            if (String(findErr?.message || "").includes("booking_items.")) {
+              ensureColumnsReady(client).catch(() => {
+              });
+              b2 = await client.booking.findFirst({
+                where: {
+                  OR: [
+                    { id },
+                    { bookingCode: id }
+                  ]
+                },
+                include: {
+                  payments: true,
+                  factoryOrders: {
+                    include: {
+                      payments: { orderBy: { createdAt: "desc" } }
+                    },
+                    orderBy: { createdAt: "desc" }
+                  },
+                  auditLogs: true
+                }
+              });
+            } else {
+              throw findErr;
             }
-          });
+          }
           if (b2) {
             return {
               id: b2.id,
@@ -1057,22 +1764,31 @@ var db = {
               version: b2.version,
               createdAt: b2.createdAt.toISOString(),
               updatedAt: b2.updatedAt.toISOString(),
-              items: b2.items.map((it) => ({
-                mealId: it.mealId || it.mealCode,
-                mealCode: it.mealCode,
-                mealName: it.mealName,
-                category: it.category,
-                ingredients: it.ingredients,
-                quantity: it.quantity,
-                drinkOption: it.drinkOption || "standard",
-                baseDistributorPrice: it.baseDistributorPrice,
-                unitDistributorPrice: it.unitDistributorPrice,
-                totalDistributorPrice: it.totalDistributorPrice,
-                baseFactoryPrice: it.baseFactoryPrice || 0,
-                unitFactoryPrice: it.unitFactoryPrice || 0,
-                totalFactoryPrice: it.totalFactoryPrice || 0
-              })),
-              payments: b2.payments.map((p) => ({
+              items: (b2.items || []).map((it) => {
+                const sweetOpt = it.orientalSweetOption || "none";
+                const sweetDist = sweetOpt === "add_with_juice" ? 20 : sweetOpt === "replace_juice" ? 15 : 0;
+                const sweetFact = sweetOpt === "add_with_juice" ? 10 : sweetOpt === "replace_juice" ? 5 : 0;
+                return {
+                  mealId: it.mealId || it.mealCode,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: it.drinkOption || "standard",
+                  orientalSweetOption: sweetOpt,
+                  orientalSweetLabel: sweetOpt === "add_with_juice" ? "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+20 \u062C)" : sweetOpt === "replace_juice" ? "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15 \u062C)" : void 0,
+                  orientalSweetDistributorAdjustment: sweetDist,
+                  factoryOrientalSweetAdjustment: sweetFact,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice || 0,
+                  unitFactoryPrice: it.unitFactoryPrice || 0,
+                  totalFactoryPrice: it.totalFactoryPrice || 0
+                };
+              }),
+              payments: (b2.payments || []).map((p) => ({
                 id: p.id,
                 bookingId: p.bookingId,
                 amount: p.amount,
@@ -1083,30 +1799,8 @@ var db = {
                 status: p.notes && p.notes.includes("[\u0645\u0644\u063A\u0627\u0629") ? "CANCELLED" : "VALID",
                 createdAt: p.createdAt.toISOString()
               })),
-              factoryOrders: b2.factoryOrders.map((fo) => {
-                let parsedItems = [];
-                try {
-                  parsedItems = JSON.parse(fo.itemsJson);
-                } catch {
-                }
-                return {
-                  id: fo.id,
-                  orderNumber: fo.orderNumber,
-                  bookingId: fo.bookingId,
-                  bookingCode: fo.bookingCode,
-                  version: fo.version,
-                  status: fo.status,
-                  eventDate: fo.eventDate,
-                  deliveryTime: fo.deliveryTime,
-                  deliveryLocation: fo.deliveryLocation,
-                  factoryCostTotal: 0,
-                  items: parsedItems,
-                  packagingNotes: fo.packagingNotes || "",
-                  createdAt: fo.createdAt.toISOString(),
-                  updatedAt: fo.updatedAt.toISOString()
-                };
-              }),
-              auditLogs: b2.auditLogs.map((al) => ({
+              factoryOrders: (b2.factoryOrders || []).map((fo) => hydrateFactoryOrderFinancials(fo)),
+              auditLogs: (b2.auditLogs || []).map((al) => ({
                 id: al.id,
                 bookingId: al.bookingId || "",
                 bookingCode: al.bookingCode || b2.bookingCode || "",
@@ -1129,9 +1823,185 @@ var db = {
       ...b,
       isTest: b.isTest ?? (b.bookingCode === "CLB-2026-1699" || b.customerName.includes("\u062A\u062C\u0631\u064A\u0628")),
       payments: memoryDB.payments.filter((p) => p.bookingId === b.id),
-      factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id),
+      factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id).map((fo) => hydrateFactoryOrderFinancials(
+        fo,
+        (memoryDB.factoryPayments || []).filter((p) => p.factoryOrderId ? p.factoryOrderId === fo.id : p.factoryOrderNumber === fo.orderNumber)
+      )),
       auditLogs: memoryDB.auditLogs.filter((al) => al.bookingId === b.id)
     };
+  },
+  /**
+   * Authoritative lookup strictly by primary key ID (b.id).
+   * Used for all update, delete, payment, and status modification operations.
+   * NEVER falls back to bookingCode to guarantee total data isolation.
+   */
+  async getBookingByPrimaryId(bookingId) {
+    if (!bookingId || typeof bookingId !== "string") return null;
+    const cleanId = bookingId.trim();
+    if (!cleanId) return null;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          let dbBooking = null;
+          try {
+            dbBooking = await client.booking.findUnique({
+              where: { id: cleanId },
+              include: {
+                items: true,
+                payments: { orderBy: { createdAt: "desc" } },
+                factoryOrders: {
+                  include: {
+                    payments: { orderBy: { createdAt: "desc" } }
+                  },
+                  orderBy: { createdAt: "desc" }
+                },
+                auditLogs: { orderBy: { timestamp: "desc" } }
+              }
+            });
+          } catch (findErr) {
+            if (String(findErr?.message || "").includes("booking_items.")) {
+              ensureColumnsReady(client).catch(() => {
+              });
+              dbBooking = await client.booking.findUnique({
+                where: { id: cleanId },
+                include: {
+                  payments: { orderBy: { createdAt: "desc" } },
+                  factoryOrders: {
+                    include: {
+                      payments: { orderBy: { createdAt: "desc" } }
+                    },
+                    orderBy: { createdAt: "desc" }
+                  },
+                  auditLogs: { orderBy: { timestamp: "desc" } }
+                }
+              });
+            } else {
+              throw findErr;
+            }
+          }
+          if (dbBooking) {
+            return {
+              id: dbBooking.id,
+              bookingCode: dbBooking.bookingCode,
+              securityCode: dbBooking.securityCode,
+              customerName: dbBooking.customerName,
+              customerPhone: dbBooking.customerPhone,
+              customerWhatsapp: dbBooking.customerWhatsapp || void 0,
+              preferredContact: dbBooking.preferredContact,
+              eventName: dbBooking.eventName,
+              eventDate: dbBooking.eventDate,
+              deliveryTime: dbBooking.deliveryTime,
+              deliveryGovernorate: dbBooking.deliveryGovernorate,
+              deliveryAddress: dbBooking.deliveryAddress,
+              notes: dbBooking.notes || "",
+              totalMealsCount: dbBooking.totalMealsCount,
+              totalDistributorPrice: dbBooking.totalDistributorPrice,
+              totalFactoryPrice: dbBooking.totalFactoryPrice ?? void 0,
+              profitMargin: dbBooking.profitMargin ?? void 0,
+              paidAmount: dbBooking.paidAmount,
+              remainingAmount: dbBooking.remainingAmount,
+              status: dbBooking.status,
+              statusNotes: dbBooking.statusNotes || "",
+              isTest: dbBooking.isTest,
+              version: dbBooking.version,
+              createdAt: dbBooking.createdAt.toISOString(),
+              updatedAt: dbBooking.updatedAt.toISOString(),
+              items: (dbBooking.items || []).map((it) => {
+                const sweetOpt = it.orientalSweetOption || "none";
+                const sweetDist = sweetOpt === "add_with_juice" ? 20 : sweetOpt === "replace_juice" ? 15 : 0;
+                const sweetFact = sweetOpt === "add_with_juice" ? 10 : sweetOpt === "replace_juice" ? 5 : 0;
+                return {
+                  mealId: it.mealId,
+                  mealCode: it.mealCode,
+                  mealName: it.mealName,
+                  category: it.category,
+                  ingredients: it.ingredients,
+                  quantity: it.quantity,
+                  drinkOption: it.drinkOption,
+                  orientalSweetOption: sweetOpt,
+                  orientalSweetLabel: sweetOpt === "add_with_juice" ? "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+20 \u062C)" : sweetOpt === "replace_juice" ? "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15 \u062C)" : void 0,
+                  orientalSweetDistributorAdjustment: sweetDist,
+                  factoryOrientalSweetAdjustment: sweetFact,
+                  baseDistributorPrice: it.baseDistributorPrice,
+                  unitDistributorPrice: it.unitDistributorPrice,
+                  totalDistributorPrice: it.totalDistributorPrice,
+                  baseFactoryPrice: it.baseFactoryPrice,
+                  factoryDrinkAdjustment: it.factoryDrinkAdjustment ?? void 0,
+                  unitFactoryPrice: it.unitFactoryPrice,
+                  totalFactoryPrice: it.totalFactoryPrice
+                };
+              }),
+              payments: dbBooking.payments.map((p) => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method,
+                date: p.date,
+                notes: p.notes || "",
+                receiptNumber: p.receiptNumber || void 0,
+                recordedBy: p.recordedBy || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629",
+                status: p.status || "VALID",
+                createdAt: p.createdAt.toISOString(),
+                cancelledBy: p.cancelledBy || void 0,
+                cancelledAt: p.cancelledAt?.toISOString() || void 0,
+                cancelReason: p.cancelReason || void 0
+              })),
+              factoryOrders: (dbBooking.factoryOrders || []).map((fo) => hydrateFactoryOrderFinancials(fo)),
+              auditLogs: dbBooking.auditLogs.map((al) => ({
+                id: al.id,
+                bookingId: al.bookingId,
+                bookingCode: al.bookingCode,
+                action: al.action,
+                performedBy: al.performedBy,
+                details: al.details,
+                timestamp: al.timestamp.toISOString()
+              }))
+            };
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.getBookingByPrimaryId.prisma");
+      }
+    }
+    memoryDB = loadLocalDB();
+    const b = memoryDB.bookings.find((item) => item.id === cleanId);
+    if (!b) return null;
+    return {
+      ...b,
+      payments: memoryDB.payments.filter((p) => p.bookingId === b.id),
+      factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === b.id).map((fo) => hydrateFactoryOrderFinancials(
+        fo,
+        (memoryDB.factoryPayments || []).filter((p) => p.factoryOrderId ? p.factoryOrderId === fo.id : p.factoryOrderNumber === fo.orderNumber)
+      )),
+      auditLogs: memoryDB.auditLogs.filter((al) => al.bookingId === b.id)
+    };
+  },
+  /**
+   * Universal, resilient resolver for any booking identifier:
+   * Accepts internal ID (UUID/timestamp ID) or external visible bookingCode (e.g. CLB-2026-XXXX).
+   * Searches PostgreSQL primary key first, then unique bookingCode, then memoryDB,
+   * guaranteeing consistent resolution across all admin operations without failing.
+   */
+  async resolveBookingAnyIdentifier(rawIdentifier) {
+    if (!rawIdentifier || typeof rawIdentifier !== "string") return null;
+    const clean = rawIdentifier.trim();
+    if (!clean) return null;
+    const byPrimary = await this.getBookingByPrimaryId(clean);
+    if (byPrimary) return byPrimary;
+    const byCodeOrId = await this.getBookingById(clean);
+    if (byCodeOrId) return byCodeOrId;
+    memoryDB = loadLocalDB();
+    const mem = memoryDB.bookings.find((b) => b.id === clean || b.bookingCode === clean);
+    if (mem) {
+      return {
+        ...mem,
+        payments: memoryDB.payments.filter((p) => p.bookingId === mem.id),
+        factoryOrders: memoryDB.factoryOrders.filter((fo) => fo.bookingId === mem.id),
+        auditLogs: memoryDB.auditLogs.filter((al) => al.bookingId === mem.id)
+      };
+    }
+    return null;
   },
   async trackBooking(bookingCode, verificationCode) {
     if (!bookingCode || typeof bookingCode !== "string" || !bookingCode.trim()) {
@@ -1241,8 +2111,13 @@ var db = {
     };
   },
   async updateBooking(id, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const cleanId = (id || "").trim();
+    if (!cleanId) return null;
+    if (cleanId.startsWith("CLB-")) {
+      throw new Error("\u0639\u0645\u0644\u064A\u0627\u062A \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u062A\u062A\u0637\u0644\u0628 \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A bookingId \u0641\u0642\u0637 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 bookingCode \u0644\u0645\u0646\u0639 \u062A\u062F\u0627\u062E\u0644 \u0627\u0644\u0633\u062C\u0644\u0627\u062A.");
+    }
     memoryDB = loadLocalDB();
-    const idx = memoryDB.bookings.findIndex((b) => b.id === id || b.bookingCode === id);
+    const idx = memoryDB.bookings.findIndex((b) => b.id === cleanId);
     if (idx === -1) return null;
     const current = memoryDB.bookings[idx];
     const prevStatus = current.status;
@@ -1294,88 +2169,261 @@ var db = {
     if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
       throw new Error("\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631");
     }
-    const cleanId = (data.bookingId || data.bookingCode || "").trim();
-    if (!cleanId) {
+    const rawIdInput = (data.bookingId || data.bookingCode || "").trim();
+    if (!rawIdInput) {
       throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u062D\u062C\u0632 \u0623\u0648 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632 \u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u0641\u0639\u0629");
     }
-    const booking = await this.getBookingById(cleanId);
-    if (!booking) {
-      throw new Error(`\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F (\u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0645\u0637\u0644\u0648\u0628: "${cleanId}"). \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0635\u062D\u0629 \u0631\u0642\u0645 \u0623\u0648 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632.`);
-    }
-    const validPayments = (booking.payments || []).filter((p) => p.status !== "CANCELLED");
-    const currentPaid = validPayments.reduce((acc, p) => acc + Number(p.amount), 0);
-    const currentRemaining = Math.max(0, booking.totalDistributorPrice - currentPaid);
-    if (numAmount > currentRemaining && !data.allowOverpayment) {
-      throw new Error(`\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 (${numAmount.toLocaleString("ar-EG")} \u062C) \u062A\u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u0645\u0628\u0644\u063A \u0627\u0644\u0645\u062A\u0628\u0642\u064A \u0639\u0644\u0649 \u0627\u0644\u0639\u0645\u064A\u0644 (${currentRemaining.toLocaleString("ar-EG")} \u062C). \u0625\u0630\u0627 \u0643\u0627\u0646\u062A \u062F\u0641\u0639\u0629 \u062A\u0633\u0648\u064A\u0629 \u062E\u0627\u0635\u0629 \u0623\u0648 \u0632\u064A\u0627\u062F\u0629 \u0645\u0642\u0635\u0648\u062F\u0629\u060C \u064A\u0631\u062C\u0649 \u062A\u0641\u0639\u064A\u0644 \u062E\u064A\u0627\u0631 "\u0633\u0645\u0627\u062D \u0628\u0645\u0628\u0644\u063A \u062A\u0633\u0648\u064A\u0629 \u0632\u0627\u0626\u062F".`);
-    }
     const cleanReceipt = (data.receiptNumber || "").trim();
-    if (cleanReceipt) {
-      const duplicateReceipt = validPayments.find((p) => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
-      if (duplicateReceipt) {
-        throw new Error(`\u064A\u0648\u062C\u062F \u0628\u0627\u0644\u0641\u0639\u0644 \u062F\u0641\u0639\u0629 \u0645\u0633\u062C\u0644\u0629 \u0628\u0646\u0641\u0633 \u0631\u0642\u0645 \u0627\u0644\u0625\u064A\u0635\u0627\u0644 / \u0627\u0644\u0645\u0631\u062C\u0639 (${cleanReceipt}) \u0628\u0642\u064A\u0645\u0629 ${duplicateReceipt.amount} \u062C \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u062C\u0632.`);
-      }
-    }
     const paymentId = `pay-${Date.now()}-${Math.floor(Math.random() * 1e3)}`;
     const paymentDate = data.date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     const paymentNotes = (data.notes || "").trim();
-    const newPaidAmount = currentPaid + numAmount;
-    const newRemainingAmount = Math.max(0, booking.totalDistributorPrice - newPaidAmount);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const auditLogId = `log-${Date.now()}-${Math.floor(Math.random() * 1e3)}`;
-    const auditDetails = `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0628\u0642\u064A\u0645\u0629 ${numAmount} \u062C.\u0645 \u0628\u0637\u0631\u064A\u0642\u0629 (${data.method}) \u0644\u0644\u062D\u062C\u0632 ${booking.bookingCode}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaidAmount} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemainingAmount} \u062C. \u0645\u0631\u062C\u0639: ${cleanReceipt || "\u0644\u0627 \u064A\u0648\u062C\u062F"}.`;
-    const payment = {
-      id: paymentId,
-      bookingId: booking.id,
-      // Primary key of Booking
-      amount: numAmount,
-      method: data.method,
-      date: paymentDate,
-      notes: paymentNotes,
-      receiptNumber: cleanReceipt,
-      recordedBy: performedBy,
-      status: "VALID",
-      createdAt: now
-    };
-    const authoritativeBookingCode = (booking.bookingCode || "").trim();
-    if (!authoritativeBookingCode) {
-      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0639\u062A\u0645\u062F (bookingCode) \u0644\u0644\u062D\u062C\u0632 ${booking.id} \u0644\u062A\u0648\u062B\u064A\u0642 \u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642`);
-    }
+    let finalPayment = null;
+    let finalBooking = null;
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
+          try {
+            await ensureColumnsReady(client);
+          } catch {
+          }
           await client.$transaction(async (tx) => {
+            let dbBooking = null;
+            const safeFindBooking = async (whereClause) => {
+              try {
+                return await tx.booking.findFirst({
+                  where: whereClause,
+                  include: { payments: true, items: true }
+                });
+              } catch (lookupErr) {
+                if (String(lookupErr?.message || "").includes("booking_items.")) {
+                  return await tx.booking.findFirst({
+                    where: whereClause,
+                    include: { payments: true }
+                  });
+                }
+                throw lookupErr;
+              }
+            };
+            if (data.bookingId && !data.bookingId.startsWith("CLB-")) {
+              dbBooking = await safeFindBooking({ id: data.bookingId.trim() });
+            }
+            const targetCode = data.bookingCode?.trim() || (rawIdInput.startsWith("CLB-") ? rawIdInput : null);
+            if (!dbBooking && targetCode) {
+              dbBooking = await safeFindBooking({ bookingCode: targetCode });
+            }
+            if (!dbBooking) {
+              dbBooking = await safeFindBooking({
+                OR: [
+                  { id: rawIdInput },
+                  { bookingCode: rawIdInput },
+                  ...data.bookingCode ? [{ bookingCode: data.bookingCode.trim() }] : [],
+                  ...data.bookingId ? [{ id: data.bookingId.trim() }, { bookingCode: data.bookingId.trim() }] : []
+                ]
+              });
+            }
+            if (!dbBooking) {
+              memoryDB = loadLocalDB();
+              const memBooking2 = memoryDB.bookings.find(
+                (b) => b.id === rawIdInput || b.bookingCode === rawIdInput || data.bookingCode && b.bookingCode === data.bookingCode.trim() || data.bookingId && (b.id === data.bookingId.trim() || b.bookingCode === data.bookingId.trim())
+              );
+              if (memBooking2) {
+                dbBooking = await tx.booking.create({
+                  data: {
+                    id: memBooking2.id,
+                    bookingCode: memBooking2.bookingCode,
+                    securityCode: memBooking2.securityCode || "0000",
+                    customerName: memBooking2.customerName,
+                    customerPhone: memBooking2.customerPhone,
+                    customerWhatsapp: memBooking2.customerWhatsapp || memBooking2.customerPhone,
+                    preferredContact: memBooking2.preferredContact || "whatsapp",
+                    eventName: memBooking2.eventName,
+                    eventDate: memBooking2.eventDate,
+                    deliveryTime: memBooking2.deliveryTime,
+                    deliveryGovernorate: memBooking2.deliveryGovernorate,
+                    deliveryAddress: memBooking2.deliveryAddress,
+                    notes: memBooking2.notes || "",
+                    totalMealsCount: memBooking2.totalMealsCount,
+                    totalDistributorPrice: memBooking2.totalDistributorPrice,
+                    totalFactoryPrice: memBooking2.totalFactoryPrice,
+                    profitMargin: memBooking2.profitMargin,
+                    paidAmount: memBooking2.paidAmount || 0,
+                    remainingAmount: memBooking2.remainingAmount,
+                    status: memBooking2.status || "INITIAL",
+                    statusNotes: memBooking2.statusNotes,
+                    isTest: memBooking2.isTest ?? false,
+                    version: memBooking2.version || 1,
+                    items: {
+                      create: (memBooking2.items || []).map((it) => ({
+                        mealId: it.mealId || it.mealCode,
+                        mealCode: it.mealCode,
+                        mealName: it.mealName,
+                        category: it.category || "mix_box",
+                        ingredients: it.ingredients || "",
+                        quantity: it.quantity,
+                        drinkOption: it.drinkOption || "standard",
+                        orientalSweetOption: it.orientalSweetOption || "none",
+                        baseDistributorPrice: it.baseDistributorPrice,
+                        unitDistributorPrice: it.unitDistributorPrice,
+                        totalDistributorPrice: it.totalDistributorPrice,
+                        baseFactoryPrice: it.baseFactoryPrice,
+                        unitFactoryPrice: it.unitFactoryPrice,
+                        totalFactoryPrice: it.totalFactoryPrice
+                      }))
+                    }
+                  },
+                  include: { payments: true, items: true }
+                });
+              }
+            }
+            if (!dbBooking) {
+              throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A (\u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0623\u0648 \u0627\u0644\u0643\u0648\u062F: "${rawIdInput}"). \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0635\u062D\u0629 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062D\u062C\u0632.`);
+            }
+            const authoritativeBookingId = dbBooking.id;
+            const authoritativeBookingCode = dbBooking.bookingCode;
+            const activePayments = (dbBooking.payments || []).filter((p) => !p.notes || !p.notes.includes("[\u0645\u0644\u063A\u0627\u0629"));
+            const currentPaid = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+            const currentRemaining = Math.max(0, dbBooking.totalDistributorPrice - currentPaid);
+            if (numAmount > currentRemaining && !data.allowOverpayment) {
+              throw new Error(`\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 (${numAmount.toLocaleString("ar-EG")} \u062C) \u062A\u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u0645\u0628\u0644\u063A \u0627\u0644\u0645\u062A\u0628\u0642\u064A \u0639\u0644\u0649 \u0627\u0644\u0639\u0645\u064A\u0644 (${currentRemaining.toLocaleString("ar-EG")} \u062C). \u0625\u0630\u0627 \u0643\u0627\u0646\u062A \u062F\u0641\u0639\u0629 \u062A\u0633\u0648\u064A\u0629 \u062E\u0627\u0635\u0629 \u0623\u0648 \u0632\u064A\u0627\u062F\u0629 \u0645\u0642\u0635\u0648\u062F\u0629\u060C \u064A\u0631\u062C\u0649 \u062A\u0641\u0639\u064A\u0644 \u062E\u064A\u0627\u0631 "\u0633\u0645\u0627\u062D \u0628\u0645\u0628\u0644\u063A \u062A\u0633\u0648\u064A\u0629 \u0632\u0627\u0626\u062F".`);
+            }
+            if (cleanReceipt) {
+              const duplicate = activePayments.find((p) => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
+              if (duplicate) {
+                throw new Error(`\u064A\u0648\u062C\u062F \u0628\u0627\u0644\u0641\u0639\u0644 \u062F\u0641\u0639\u0629 \u0645\u0633\u062C\u0644\u0629 \u0628\u0646\u0641\u0633 \u0631\u0642\u0645 \u0627\u0644\u0625\u064A\u0635\u0627\u0644 / \u0627\u0644\u0645\u0631\u062C\u0639 (${cleanReceipt}) \u0628\u0642\u064A\u0645\u0629 ${duplicate.amount} \u062C \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u062C\u0632.`);
+              }
+            }
+            const newPaidAmount = currentPaid + numAmount;
+            const newRemainingAmount = Math.max(0, dbBooking.totalDistributorPrice - newPaidAmount);
+            const auditDetails = `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0628\u0642\u064A\u0645\u0629 ${numAmount} \u062C.\u0645 \u0628\u0637\u0631\u064A\u0642\u0629 (${data.method}) \u0644\u0644\u062D\u062C\u0632 ${authoritativeBookingCode}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaidAmount} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemainingAmount} \u062C. \u0645\u0631\u062C\u0639: ${cleanReceipt || "\u0644\u0627 \u064A\u0648\u062C\u062F"}.`;
             await tx.payment.create({
               data: {
-                id: payment.id,
-                bookingId: booking.id,
-                // Foreign key referencing bookings(id)
-                amount: payment.amount,
-                method: payment.method,
-                date: payment.date,
-                notes: `[\u0633\u062C\u0644\u062A \u0628\u0648\u0627\u0633\u0637\u0629: ${performedBy}] ${payment.notes}`.trim(),
-                receiptNumber: payment.receiptNumber || null
+                id: paymentId,
+                amount: numAmount,
+                method: data.method,
+                date: paymentDate,
+                notes: `[\u0633\u062C\u0644\u062A \u0628\u0648\u0627\u0633\u0637\u0629: ${performedBy}] ${paymentNotes}`.trim(),
+                receiptNumber: cleanReceipt || null,
+                booking: {
+                  connect: { id: authoritativeBookingId }
+                }
               }
             });
-            await tx.booking.update({
-              where: { id: booking.id },
-              data: {
-                paidAmount: newPaidAmount,
-                remainingAmount: newRemainingAmount,
-                version: { increment: 1 },
-                updatedAt: /* @__PURE__ */ new Date()
+            let updatedBookingRow = null;
+            try {
+              updatedBookingRow = await tx.booking.update({
+                where: { id: authoritativeBookingId },
+                data: {
+                  paidAmount: newPaidAmount,
+                  remainingAmount: newRemainingAmount,
+                  version: { increment: 1 },
+                  updatedAt: /* @__PURE__ */ new Date()
+                },
+                include: {
+                  items: true,
+                  payments: { orderBy: { createdAt: "desc" } },
+                  factoryOrders: true,
+                  auditLogs: true
+                }
+              });
+            } catch (updateErr) {
+              if (String(updateErr?.message || "").includes("booking_items.")) {
+                updatedBookingRow = await tx.booking.update({
+                  where: { id: authoritativeBookingId },
+                  data: {
+                    paidAmount: newPaidAmount,
+                    remainingAmount: newRemainingAmount,
+                    version: { increment: 1 },
+                    updatedAt: /* @__PURE__ */ new Date()
+                  },
+                  include: {
+                    payments: { orderBy: { createdAt: "desc" } },
+                    factoryOrders: true,
+                    auditLogs: true
+                  }
+                });
+              } else {
+                throw updateErr;
               }
-            });
+            }
             await tx.auditLog.create({
               data: {
                 id: auditLogId,
-                bookingId: booking.id,
+                bookingId: authoritativeBookingId,
                 bookingCode: authoritativeBookingCode,
                 action: "\u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
                 performedBy,
                 details: auditDetails
               }
             });
+            finalPayment = {
+              id: paymentId,
+              bookingId: authoritativeBookingId,
+              amount: numAmount,
+              method: data.method,
+              date: paymentDate,
+              notes: paymentNotes,
+              receiptNumber: cleanReceipt,
+              recordedBy: performedBy,
+              status: "VALID",
+              createdAt: now
+            };
+            finalBooking = {
+              id: updatedBookingRow.id,
+              bookingCode: updatedBookingRow.bookingCode,
+              securityCode: updatedBookingRow.securityCode,
+              customerName: updatedBookingRow.customerName,
+              customerPhone: updatedBookingRow.customerPhone,
+              customerWhatsapp: updatedBookingRow.customerWhatsapp || void 0,
+              preferredContact: updatedBookingRow.preferredContact,
+              eventName: updatedBookingRow.eventName,
+              eventDate: updatedBookingRow.eventDate,
+              deliveryTime: updatedBookingRow.deliveryTime,
+              deliveryGovernorate: updatedBookingRow.deliveryGovernorate,
+              deliveryAddress: updatedBookingRow.deliveryAddress,
+              notes: updatedBookingRow.notes || "",
+              totalMealsCount: updatedBookingRow.totalMealsCount,
+              totalDistributorPrice: updatedBookingRow.totalDistributorPrice,
+              totalFactoryPrice: updatedBookingRow.totalFactoryPrice ?? void 0,
+              profitMargin: updatedBookingRow.profitMargin ?? void 0,
+              paidAmount: updatedBookingRow.paidAmount,
+              remainingAmount: updatedBookingRow.remainingAmount,
+              status: updatedBookingRow.status,
+              statusNotes: updatedBookingRow.statusNotes || "",
+              isTest: updatedBookingRow.isTest,
+              version: updatedBookingRow.version,
+              createdAt: updatedBookingRow.createdAt.toISOString(),
+              updatedAt: updatedBookingRow.updatedAt.toISOString(),
+              items: (updatedBookingRow.items || dbBooking?.items || []).map((it) => ({
+                mealId: it.mealId || it.mealCode,
+                mealCode: it.mealCode,
+                mealName: it.mealName,
+                category: it.category,
+                ingredients: it.ingredients,
+                quantity: it.quantity,
+                drinkOption: it.drinkOption || "standard",
+                orientalSweetOption: it.orientalSweetOption || "none",
+                baseDistributorPrice: it.baseDistributorPrice,
+                unitDistributorPrice: it.unitDistributorPrice,
+                totalDistributorPrice: it.totalDistributorPrice,
+                baseFactoryPrice: it.baseFactoryPrice ?? void 0,
+                unitFactoryPrice: it.unitFactoryPrice ?? void 0,
+                totalFactoryPrice: it.totalFactoryPrice ?? void 0
+              })),
+              payments: (updatedBookingRow.payments || []).map((p) => ({
+                id: p.id,
+                bookingId: p.bookingId,
+                amount: p.amount,
+                method: p.method,
+                date: p.date,
+                notes: p.notes || "",
+                receiptNumber: p.receiptNumber || "",
+                status: p.notes && p.notes.includes("[\u0645\u0644\u063A\u0627\u0629") ? "CANCELLED" : "VALID",
+                createdAt: p.createdAt.toISOString()
+              }))
+            };
           });
         }
       } catch (err) {
@@ -1384,35 +2432,79 @@ var db = {
       }
     }
     memoryDB = loadLocalDB();
-    memoryDB.payments.unshift(payment);
-    const memBookingIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
+    const memBooking = memoryDB.bookings.find(
+      (b) => b.id === rawIdInput || b.bookingCode === rawIdInput || data.bookingCode && b.bookingCode === data.bookingCode.trim() || data.bookingId && (b.id === data.bookingId.trim() || b.bookingCode === data.bookingId.trim())
+    );
+    if (!finalBooking && !memBooking) {
+      throw new Error(`\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F (\u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0645\u0637\u0644\u0648\u0628: "${rawIdInput}"). \u064A\u0631\u062C\u0649 \u0627\u0644\u062A\u0623\u0643\u062F \u0645\u0646 \u0635\u062D\u0629 \u0631\u0642\u0645 \u0623\u0648 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632.`);
+    }
+    const targetMemBooking = memBooking || finalBooking;
+    const authoritativeId = targetMemBooking.id;
+    const authoritativeCode = targetMemBooking.bookingCode;
+    if (!finalPayment) {
+      const existingPayments = (memoryDB.payments || []).filter(
+        (p) => (p.bookingId === authoritativeId || p.bookingId === authoritativeCode) && p.status !== "CANCELLED" && (!p.notes || !p.notes.includes("[\u0645\u0644\u063A\u0627\u0629"))
+      );
+      const currentPaid = existingPayments.reduce((acc, p) => acc + Number(p.amount), 0);
+      const currentRemaining = Math.max(0, targetMemBooking.totalDistributorPrice - currentPaid);
+      if (numAmount > currentRemaining && !data.allowOverpayment) {
+        throw new Error(`\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 (${numAmount.toLocaleString("ar-EG")} \u062C) \u062A\u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u0645\u0628\u0644\u063A \u0627\u0644\u0645\u062A\u0628\u0642\u064A \u0639\u0644\u0649 \u0627\u0644\u0639\u0645\u064A\u0644 (${currentRemaining.toLocaleString("ar-EG")} \u062C). \u0625\u0630\u0627 \u0643\u0627\u0646\u062A \u062F\u0641\u0639\u0629 \u062A\u0633\u0648\u064A\u0629 \u062E\u0627\u0635\u0629 \u0623\u0648 \u0632\u064A\u0627\u062F\u0629 \u0645\u0642\u0635\u0648\u062F\u0629\u060C \u064A\u0631\u062C\u0649 \u062A\u0641\u0639\u064A\u0644 \u062E\u064A\u0627\u0631 "\u0633\u0645\u0627\u062D \u0628\u0645\u0628\u0644\u063A \u062A\u0633\u0648\u064A\u0629 \u0632\u0627\u0626\u062F".`);
+      }
+      if (cleanReceipt) {
+        const duplicate = existingPayments.find((p) => p.receiptNumber && p.receiptNumber.trim() === cleanReceipt);
+        if (duplicate) {
+          throw new Error(`\u064A\u0648\u062C\u062F \u0628\u0627\u0644\u0641\u0639\u0644 \u062F\u0641\u0639\u0629 \u0645\u0633\u062C\u0644\u0629 \u0628\u0646\u0641\u0633 \u0631\u0642\u0645 \u0627\u0644\u0625\u064A\u0635\u0627\u0644 / \u0627\u0644\u0645\u0631\u062C\u0639 (${cleanReceipt}) \u0628\u0642\u064A\u0645\u0629 ${duplicate.amount} \u062C \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u062C\u0632.`);
+        }
+      }
+      const newPaidAmount = currentPaid + numAmount;
+      const newRemainingAmount = Math.max(0, targetMemBooking.totalDistributorPrice - newPaidAmount);
+      finalPayment = {
+        id: paymentId,
+        bookingId: authoritativeId,
+        amount: numAmount,
+        method: data.method,
+        date: paymentDate,
+        notes: paymentNotes,
+        receiptNumber: cleanReceipt,
+        recordedBy: performedBy,
+        status: "VALID",
+        createdAt: now
+      };
+      finalBooking = {
+        ...targetMemBooking,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+        version: targetMemBooking.version + 1,
+        updatedAt: now,
+        payments: [finalPayment, ...existingPayments]
+      };
+    }
+    if (!finalBooking || !finalPayment) {
+      throw new Error("\u0641\u0634\u0644 \u0625\u062A\u0645\u0627\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u0641\u0639\u0629 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0623\u0648 \u0627\u0644\u062A\u062E\u0632\u064A\u0646 \u0627\u0644\u062F\u0627\u0626\u0645");
+    }
+    const memBookingIdx = memoryDB.bookings.findIndex((b) => b.id === authoritativeId || b.bookingCode === authoritativeCode);
     if (memBookingIdx !== -1) {
-      memoryDB.bookings[memBookingIdx].paidAmount = newPaidAmount;
-      memoryDB.bookings[memBookingIdx].remainingAmount = newRemainingAmount;
-      memoryDB.bookings[memBookingIdx].version += 1;
+      memoryDB.bookings[memBookingIdx].paidAmount = finalBooking.paidAmount;
+      memoryDB.bookings[memBookingIdx].remainingAmount = finalBooking.remainingAmount;
+      memoryDB.bookings[memBookingIdx].version = finalBooking.version;
       memoryDB.bookings[memBookingIdx].updatedAt = now;
-    } else {
-      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0628\u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0641\u0631\u064A\u062F ${booking.id} \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0644\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0631\u0635\u064A\u062F`);
+    }
+    if (!memoryDB.payments.some((p) => p.id === finalPayment.id)) {
+      memoryDB.payments.unshift(finalPayment);
     }
     memoryDB.auditLogs.unshift({
       id: auditLogId,
-      bookingId: booking.id,
-      bookingCode: authoritativeBookingCode,
+      bookingId: authoritativeId,
+      bookingCode: authoritativeCode,
       action: "\u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629",
       performedBy,
-      details: auditDetails,
+      details: `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0628\u0642\u064A\u0645\u0629 ${numAmount} \u062C.\u0645 \u0628\u0637\u0631\u064A\u0642\u0629 (${data.method}) \u0644\u0644\u062D\u062C\u0632 ${authoritativeCode}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${finalBooking.paidAmount} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${finalBooking.remainingAmount} \u062C. \u0645\u0631\u062C\u0639: ${cleanReceipt || "\u0644\u0627 \u064A\u0648\u062C\u062F"}.`,
       timestamp: now
     });
     saveLocalDB(memoryDB);
-    const refreshedBooking = await this.getBookingById(booking.id);
     return {
-      payment,
-      booking: refreshedBooking || {
-        ...booking,
-        paidAmount: newPaidAmount,
-        remainingAmount: newRemainingAmount,
-        version: booking.version + 1
-      }
+      payment: finalPayment,
+      booking: finalBooking
     };
   },
   async cancelPayment(paymentId, reason, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
@@ -1515,7 +2607,7 @@ var db = {
       memPayment.cancelReason = reason.trim();
       memPayment.notes = updatedNotes;
     }
-    const memBooking = memoryDB.bookings.find((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
+    const memBooking = memoryDB.bookings.find((b) => b.id === booking.id);
     if (memBooking) {
       memBooking.paidAmount = newPaidAmount;
       memBooking.remainingAmount = newRemainingAmount;
@@ -1532,7 +2624,7 @@ var db = {
       timestamp: now
     });
     saveLocalDB(memoryDB);
-    const freshBooking = await this.getBookingById(booking.id);
+    const freshBooking = await this.getBookingByPrimaryId(booking.id) || await this.getBookingById(booking.id);
     return {
       success: true,
       payment: {
@@ -1563,9 +2655,13 @@ var db = {
     if (!allowedStatuses.includes(newStatus)) {
       throw new Error(`\u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629: ${newStatus}`);
     }
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0641 \u0627\u0644\u062D\u062C\u0632 \u0623\u0648 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632");
+    }
+    const booking = await this.resolveBookingAnyIdentifier(cleanId);
     if (!booking) {
-      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A (\u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0623\u0648 \u0627\u0644\u0643\u0648\u062F: "${cleanId}")`);
     }
     if (newStatus === "CONFIRMED" && booking.totalMealsCount < 50) {
       throw new Error(`\u0627\u0644\u062D\u062F \u0627\u0644\u0623\u062F\u0646\u0649 \u0644\u0644\u0637\u0644\u0628 50 \u0648\u062C\u0628\u0629. \u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0623\u0643\u064A\u062F \u062D\u062C\u0632 \u064A\u0642\u0644 \u0625\u062C\u0645\u0627\u0644\u064A \u0648\u062C\u0628\u0627\u062A\u0647 \u0639\u0646 50 \u0648\u062C\u0628\u0629 (\u0627\u0644\u0639\u062F\u062F \u0627\u0644\u062D\u0627\u0644\u064A: ${booking.totalMealsCount} \u0648\u062C\u0628\u0629).`);
@@ -1582,13 +2678,22 @@ var db = {
       updatedAt: now
     };
     memoryDB = loadLocalDB();
-    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id);
+    const memIdx = memoryDB.bookings.findIndex((b) => b.id === booking.id || b.bookingCode === booking.bookingCode);
     if (memIdx !== -1) {
       memoryDB.bookings[memIdx] = updatedBooking;
-      saveLocalDB(memoryDB);
     } else {
-      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0628\u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0641\u0631\u064A\u062F ${booking.id} \u0644\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u062D\u0627\u0644\u0629`);
+      memoryDB.bookings.unshift(updatedBooking);
     }
+    if (newStatus === "CANCELLED") {
+      const activeOrders = (memoryDB.factoryOrders || []).filter(
+        (fo) => (fo.bookingId === booking.id || fo.bookingCode === booking.bookingCode) && fo.status !== "CANCELLED" && fo.status !== "COMPLETED"
+      );
+      for (const fo of activeOrders) {
+        fo.status = "CANCELLED";
+        fo.updatedAt = now;
+      }
+    }
+    saveLocalDB(memoryDB);
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
@@ -1602,6 +2707,19 @@ var db = {
               updatedAt: /* @__PURE__ */ new Date()
             }
           });
+          if (newStatus === "CANCELLED") {
+            await client.factoryOrder.updateMany({
+              where: {
+                bookingId: booking.id,
+                status: { notIn: ["CANCELLED", "COMPLETED"] }
+              },
+              data: {
+                status: "CANCELLED",
+                updatedAt: /* @__PURE__ */ new Date()
+              }
+            }).catch(() => {
+            });
+          }
         }
       } catch (err) {
         logServerError(err, "db.updateBookingStatus.prisma");
@@ -1628,16 +2746,29 @@ var db = {
       const meal = mealsMap.get(item.mealCode);
       const baseFactPrice = meal?.factoryPrice ?? item.baseFactoryPrice ?? 0;
       const hasJuice = meal ? meal.hasJuice : true;
+      let sweetDelta = 0;
+      let sweetLabel = "\u0628\u062F\u0648\u0646 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+      const sweetOpt = item.orientalSweetOption || "none";
+      if (sweetOpt === "add_with_juice") {
+        sweetDelta = 10;
+        sweetLabel = "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+10 \u062C \u0644\u0644\u0645\u0635\u0646\u0639)";
+      } else if (sweetOpt === "replace_juice") {
+        sweetDelta = 5;
+        sweetLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+5 \u062C \u0644\u0644\u0645\u0635\u0646\u0639)";
+      }
       let factoryDrinkDelta = 0;
       let drinkLabel = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
       let specialInstructions = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
-      if (hasJuice) {
+      if (sweetOpt === "replace_juice") {
+        drinkLabel = "\u0627\u0644\u0639\u0635\u064A\u0631 \u0645\u0633\u062A\u0628\u062F\u0644 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+        specialInstructions = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u062D\u0644\u0648\u064A\u0627\u062A";
+      } else if (hasJuice) {
         if (item.drinkOption === "pepsi") {
           factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
           drinkLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
           specialInstructions = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
         } else if (item.drinkOption === "no_juice") {
-          factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+          factoryDrinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction;
           drinkLabel = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
           specialInstructions = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
         } else {
@@ -1648,7 +2779,7 @@ var db = {
         drinkLabel = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (\u0623\u0635\u0644\u064A\u0629)";
         specialInstructions = "\u0648\u062C\u0628\u0629 \u0623\u0635\u0644\u064A\u0629 \u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
       }
-      const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta);
+      const unitFactPrice = Math.max(0, baseFactPrice + factoryDrinkDelta + sweetDelta);
       const totalFactItemPrice = unitFactPrice * item.quantity;
       totalFactoryCost += totalFactItemPrice;
       return {
@@ -1657,6 +2788,9 @@ var db = {
         quantity: item.quantity,
         drinkOption: item.drinkOption,
         drinkLabel,
+        orientalSweetOption: sweetOpt,
+        orientalSweetLabel: sweetLabel,
+        orientalSweetFactoryAdjustment: sweetDelta,
         ingredients: meal?.ingredients || item.ingredients,
         baseFactoryPrice: baseFactPrice,
         factoryDrinkAdjustment: factoryDrinkDelta,
@@ -1681,11 +2815,15 @@ var db = {
       items: previewItems,
       existingOrdersCount: uniqueExisting.length,
       existingOrders: uniqueExisting,
-      packagingNotes: `\u0627\u0644\u0639\u0644\u0628\u0629 \u0627\u0644\u0628\u064A\u0636\u0627\u0621 \u0627\u0644\u0631\u0633\u0645\u064A\u0629 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629 \u0644\u0640 Celebre Catering. \u0648\u0636\u0639 \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644 \u0645\u0639\u0637\u0631 \u0645\u0639 \u0643\u0644 \u0648\u062C\u0628\u0629. \u0641\u062D\u0635 \u0627\u0644\u062C\u0648\u062F\u0629 \u0648\u062A\u0627\u0631\u064A\u062E \u0627\u0644\u062A\u0639\u0628\u0626\u0629. ${booking.notes || ""}`.trim()
+      packagingNotes: (booking.notes || "").trim()
     };
   },
   async createFactoryOrder(bookingId, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", options) {
-    const booking = await this.getBookingById(bookingId);
+    const cleanId = (bookingId || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0644\u0644\u062D\u062C\u0632 (bookingId) \u0644\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639");
+    }
+    const booking = await this.getBookingByPrimaryId(cleanId) || await this.getBookingById(cleanId);
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0644\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639");
     }
@@ -1694,15 +2832,18 @@ var db = {
     }
     memoryDB = loadLocalDB();
     const existingOrders = (booking.factoryOrders || []).concat(
-      memoryDB.factoryOrders.filter((fo) => fo.bookingId === bookingId)
+      memoryDB.factoryOrders.filter((fo) => fo.bookingId === booking.id)
     );
     const uniqueExisting = Array.from(new Map(existingOrders.map((o) => [o.orderNumber, o])).values());
     if (uniqueExisting.length > 0 && !options?.forceNewVersion) {
       const latest = uniqueExisting[uniqueExisting.length - 1];
       throw new Error(`\u064A\u0648\u062C\u062F \u0628\u0627\u0644\u0641\u0639\u0644 \u0623\u0645\u0631 \u0645\u0635\u0646\u0639 \u0635\u0627\u062F\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u062C\u0632 (${latest.orderNumber} - \u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${latest.version}). \u0625\u0630\u0627 \u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u0648\u062A\u0631\u064A\u062F \u0625\u0635\u062F\u0627\u0631 \u0646\u0633\u062E\u0629 \u0639\u0645\u0644 \u062C\u062F\u064A\u062F\u0629 \u0644\u0644\u0645\u0635\u0646\u0639\u060C \u064A\u0631\u062C\u0649 \u062A\u0623\u0643\u064A\u062F \u062E\u064A\u0627\u0631 "\u0625\u0635\u062F\u0627\u0631 \u0646\u0633\u062E\u0629 \u0639\u0645\u0644 \u062C\u062F\u064A\u062F\u0629".`);
     }
-    const version = uniqueExisting.length + 1;
-    memoryDB.factoryOrderCounter += 1;
+    const version = options?.targetVersion !== void 0 ? options.targetVersion : uniqueExisting.length + 1;
+    memoryDB.factoryOrderCounter = Math.max(memoryDB.factoryOrderCounter || 100, 100);
+    do {
+      memoryDB.factoryOrderCounter += 1;
+    } while (memoryDB.factoryOrders.some((o) => o.orderNumber === `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, "0")}`) || memoryDB.factoryPayments.some((p) => p.factoryOrderNumber === `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, "0")}`));
     const orderNumber = `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, "0")}`;
     const preview = await this.getFactoryOrderPreview(bookingId);
     const factoryOrder = {
@@ -1749,21 +2890,23 @@ var db = {
               paymentStatus: "UNPAID"
             }
           });
-          await client.booking.update({
-            where: { id: booking.id },
-            data: {
-              status: "IN_PRODUCTION",
-              statusNotes: `\u062A\u0645 \u062A\u062D\u0648\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u0644\u0644\u0645\u0635\u0646\u0639 \u0648\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`,
-              updatedAt: /* @__PURE__ */ new Date()
-            }
-          });
+          if (!options?.preserveBookingStatus) {
+            await client.booking.update({
+              where: { id: booking.id },
+              data: {
+                status: "IN_PRODUCTION",
+                statusNotes: `\u062A\u0645 \u062A\u062D\u0648\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u0644\u0644\u0645\u0635\u0646\u0639 \u0648\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`,
+                updatedAt: /* @__PURE__ */ new Date()
+              }
+            });
+          }
         }
       } catch (err) {
         logServerError(err, "db.createFactoryOrder.prisma");
       }
     }
     const memBooking = memoryDB.bookings.find((b) => b.id === booking.id);
-    if (memBooking) {
+    if (memBooking && !options?.preserveBookingStatus) {
       memBooking.status = "IN_PRODUCTION";
       memBooking.statusNotes = `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0631\u0642\u0645 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version})`;
       memBooking.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -1772,13 +2915,14 @@ var db = {
       (it) => it.drinkOption === "pepsi" && (it.factoryDrinkAdjustment ?? 0) === FACTORY_PEPSI_ACCOUNTING.netAdjustment
     );
     const pepsiQty = pepsiAdjustedItems.reduce((acc, it) => acc + it.quantity, 0);
-    const pepsiAuditNote = pepsiQty > 0 ? ` [\u062A\u0645 \u062A\u0637\u0628\u064A\u0642 \u0645\u0639\u0627\u062F\u0644\u0629 \u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0627\u0644\u0628\u064A\u0628\u0633\u064A \u0644\u0644\u0645\u0635\u0646\u0639: -5 \u062C \u0639\u0635\u064A\u0631 +10 \u062C \u0643\u0627\u0646\u0632 = +5 \u062C \u0639\u0644\u0649 ${pepsiQty} \u0648\u062C\u0628\u0629]` : "";
+    const pepsiAuditNote = pepsiQty > 0 ? ` [\u062A\u0645 \u062A\u0637\u0628\u064A\u0642 \u0645\u0639\u0627\u062F\u0644\u0629 \u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0627\u0644\u0628\u064A\u0628\u0633\u064A \u0644\u0644\u0645\u0635\u0646\u0639: -5 \u062C \u0639\u0635\u064A\u0631 -1 \u062C \u0639\u0628\u0648\u0629 +10 \u062C \u0643\u0627\u0646\u0632 = +4 \u062C \u0639\u0644\u0649 ${pepsiQty} \u0648\u062C\u0628\u0629]` : "";
+    const auditText = options?.customAuditDetails ? options.customAuditDetails : `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 ${preview.totalFactoryCost} \u062C (\u062E\u0627\u0644\u064D \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).${pepsiAuditNote}`;
     this.addAuditLog({
       bookingId: booking.id,
       bookingCode: booking.bookingCode,
       action: "\u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639",
       performedBy,
-      details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${version}) \u0628\u0625\u062C\u0645\u0627\u0644\u064A ${booking.totalMealsCount} \u0648\u062C\u0628\u0629 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 ${preview.totalFactoryCost} \u062C (\u062E\u0627\u0644\u064D \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).${pepsiAuditNote}`
+      details: auditText
     });
     saveLocalDB(memoryDB);
     return factoryOrder;
@@ -1788,76 +2932,34 @@ var db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          const dbOrders = await client.factoryOrder.findMany({
-            include: {
-              payments: {
-                orderBy: { createdAt: "desc" }
-              }
-            },
-            orderBy: { createdAt: "desc" }
-          });
-          if (dbOrders && dbOrders.length > 0) {
-            return dbOrders.map((fo) => {
-              let parsedItems = [];
-              try {
-                parsedItems = JSON.parse(fo.itemsJson);
-              } catch {
-              }
-              const itemsTotal = parsedItems.reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
-              const costTotal = fo.factoryCostTotal && fo.factoryCostTotal > 0 ? fo.factoryCostTotal : itemsTotal;
-              const paymentsList = (fo.payments || []).map((p) => ({
-                id: p.id,
-                factoryOrderId: p.factoryOrderId,
-                factoryOrderNumber: p.factoryOrderNumber,
-                bookingId: p.bookingId,
-                bookingCode: p.bookingCode,
-                amount: p.amount,
-                method: p.method,
-                date: p.date,
-                notes: p.notes || void 0,
-                receiptNumber: p.receiptNumber || void 0,
-                recordedBy: p.recordedBy,
-                status: p.status,
-                cancelledBy: p.cancelledBy || void 0,
-                cancelledAt: p.cancelledAt ? p.cancelledAt.toISOString() : void 0,
-                cancelReason: p.cancelReason || void 0,
-                createdAt: p.createdAt.toISOString(),
-                updatedAt: p.updatedAt ? p.updatedAt.toISOString() : void 0
-              }));
-              const validPayments = paymentsList.filter((p) => p.status === "VALID");
-              const paidAmount = validPayments.reduce((sum, p) => sum + p.amount, 0);
-              const remainingAmount = costTotal - paidAmount;
-              let paymentStatus = "UNPAID";
-              if (paidAmount <= 0) {
-                paymentStatus = "UNPAID";
-              } else if (paidAmount < costTotal) {
-                paymentStatus = "PARTIALLY_PAID";
-              } else if (paidAmount === costTotal) {
-                paymentStatus = "FULLY_PAID";
-              } else {
-                paymentStatus = "OVERPAID";
-              }
-              return {
-                id: fo.id,
-                orderNumber: fo.orderNumber,
-                bookingId: fo.bookingId,
-                bookingCode: fo.bookingCode,
-                version: fo.version,
-                status: fo.status,
-                eventDate: fo.eventDate,
-                deliveryTime: fo.deliveryTime,
-                deliveryLocation: fo.deliveryLocation,
-                factoryCostTotal: costTotal,
-                paidToFactoryAmount: paidAmount,
-                remainingToFactoryAmount: remainingAmount,
-                paymentStatus,
-                payments: paymentsList,
-                items: parsedItems,
-                packagingNotes: fo.packagingNotes || "",
-                createdAt: fo.createdAt.toISOString(),
-                updatedAt: fo.updatedAt.toISOString()
-              };
+          let dbOrders = [];
+          try {
+            dbOrders = await client.factoryOrder.findMany({
+              include: {
+                payments: {
+                  orderBy: { createdAt: "desc" }
+                }
+              },
+              orderBy: { createdAt: "desc" }
             });
+          } catch (queryErr) {
+            if (String(queryErr?.message || "").includes("paymentType")) {
+              await ensureColumnsReady(client).catch(() => {
+              });
+              dbOrders = await client.factoryOrder.findMany({
+                include: {
+                  payments: {
+                    orderBy: { createdAt: "desc" }
+                  }
+                },
+                orderBy: { createdAt: "desc" }
+              });
+            } else {
+              throw queryErr;
+            }
+          }
+          if (dbOrders && dbOrders.length > 0) {
+            return dbOrders.map((fo) => hydrateFactoryOrderFinancials(fo));
           }
         }
       } catch (err) {
@@ -1867,38 +2969,52 @@ var db = {
     memoryDB = loadLocalDB();
     if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
     return memoryDB.factoryOrders.map((fo) => {
-      const parsedItems = fo.items || [];
-      const itemsTotal = parsedItems.reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
-      const costTotal = fo.factoryCostTotal && fo.factoryCostTotal > 0 ? fo.factoryCostTotal : itemsTotal;
       const paymentsList = memoryDB.factoryPayments.filter(
-        (p) => p.factoryOrderId === fo.id || p.factoryOrderNumber === fo.orderNumber
+        (p) => p.factoryOrderId ? p.factoryOrderId === fo.id : p.factoryOrderNumber === fo.orderNumber
       );
-      const validPayments = paymentsList.filter((p) => p.status === "VALID");
-      const paidAmount = validPayments.reduce((sum, p) => sum + p.amount, 0);
-      const remainingAmount = costTotal - paidAmount;
-      let paymentStatus = "UNPAID";
-      if (paidAmount <= 0) {
-        paymentStatus = "UNPAID";
-      } else if (paidAmount < costTotal) {
-        paymentStatus = "PARTIALLY_PAID";
-      } else if (paidAmount === costTotal) {
-        paymentStatus = "FULLY_PAID";
-      } else {
-        paymentStatus = "OVERPAID";
-      }
-      return {
-        ...fo,
-        factoryCostTotal: costTotal,
-        paidToFactoryAmount: paidAmount,
-        remainingToFactoryAmount: remainingAmount,
-        paymentStatus,
-        payments: paymentsList
-      };
+      return hydrateFactoryOrderFinancials(fo, paymentsList);
     });
   },
   async getFactoryOrderById(idOrNumber) {
-    const orders = await this.getFactoryOrders();
     const clean = (idOrNumber || "").trim();
+    if (!clean) return null;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const fo = await client.factoryOrder.findFirst({
+            where: {
+              OR: [{ id: clean }, { orderNumber: clean }]
+            },
+            include: {
+              payments: {
+                orderBy: { createdAt: "desc" }
+              }
+            }
+          });
+          if (fo) {
+            return hydrateFactoryOrderFinancials(fo);
+          }
+        }
+      } catch (err) {
+        if (String(err?.message || "").includes("paymentType")) {
+          try {
+            const client = getPrismaClient();
+            if (client) {
+              await ensureColumnsReady(client);
+              const fo = await client.factoryOrder.findFirst({
+                where: { OR: [{ id: clean }, { orderNumber: clean }] },
+                include: { payments: { orderBy: { createdAt: "desc" } } }
+              });
+              if (fo) return hydrateFactoryOrderFinancials(fo);
+            }
+          } catch {
+          }
+        }
+        logServerError(err, "db.getFactoryOrderById.prisma");
+      }
+    }
+    const orders = await this.getFactoryOrders();
     return orders.find((o) => o.id === clean || o.orderNumber === clean) || null;
   },
   async getFactoryPayments(factoryOrderId) {
@@ -1913,25 +3029,7 @@ var db = {
           const list = await client.factoryPayment.findMany({
             orderBy: { createdAt: "desc" }
           });
-          return list.map((p) => ({
-            id: p.id,
-            factoryOrderId: p.factoryOrderId,
-            factoryOrderNumber: p.factoryOrderNumber,
-            bookingId: p.bookingId,
-            bookingCode: p.bookingCode,
-            amount: p.amount,
-            method: p.method,
-            date: p.date,
-            notes: p.notes || void 0,
-            receiptNumber: p.receiptNumber || void 0,
-            recordedBy: p.recordedBy,
-            status: p.status,
-            cancelledBy: p.cancelledBy || void 0,
-            cancelledAt: p.cancelledAt ? p.cancelledAt.toISOString() : void 0,
-            cancelReason: p.cancelReason || void 0,
-            createdAt: p.createdAt.toISOString(),
-            updatedAt: p.updatedAt ? p.updatedAt.toISOString() : void 0
-          }));
+          return list.map(mapFactoryPaymentRecord);
         }
       } catch (err) {
         logServerError(err, "db.getFactoryPayments.prisma");
@@ -1939,7 +3037,7 @@ var db = {
     }
     memoryDB = loadLocalDB();
     if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
-    return [...memoryDB.factoryPayments].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return [...memoryDB.factoryPayments].map(mapFactoryPaymentRecord).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
   async addFactoryPayment(data, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
     const cleanOrderId = (data.factoryOrderId || "").trim();
@@ -1948,7 +3046,7 @@ var db = {
       throw new Error("\u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u0641\u0639\u0629");
     }
     const numAmount = Number(data.amount);
-    if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
       throw new Error("\u0642\u064A\u0645\u0629 \u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0631\u0642\u0645\u0627\u064B \u0645\u0648\u062C\u0628\u0627\u064B \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631");
     }
     const cleanReceipt = data.receiptNumber?.trim();
@@ -1963,6 +3061,8 @@ var db = {
     const now = /* @__PURE__ */ new Date();
     const nowIso = now.toISOString();
     const paymentId = `fpay-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const safeMethod = normalizeFactoryPaymentMethod(data.method);
+    const safeType = normalizeFactoryPaymentType(data.paymentType);
     const newPayment = {
       id: paymentId,
       factoryOrderId: order.id,
@@ -1970,7 +3070,8 @@ var db = {
       bookingId: order.bookingId,
       bookingCode: order.bookingCode,
       amount: numAmount,
-      method: data.method || "cash",
+      method: safeMethod,
+      paymentType: safeType,
       date: data.date?.trim() || nowIso.split("T")[0],
       notes: data.notes?.trim() || void 0,
       receiptNumber: cleanReceipt || void 0,
@@ -1983,21 +3084,15 @@ var db = {
     const newPaid = priorValidPayments.reduce((acc, p) => acc + p.amount, 0) + numAmount;
     const costTotal = order.factoryCostTotal || 0;
     const newRemaining = costTotal - newPaid;
-    let newStatus = "UNPAID";
-    if (newPaid <= 0) {
-      newStatus = "UNPAID";
-    } else if (newPaid < costTotal) {
-      newStatus = "PARTIALLY_PAID";
-    } else if (newPaid === costTotal) {
-      newStatus = "FULLY_PAID";
-    } else {
-      newStatus = "OVERPAID";
-    }
-    const auditDetail = `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0627\u0644\u064A\u0629 \u0644\u0644\u0645\u0635\u0646\u0639 \u0628\u0642\u064A\u0645\u0629 ${numAmount} \u062C.\u0645 \u0628\u0637\u0631\u064A\u0642\u0629 (${newPayment.method}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} (\u062D\u062C\u0632: ${order.bookingCode}) \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0627\u0644\u0645\u0633\u062F\u062F \u0644\u0644\u0645\u0635\u0646\u0639: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.${cleanReceipt ? ` \u0645\u0631\u062C\u0639: ${cleanReceipt}.` : ""}${newStatus === "OVERPAID" ? ` [\u062A\u0646\u0628\u064A\u0647: \u0633\u062F\u0627\u062F \u0628\u0627\u0644\u0632\u064A\u0627\u062F\u0629 \u0642\u062F\u0631\u0647 ${newPaid - costTotal} \u062C]` : ""}`;
+    const newStatus = calculateFactoryPaymentStatus(newPaid, costTotal);
+    const typeLabel = formatFactoryPaymentTypeLabel(safeType);
+    const auditDetail = `\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 (${typeLabel}) \u0644\u0644\u0645\u0635\u0646\u0639 \u0628\u0642\u064A\u0645\u0629 ${numAmount} \u062C.\u0645 \u0628\u0637\u0631\u064A\u0642\u0629 (${formatFactoryPaymentMethodLabel(safeMethod)}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} (\u062D\u062C\u0632: ${order.bookingCode}) \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0627\u0644\u0645\u0633\u062F\u062F \u0644\u0644\u0645\u0635\u0646\u0639: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.${cleanReceipt ? ` \u0645\u0631\u062C\u0639: ${cleanReceipt}.` : ""}${newStatus === "OVERPAID" ? ` [\u062A\u0646\u0628\u064A\u0647: \u0633\u062F\u0627\u062F \u0628\u0627\u0644\u0632\u064A\u0627\u062F\u0629 \u0642\u062F\u0631\u0647 ${newPaid - costTotal} \u062C]` : ""}`;
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
+          await ensureColumnsReady(client).catch(() => {
+          });
           await client.$transaction(async (tx) => {
             await tx.factoryPayment.create({
               data: {
@@ -2008,6 +3103,7 @@ var db = {
                 bookingCode: order.bookingCode,
                 amount: newPayment.amount,
                 method: newPayment.method,
+                paymentType: safeType,
                 date: newPayment.date,
                 notes: newPayment.notes,
                 receiptNumber: newPayment.receiptNumber,
@@ -2071,84 +3167,110 @@ var db = {
     return { payment: newPayment, factoryOrder: updatedOrder };
   },
   async updateFactoryPayment(paymentId, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const cleanPayId = (paymentId || "").trim();
+    if (!cleanPayId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062A\u0639\u062F\u064A\u0644\u0647\u0627");
+    }
     memoryDB = loadLocalDB();
     if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
-    const payment = memoryDB.factoryPayments.find((p) => p.id === paymentId);
+    let payment = memoryDB.factoryPayments.find((p) => p.id === cleanPayId);
+    let order = payment ? memoryDB.factoryOrders.find((o) => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber) || null : null;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbPay = await client.factoryPayment.findUnique({ where: { id: cleanPayId } });
+          if (dbPay) {
+            payment = mapFactoryPaymentRecord(dbPay);
+            const dbOrder = await client.factoryOrder.findUnique({
+              where: { id: dbPay.factoryOrderId },
+              include: { payments: { orderBy: { createdAt: "desc" } } }
+            });
+            if (dbOrder) {
+              order = hydrateFactoryOrderFinancials(dbOrder);
+            }
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.updateFactoryPayment.resolve");
+      }
+    }
     if (!payment) {
       throw new Error("\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u0627\u062F \u062A\u0639\u062F\u064A\u0644\u0647\u0627 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
     }
-    const order = memoryDB.factoryOrders.find((o) => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber);
+    if (!order) {
+      order = await this.getFactoryOrderById(payment.factoryOrderId || payment.factoryOrderNumber);
+    }
     if (!order) {
       throw new Error("\u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0627\u0644\u062F\u0641\u0639\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
     const oldAmount = payment.amount;
     const oldMethod = payment.method;
     const oldReceipt = payment.receiptNumber;
+    const updatedPayment = { ...payment };
     if (updates.amount !== void 0) {
       const num = Number(updates.amount);
-      if (isNaN(num) || num <= 0) {
+      if (!Number.isFinite(num) || num <= 0) {
         throw new Error("\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0639\u062F\u0644\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0631\u0642\u0645\u0627\u064B \u0645\u0648\u062C\u0628\u0627\u064B \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631");
       }
-      payment.amount = num;
+      updatedPayment.amount = num;
     }
     if (updates.method !== void 0) {
-      payment.method = updates.method;
+      updatedPayment.method = normalizeFactoryPaymentMethod(updates.method);
+    }
+    if (updates.paymentType !== void 0) {
+      updatedPayment.paymentType = normalizeFactoryPaymentType(updates.paymentType);
     }
     if (updates.date !== void 0) {
-      payment.date = updates.date.trim();
+      updatedPayment.date = updates.date.trim() || payment.date;
     }
     if (updates.notes !== void 0) {
-      payment.notes = updates.notes.trim() || void 0;
+      updatedPayment.notes = updates.notes.trim() || void 0;
     }
+    const siblingPayments = order.payments && order.payments.length > 0 ? order.payments : memoryDB.factoryPayments.filter((p) => p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber);
     if (updates.receiptNumber !== void 0) {
       const cleanRec = updates.receiptNumber.trim() || void 0;
       if (cleanRec && cleanRec !== oldReceipt) {
-        const dup = memoryDB.factoryPayments.find(
-          (p) => p.id !== paymentId && p.status === "VALID" && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber) && p.receiptNumber && p.receiptNumber.trim().toLowerCase() === cleanRec.toLowerCase()
+        const dup = siblingPayments.find(
+          (p) => p.id !== cleanPayId && p.status === "VALID" && p.receiptNumber && p.receiptNumber.trim().toLowerCase() === cleanRec.toLowerCase()
         );
         if (dup) {
           throw new Error(`\u0631\u0642\u0645 \u0627\u0644\u0625\u064A\u0635\u0627\u0644 / \u0627\u0644\u0645\u0631\u062C\u0639 (${cleanRec}) \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644 \u0641\u064A \u062F\u0641\u0639\u0629 \u0623\u062E\u0631\u0649 \u0644\u0646\u0641\u0633 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639.`);
         }
       }
-      payment.receiptNumber = cleanRec;
+      updatedPayment.receiptNumber = cleanRec;
     }
-    payment.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    const allValidPayments = memoryDB.factoryPayments.filter(
-      (p) => p.status === "VALID" && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber)
-    );
+    const now = /* @__PURE__ */ new Date();
+    const nowIso = now.toISOString();
+    updatedPayment.updatedAt = nowIso;
+    const mergedPayments = siblingPayments.map((p) => p.id === cleanPayId ? updatedPayment : p);
+    if (!mergedPayments.some((p) => p.id === cleanPayId)) {
+      mergedPayments.unshift(updatedPayment);
+    }
+    const allValidPayments = mergedPayments.filter((p) => p.status === "VALID");
     const newPaid = allValidPayments.reduce((acc, p) => acc + p.amount, 0);
     const itemsTotal = (order.items || []).reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
     const costTotal = order.factoryCostTotal && order.factoryCostTotal > 0 ? order.factoryCostTotal : itemsTotal;
     const newRemaining = costTotal - newPaid;
-    let newStatus = "UNPAID";
-    if (newPaid <= 0) {
-      newStatus = "UNPAID";
-    } else if (newPaid < costTotal) {
-      newStatus = "PARTIALLY_PAID";
-    } else if (newPaid === costTotal) {
-      newStatus = "FULLY_PAID";
-    } else {
-      newStatus = "OVERPAID";
-    }
-    order.paidToFactoryAmount = newPaid;
-    order.remainingToFactoryAmount = newRemaining;
-    order.paymentStatus = newStatus;
-    order.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    const auditDetail = `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 (\u0627\u0644\u0645\u0639\u0631\u0641: ${payment.id}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0627\u0644\u0645\u0628\u0644\u063A: \u0643\u0627\u0646 ${oldAmount} \u062C \u0648\u0623\u0635\u0628\u062D ${payment.amount} \u062C\u060C \u0627\u0644\u0637\u0631\u064A\u0642\u0629: ${oldMethod} -> ${payment.method}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.`;
+    const newStatus = calculateFactoryPaymentStatus(newPaid, costTotal);
+    const auditDetail = `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 (\u0627\u0644\u0645\u0639\u0631\u0641: ${updatedPayment.id} - ${formatFactoryPaymentTypeLabel(updatedPayment.paymentType)}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber} \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u0627\u0644\u0645\u0628\u0644\u063A: \u0643\u0627\u0646 ${oldAmount} \u062C \u0648\u0623\u0635\u0628\u062D ${updatedPayment.amount} \u062C\u060C \u0627\u0644\u0637\u0631\u064A\u0642\u0629: ${oldMethod} -> ${updatedPayment.method}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.`;
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
+          await ensureColumnsReady(client).catch(() => {
+          });
           await client.$transaction(async (tx) => {
             await tx.factoryPayment.update({
-              where: { id: payment.id },
+              where: { id: updatedPayment.id },
               data: {
-                amount: payment.amount,
-                method: payment.method,
-                date: payment.date,
-                notes: payment.notes,
-                receiptNumber: payment.receiptNumber,
-                updatedAt: /* @__PURE__ */ new Date()
+                amount: updatedPayment.amount,
+                method: updatedPayment.method,
+                paymentType: normalizeFactoryPaymentType(updatedPayment.paymentType),
+                date: updatedPayment.date,
+                notes: updatedPayment.notes ?? null,
+                receiptNumber: updatedPayment.receiptNumber ?? null,
+                updatedAt: now
               }
             });
             await tx.factoryOrder.update({
@@ -2157,7 +3279,7 @@ var db = {
                 paidAmount: newPaid,
                 remainingAmount: newRemaining,
                 paymentStatus: newStatus,
-                updatedAt: /* @__PURE__ */ new Date()
+                updatedAt: now
               }
             });
             await tx.auditLog.create({
@@ -2176,6 +3298,24 @@ var db = {
         logServerError(err, "db.updateFactoryPayment.prisma");
       }
     }
+    const memPayIdx = memoryDB.factoryPayments.findIndex((p) => p.id === cleanPayId);
+    if (memPayIdx !== -1) {
+      memoryDB.factoryPayments[memPayIdx] = updatedPayment;
+    } else {
+      memoryDB.factoryPayments.unshift(updatedPayment);
+    }
+    const memOrderIdx = memoryDB.factoryOrders.findIndex((o) => o.id === order.id || o.orderNumber === order.orderNumber);
+    const updatedOrder = {
+      ...order,
+      paidToFactoryAmount: newPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newStatus,
+      payments: mergedPayments,
+      updatedAt: nowIso
+    };
+    if (memOrderIdx !== -1) {
+      memoryDB.factoryOrders[memOrderIdx] = updatedOrder;
+    }
     if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
     memoryDB.auditLogs.unshift({
       id: `al-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
@@ -2184,60 +3324,67 @@ var db = {
       action: "\u062A\u0639\u062F\u064A\u0644 \u062F\u0641\u0639\u0629 \u0645\u0635\u0646\u0639",
       performedBy,
       details: auditDetail,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      timestamp: nowIso
     });
     saveLocalDB(memoryDB);
-    const updatedOrder = {
-      ...order,
-      paidToFactoryAmount: newPaid,
-      remainingToFactoryAmount: newRemaining,
-      paymentStatus: newStatus,
-      payments: allValidPayments
-    };
-    return { payment, factoryOrder: updatedOrder };
+    return { payment: updatedPayment, factoryOrder: updatedOrder };
   },
   async deleteFactoryPayment(paymentId, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629", reason = "\u062D\u0630\u0641 \u062F\u0641\u0639\u0629 \u0645\u0633\u062C\u0644\u0629 \u0628\u0627\u0644\u062E\u0637\u0623") {
+    const cleanPayId = (paymentId || "").trim();
+    if (!cleanPayId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062D\u0630\u0641\u0647\u0627");
+    }
     memoryDB = loadLocalDB();
     if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
-    const payIdx = memoryDB.factoryPayments.findIndex((p) => p.id === paymentId);
-    if (payIdx === -1) {
+    let payment = memoryDB.factoryPayments.find((p) => p.id === cleanPayId);
+    let order = payment ? memoryDB.factoryOrders.find((o) => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber) || null : null;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const dbPay = await client.factoryPayment.findUnique({ where: { id: cleanPayId } });
+          if (dbPay) {
+            payment = mapFactoryPaymentRecord(dbPay);
+            const dbOrder = await client.factoryOrder.findUnique({
+              where: { id: dbPay.factoryOrderId },
+              include: { payments: { orderBy: { createdAt: "desc" } } }
+            });
+            if (dbOrder) {
+              order = hydrateFactoryOrderFinancials(dbOrder);
+            }
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.deleteFactoryPayment.resolve");
+      }
+    }
+    if (!payment) {
       throw new Error("\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u0627\u062F \u062D\u0630\u0641\u0647\u0627 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
     }
-    const payment = memoryDB.factoryPayments[payIdx];
-    const order = memoryDB.factoryOrders.find((o) => o.id === payment.factoryOrderId || o.orderNumber === payment.factoryOrderNumber);
+    if (!order) {
+      order = await this.getFactoryOrderById(payment.factoryOrderId || payment.factoryOrderNumber);
+    }
     if (!order) {
       throw new Error("\u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0627\u0644\u062F\u0641\u0639\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
-    memoryDB.factoryPayments.splice(payIdx, 1);
-    const remainingPayments = memoryDB.factoryPayments.filter(
-      (p) => p.status === "VALID" && (p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber)
-    );
-    const newPaid = remainingPayments.reduce((acc, p) => acc + p.amount, 0);
+    const basePayments = order.payments && order.payments.length > 0 ? order.payments : memoryDB.factoryPayments.filter((p) => p.factoryOrderId === order.id || p.factoryOrderNumber === order.orderNumber);
+    const remainingAllPayments = basePayments.filter((p) => p.id !== cleanPayId);
+    const remainingValidPayments = remainingAllPayments.filter((p) => p.status === "VALID");
+    const newPaid = remainingValidPayments.reduce((acc, p) => acc + p.amount, 0);
     const itemsTotal = (order.items || []).reduce((acc, item) => acc + (item.totalFactoryPrice || 0), 0);
     const costTotal = order.factoryCostTotal && order.factoryCostTotal > 0 ? order.factoryCostTotal : itemsTotal;
     const newRemaining = costTotal - newPaid;
-    let newStatus = "UNPAID";
-    if (newPaid <= 0) {
-      newStatus = "UNPAID";
-    } else if (newPaid < costTotal) {
-      newStatus = "PARTIALLY_PAID";
-    } else if (newPaid === costTotal) {
-      newStatus = "FULLY_PAID";
-    } else {
-      newStatus = "OVERPAID";
-    }
-    order.paidToFactoryAmount = newPaid;
-    order.remainingToFactoryAmount = newRemaining;
-    order.paymentStatus = newStatus;
-    order.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    const auditDetail = `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062D\u0630\u0641 \u062F\u0641\u0639\u0629 \u0645\u0635\u0646\u0639 \u0628\u0642\u064A\u0645\u0629 ${payment.amount} \u062C.\u0645 (\u0637\u0631\u064A\u0642\u0629: ${payment.method}\u060C \u0625\u064A\u0635\u0627\u0644: ${payment.receiptNumber || "\u0628\u062F\u0648\u0646"}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber}. \u0627\u0644\u0633\u0628\u0628: ${reason}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.`;
+    const newStatus = calculateFactoryPaymentStatus(newPaid, costTotal);
+    const now = /* @__PURE__ */ new Date();
+    const nowIso = now.toISOString();
+    const auditDetail = `\u0642\u0627\u0645 \u0627\u0644\u0625\u062F\u0627\u0631\u064A (${performedBy}) \u0628\u062D\u0630\u0641 \u062F\u0641\u0639\u0629 \u0645\u0635\u0646\u0639 \u0628\u0642\u064A\u0645\u0629 ${payment.amount} \u062C.\u0645 (${formatFactoryPaymentTypeLabel(payment.paymentType)}\u060C \u0637\u0631\u064A\u0642\u0629: ${payment.method}\u060C \u0625\u064A\u0635\u0627\u0644: ${payment.receiptNumber || "\u0628\u062F\u0648\u0646"}) \u0644\u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 ${order.orderNumber}. \u0627\u0644\u0633\u0628\u0628: ${reason}. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u062C\u062F\u064A\u062F: ${newPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.`;
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
           await client.$transaction(async (tx) => {
             await tx.factoryPayment.delete({
-              where: { id: paymentId }
+              where: { id: cleanPayId }
             });
             await tx.factoryOrder.update({
               where: { id: order.id },
@@ -2245,7 +3392,7 @@ var db = {
                 paidAmount: newPaid,
                 remainingAmount: newRemaining,
                 paymentStatus: newStatus,
-                updatedAt: /* @__PURE__ */ new Date()
+                updatedAt: now
               }
             });
             await tx.auditLog.create({
@@ -2264,6 +3411,19 @@ var db = {
         logServerError(err, "db.deleteFactoryPayment.prisma");
       }
     }
+    memoryDB.factoryPayments = memoryDB.factoryPayments.filter((p) => p.id !== cleanPayId);
+    const updatedOrder = {
+      ...order,
+      paidToFactoryAmount: newPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newStatus,
+      payments: remainingAllPayments,
+      updatedAt: nowIso
+    };
+    const memOrderIdx = memoryDB.factoryOrders.findIndex((o) => o.id === order.id || o.orderNumber === order.orderNumber);
+    if (memOrderIdx !== -1) {
+      memoryDB.factoryOrders[memOrderIdx] = updatedOrder;
+    }
     if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
     memoryDB.auditLogs.unshift({
       id: `al-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
@@ -2272,21 +3432,17 @@ var db = {
       action: "\u062D\u0630\u0641 \u062F\u0641\u0639\u0629 \u0645\u0635\u0646\u0639",
       performedBy,
       details: auditDetail,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      timestamp: nowIso
     });
     saveLocalDB(memoryDB);
-    const updatedOrder = {
-      ...order,
-      paidToFactoryAmount: newPaid,
-      remainingToFactoryAmount: newRemaining,
-      paymentStatus: newStatus,
-      payments: remainingPayments
-    };
     return { success: true, factoryOrder: updatedOrder };
   },
   async updateFactoryOrderStatus(orderId, status, performedBy = "\u0627\u0644\u0645\u0635\u0646\u0639") {
     memoryDB = loadLocalDB();
-    const fo = memoryDB.factoryOrders.find((item) => item.id === orderId || item.orderNumber === orderId);
+    let fo = memoryDB.factoryOrders.find((item) => item.id === orderId || item.orderNumber === orderId) || null;
+    if (!fo) {
+      fo = await this.getFactoryOrderById(orderId);
+    }
     if (!fo) return null;
     fo.status = status;
     fo.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -2323,6 +3479,307 @@ var db = {
     });
     saveLocalDB(memoryDB);
     return fo;
+  },
+  async updateFactoryOrder(orderId, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const cleanOrderId = (orderId || "").trim();
+    if (!cleanOrderId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0651\u0641 \u0623\u0648 \u0631\u0642\u0645 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0644\u0644\u062A\u0639\u062F\u064A\u0644");
+    }
+    const currentOrder = await this.getFactoryOrderById(cleanOrderId);
+    if (!currentOrder) {
+      throw new Error(`\u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F: ${cleanOrderId}`);
+    }
+    memoryDB = loadLocalDB();
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+    const prevCostTotal = currentOrder.factoryCostTotal || 0;
+    const prevPaidTotal = currentOrder.paidToFactoryAmount || 0;
+    const meals = await this.getMeals(true);
+    const mealsMap = new Map(meals.map((m) => [m.code, m]));
+    let newItems = currentOrder.items;
+    let newCostTotal = prevCostTotal;
+    if (updates.items && Array.isArray(updates.items)) {
+      if (updates.items.length === 0) {
+        throw new Error("\u064A\u062C\u0628 \u0623\u0646 \u064A\u062D\u062A\u0648\u064A \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0639\u0644\u0649 \u0635\u0646\u0641 \u0648\u0627\u062D\u062F \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644");
+      }
+      newCostTotal = 0;
+      newItems = updates.items.map((it) => {
+        const meal = mealsMap.get(it.mealCode);
+        if (!meal) {
+          throw new Error(`\u0627\u0644\u0648\u062C\u0628\u0629 ${it.mealCode} \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629 \u0641\u064A \u0627\u0644\u0645\u0646\u064A\u0648 \u0627\u0644\u0645\u0639\u062A\u0645\u062F`);
+        }
+        const qty = Math.max(1, Math.floor(Number(it.quantity) || 0));
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error(`\u0643\u0645\u064A\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629 \u0644\u0644\u0635\u0646\u0641 ${it.mealCode}`);
+        }
+        const baseFactPrice = meal.factoryPrice || 0;
+        const hasJuice = meal.hasJuice;
+        let sweetDelta = 0;
+        let sweetLabel = "\u0628\u062F\u0648\u0646 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+        const sweetOpt = it.orientalSweetOption || "none";
+        if (sweetOpt === "add_with_juice") {
+          sweetDelta = 10;
+          sweetLabel = "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+10 \u062C \u0644\u0644\u0645\u0635\u0646\u0639)";
+        } else if (sweetOpt === "replace_juice") {
+          sweetDelta = 5;
+          sweetLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+5 \u062C \u0644\u0644\u0645\u0635\u0646\u0639)";
+        }
+        let drinkDelta = 0;
+        let drinkLabel = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+        let specialInstructions = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+        if (sweetOpt === "replace_juice") {
+          drinkLabel = "\u0627\u0644\u0639\u0635\u064A\u0631 \u0645\u0633\u062A\u0628\u062F\u0644 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+          specialInstructions = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u062D\u0644\u0648\u064A\u0627\u062A";
+        } else if (hasJuice) {
+          if (it.drinkOption === "pepsi") {
+            drinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
+            drinkLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
+            specialInstructions = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
+          } else if (it.drinkOption === "no_juice") {
+            drinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction;
+            drinkLabel = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
+            specialInstructions = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
+          }
+        } else {
+          drinkLabel = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (\u0623\u0635\u0644\u064A\u0629)";
+          specialInstructions = "\u0648\u062C\u0628\u0629 \u0623\u0635\u0644\u064A\u0629 \u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
+        }
+        const unitFactPrice = Math.max(0, baseFactPrice + drinkDelta + sweetDelta);
+        const itemTotal = unitFactPrice * qty;
+        newCostTotal += itemTotal;
+        return {
+          mealCode: meal.code,
+          mealName: meal.name,
+          quantity: qty,
+          drinkOption: it.drinkOption,
+          drinkLabel,
+          orientalSweetOption: sweetOpt,
+          orientalSweetLabel: sweetLabel,
+          orientalSweetFactoryAdjustment: sweetDelta,
+          ingredients: meal.ingredients,
+          baseFactoryPrice: baseFactPrice,
+          factoryDrinkAdjustment: drinkDelta,
+          unitFactoryPrice: unitFactPrice,
+          totalFactoryPrice: itemTotal,
+          specialInstructions
+        };
+      });
+    }
+    const existingPayments = (currentOrder.payments && currentOrder.payments.length > 0 ? currentOrder.payments : memoryDB.factoryPayments.filter(
+      (p) => p.factoryOrderId ? p.factoryOrderId === currentOrder.id : p.factoryOrderNumber === currentOrder.orderNumber
+    )).map(mapFactoryPaymentRecord);
+    const now = /* @__PURE__ */ new Date();
+    const nowIso = now.toISOString();
+    const paymentChanges = updates.paymentChanges;
+    const deleteIdsSet = new Set(
+      Array.isArray(paymentChanges?.deleteIds) ? paymentChanges.deleteIds.map((id) => String(id).trim()).filter(Boolean) : []
+    );
+    const paymentUpdatesList = Array.isArray(paymentChanges?.update) ? paymentChanges.update : [];
+    const paymentAddsList = Array.isArray(paymentChanges?.add) ? paymentChanges.add : [];
+    for (const delId of deleteIdsSet) {
+      const target = existingPayments.find((p) => p.id === delId);
+      if (!target) {
+        throw new Error(`\u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0631\u0627\u062F \u062D\u0630\u0641\u0647\u0627 (${delId}) \u0644\u0627 \u062A\u0646\u062A\u0645\u064A \u0625\u0644\u0649 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 ${currentOrder.orderNumber}`);
+      }
+    }
+    const updatedPaymentsToPersist = [];
+    for (const upd of paymentUpdatesList) {
+      const updId = String(upd.id || "").trim();
+      if (!updId || deleteIdsSet.has(updId)) continue;
+      const target = existingPayments.find((p) => p.id === updId);
+      if (!target) {
+        throw new Error(`\u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0631\u0627\u062F \u062A\u0639\u062F\u064A\u0644\u0647\u0627 (${updId}) \u0644\u0627 \u062A\u0646\u062A\u0645\u064A \u0625\u0644\u0649 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 ${currentOrder.orderNumber}`);
+      }
+      const nextAmount = upd.amount !== void 0 ? Number(upd.amount) : target.amount;
+      if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
+        throw new Error("\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0639\u062F\u0644\u0629 \u0644\u0644\u0645\u0635\u0646\u0639 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0631\u0642\u0645\u0627\u064B \u0645\u0648\u062C\u0628\u0627\u064B \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631");
+      }
+      updatedPaymentsToPersist.push({
+        ...target,
+        amount: nextAmount,
+        method: upd.method !== void 0 ? normalizeFactoryPaymentMethod(upd.method) : target.method,
+        paymentType: upd.paymentType !== void 0 ? normalizeFactoryPaymentType(upd.paymentType) : normalizeFactoryPaymentType(target.paymentType),
+        date: upd.date !== void 0 ? upd.date.trim() || target.date : target.date,
+        notes: upd.notes !== void 0 ? upd.notes.trim() || void 0 : target.notes,
+        receiptNumber: upd.receiptNumber !== void 0 ? upd.receiptNumber.trim() || void 0 : target.receiptNumber,
+        updatedAt: nowIso
+      });
+    }
+    const addedPaymentsToPersist = paymentAddsList.map((addItem, index) => {
+      const numAmount = Number(addItem.amount);
+      if (!Number.isFinite(numAmount) || numAmount <= 0) {
+        throw new Error("\u0642\u064A\u0645\u0629 \u0623\u064A \u062F\u0641\u0639\u0629 \u0623\u0648 \u0639\u0631\u0628\u0648\u0646 \u062C\u062F\u064A\u062F \u0644\u0644\u0645\u0635\u0646\u0639 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0631\u0642\u0645\u0627\u064B \u0645\u0648\u062C\u0628\u0627\u064B \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631");
+      }
+      return {
+        id: `fpay-${Date.now()}-${index}-${Math.floor(100 + Math.random() * 900)}`,
+        factoryOrderId: currentOrder.id,
+        factoryOrderNumber: currentOrder.orderNumber,
+        bookingId: currentOrder.bookingId,
+        bookingCode: currentOrder.bookingCode,
+        amount: numAmount,
+        method: normalizeFactoryPaymentMethod(addItem.method),
+        paymentType: normalizeFactoryPaymentType(addItem.paymentType),
+        date: addItem.date?.trim() || nowIso.split("T")[0],
+        notes: addItem.notes?.trim() || void 0,
+        receiptNumber: addItem.receiptNumber?.trim() || void 0,
+        recordedBy: performedBy,
+        status: "VALID",
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+    });
+    const updatesMap = new Map(updatedPaymentsToPersist.map((p) => [p.id, p]));
+    const retainedPayments = existingPayments.filter((p) => !deleteIdsSet.has(p.id)).map((p) => updatesMap.get(p.id) || p);
+    const resultingPayments = [...addedPaymentsToPersist, ...retainedPayments];
+    const seenReceipts = /* @__PURE__ */ new Set();
+    for (const p of resultingPayments) {
+      if (p.status === "VALID" && p.receiptNumber) {
+        const key = p.receiptNumber.trim().toLowerCase();
+        if (seenReceipts.has(key)) {
+          throw new Error(`\u0631\u0642\u0645 \u0627\u0644\u0625\u064A\u0635\u0627\u0644 / \u0627\u0644\u0645\u0631\u062C\u0639 (${p.receiptNumber}) \u0645\u0643\u0631\u0631 \u0641\u064A \u0623\u0643\u062B\u0631 \u0645\u0646 \u062F\u0641\u0639\u0629 \u0644\u0646\u0641\u0633 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639.`);
+        }
+        seenReceipts.add(key);
+      }
+    }
+    const validPayments = resultingPayments.filter((p) => p.status === "VALID");
+    const totalPaid = validPayments.reduce((acc, p) => acc + p.amount, 0);
+    const newRemaining = newCostTotal - totalPaid;
+    const newPaymentStatus = calculateFactoryPaymentStatus(totalPaid, newCostTotal);
+    const newVersion = (currentOrder.version || 1) + 1;
+    const updatedOrder = {
+      ...currentOrder,
+      version: newVersion,
+      eventDate: updates.eventDate?.trim() || currentOrder.eventDate,
+      deliveryTime: updates.deliveryTime?.trim() || currentOrder.deliveryTime,
+      deliveryLocation: updates.deliveryLocation?.trim() || currentOrder.deliveryLocation,
+      packagingNotes: updates.packagingNotes !== void 0 ? updates.packagingNotes : currentOrder.packagingNotes,
+      items: newItems,
+      factoryCostTotal: newCostTotal,
+      paidToFactoryAmount: totalPaid,
+      remainingToFactoryAmount: newRemaining,
+      paymentStatus: newPaymentStatus,
+      payments: resultingPayments,
+      updatedAt: nowIso
+    };
+    const paymentDiffParts = [];
+    if (addedPaymentsToPersist.length > 0) {
+      const addedSum = addedPaymentsToPersist.reduce((s, p) => s + p.amount, 0);
+      paymentDiffParts.push(`\u0625\u0636\u0627\u0641\u0629 ${addedPaymentsToPersist.length} \u062F\u0641\u0639\u0629 (${addedSum} \u062C)`);
+    }
+    if (updatedPaymentsToPersist.length > 0) {
+      paymentDiffParts.push(`\u062A\u0639\u062F\u064A\u0644 ${updatedPaymentsToPersist.length} \u062F\u0641\u0639\u0629`);
+    }
+    if (deleteIdsSet.size > 0) {
+      paymentDiffParts.push(`\u062D\u0630\u0641 ${deleteIdsSet.size} \u062F\u0641\u0639\u0629`);
+    }
+    const paymentAuditNote = paymentDiffParts.length > 0 ? ` \u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0627\u0644\u062F\u0641\u0639\u0627\u062A: [${paymentDiffParts.join("\u060C ")}] (\u0627\u0644\u0645\u0633\u062F\u062F \u0643\u0627\u0646 ${prevPaidTotal} \u062C \u0648\u0623\u0635\u0628\u062D ${totalPaid} \u062C).` : "";
+    const auditDetail = `\u062A\u0645 \u062A\u0639\u062F\u064A\u0644 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 ${currentOrder.orderNumber} (\u062A\u0631\u0642\u064A\u0629 \u0644\u0644\u0625\u0635\u062F\u0627\u0631 v${newVersion}) \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u062A\u0643\u0644\u0641\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0633\u0627\u0628\u0642\u0629: ${prevCostTotal} \u062C\u060C \u0627\u0644\u062A\u0643\u0644\u0641\u0629 \u0627\u0644\u062C\u062F\u064A\u062F\u0629: ${newCostTotal} \u062C. \u0627\u0644\u0645\u0633\u062F\u062F \u0627\u0644\u0641\u0639\u0644\u064A \u0644\u0644\u0645\u0635\u0646\u0639: ${totalPaid} \u062C\u060C \u0627\u0644\u0645\u062A\u0628\u0642\u064A: ${newRemaining} \u062C.${paymentAuditNote}${newPaymentStatus === "OVERPAID" ? ` [\u062A\u0646\u0628\u064A\u0647: \u0633\u062F\u0627\u062F \u0628\u0627\u0644\u0632\u064A\u0627\u062F\u0629 \u0642\u062F\u0631\u0647 ${totalPaid - newCostTotal} \u062C \u0644\u0635\u0627\u0644\u062D \u0627\u0644\u0645\u0635\u0646\u0639]` : ""}`;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await ensureColumnsReady(client).catch(() => {
+          });
+          await client.$transaction(async (tx) => {
+            if (deleteIdsSet.size > 0) {
+              await tx.factoryPayment.deleteMany({
+                where: {
+                  id: { in: Array.from(deleteIdsSet) },
+                  factoryOrderId: currentOrder.id
+                }
+              });
+            }
+            for (const updPay of updatedPaymentsToPersist) {
+              await tx.factoryPayment.update({
+                where: { id: updPay.id },
+                data: {
+                  amount: updPay.amount,
+                  method: updPay.method,
+                  paymentType: normalizeFactoryPaymentType(updPay.paymentType),
+                  date: updPay.date,
+                  notes: updPay.notes ?? null,
+                  receiptNumber: updPay.receiptNumber ?? null,
+                  updatedAt: now
+                }
+              });
+            }
+            for (const addPay of addedPaymentsToPersist) {
+              await tx.factoryPayment.create({
+                data: {
+                  id: addPay.id,
+                  factoryOrderId: currentOrder.id,
+                  factoryOrderNumber: currentOrder.orderNumber,
+                  bookingId: currentOrder.bookingId,
+                  bookingCode: currentOrder.bookingCode,
+                  amount: addPay.amount,
+                  method: addPay.method,
+                  paymentType: normalizeFactoryPaymentType(addPay.paymentType),
+                  date: addPay.date,
+                  notes: addPay.notes ?? null,
+                  receiptNumber: addPay.receiptNumber ?? null,
+                  recordedBy: addPay.recordedBy,
+                  status: addPay.status
+                }
+              });
+            }
+            await tx.factoryOrder.update({
+              where: { id: currentOrder.id },
+              data: {
+                version: newVersion,
+                eventDate: updatedOrder.eventDate,
+                deliveryTime: updatedOrder.deliveryTime,
+                deliveryLocation: updatedOrder.deliveryLocation,
+                packagingNotes: updatedOrder.packagingNotes,
+                itemsJson: JSON.stringify(updatedOrder.items),
+                factoryCostTotal: newCostTotal,
+                paidAmount: totalPaid,
+                remainingAmount: newRemaining,
+                paymentStatus: newPaymentStatus,
+                updatedAt: now
+              }
+            });
+            await tx.auditLog.create({
+              data: {
+                id: `al-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
+                bookingId: currentOrder.bookingId,
+                bookingCode: currentOrder.bookingCode,
+                action: "\u062A\u0639\u062F\u064A\u0644 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0648\u0627\u0644\u062F\u0641\u0639\u0627\u062A",
+                performedBy,
+                details: auditDetail
+              }
+            });
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.updateFactoryOrder.prisma");
+        throw err;
+      }
+    }
+    memoryDB = loadLocalDB();
+    if (!memoryDB.factoryPayments) memoryDB.factoryPayments = [];
+    memoryDB.factoryPayments = memoryDB.factoryPayments.filter(
+      (p) => p.factoryOrderId !== currentOrder.id && p.factoryOrderNumber !== currentOrder.orderNumber
+    );
+    memoryDB.factoryPayments.unshift(...resultingPayments);
+    const memOrderIdx = memoryDB.factoryOrders.findIndex(
+      (o) => o.id === currentOrder.id || o.orderNumber === currentOrder.orderNumber
+    );
+    if (memOrderIdx !== -1) {
+      memoryDB.factoryOrders[memOrderIdx] = updatedOrder;
+    } else {
+      memoryDB.factoryOrders.unshift(updatedOrder);
+    }
+    if (!memoryDB.auditLogs) memoryDB.auditLogs = [];
+    memoryDB.auditLogs.unshift({
+      id: `al-${Date.now()}-${Math.floor(Math.random() * 1e3)}`,
+      bookingId: currentOrder.bookingId,
+      bookingCode: currentOrder.bookingCode,
+      action: paymentDiffParts.length > 0 ? "\u062A\u0639\u062F\u064A\u0644 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639 \u0648\u0627\u0644\u062F\u0641\u0639\u0627\u062A" : "\u062A\u0639\u062F\u064A\u0644 \u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u0635\u0646\u0639",
+      performedBy,
+      details: auditDetail,
+      timestamp: nowIso
+    });
+    saveLocalDB(memoryDB);
+    return updatedOrder;
   },
   async addAuditLog(log) {
     let bCode = (log.bookingCode || "").trim();
@@ -2475,47 +3932,116 @@ var db = {
     const { passwordHash, ...safeUser } = user;
     return safeUser;
   },
-  async updateAdminPassword(username, newPasswordHash, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
-    memoryDB = loadLocalDB();
-    const user = memoryDB.adminUsers.find(
-      (u) => u.username.toLowerCase() === username.toLowerCase() || u.email.toLowerCase() === username.toLowerCase()
-    );
-    if (user) {
-      user.passwordHash = newPasswordHash;
-      saveLocalDB(memoryDB);
-    }
+  async findAdminUser(usernameOrEmail) {
+    const clean = (usernameOrEmail || "").trim();
+    if (!clean) return null;
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
-          await client.adminUser.updateMany({
+          const dbUser = await client.adminUser.findFirst({
             where: {
               OR: [
-                { username: { equals: username, mode: "insensitive" } },
-                { email: { equals: username, mode: "insensitive" } }
+                { username: { equals: clean, mode: "insensitive" } },
+                { email: { equals: clean, mode: "insensitive" } }
+              ]
+            }
+          });
+          if (dbUser) {
+            return {
+              id: dbUser.id,
+              username: dbUser.username,
+              email: dbUser.email,
+              name: dbUser.name,
+              role: dbUser.role
+            };
+          }
+        }
+      } catch (err) {
+        logServerError(err, "db.findAdminUser.prisma");
+      }
+    }
+    memoryDB = loadLocalDB();
+    const user = memoryDB.adminUsers.find(
+      (u) => u.username.toLowerCase() === clean.toLowerCase() || u.email.toLowerCase() === clean.toLowerCase()
+    );
+    if (!user) return null;
+    const { passwordHash: _ph, ...safeUser } = user;
+    return safeUser;
+  },
+  async updateAdminPassword(username, newPasswordHash, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const clean = (username || "").trim();
+    if (!clean) return false;
+    memoryDB = loadLocalDB();
+    const user = memoryDB.adminUsers.find(
+      (u) => u.username.toLowerCase() === clean.toLowerCase() || u.email.toLowerCase() === clean.toLowerCase()
+    );
+    let updatedLocal = false;
+    if (user) {
+      user.passwordHash = newPasswordHash;
+      saveLocalDB(memoryDB);
+      updatedLocal = true;
+    }
+    let updatedPg = false;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const result = await client.adminUser.updateMany({
+            where: {
+              OR: [
+                { username: { equals: clean, mode: "insensitive" } },
+                { email: { equals: clean, mode: "insensitive" } }
               ]
             },
             data: {
               passwordHash: newPasswordHash
             }
           });
+          if (result.count > 0) {
+            updatedPg = true;
+          } else if (user) {
+            await client.adminUser.upsert({
+              where: { username: user.username },
+              update: { passwordHash: newPasswordHash },
+              create: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                passwordHash: newPasswordHash
+              }
+            });
+            updatedPg = true;
+          }
         }
       } catch (err) {
         logServerError(err, "db.updateAdminPassword.prisma");
       }
+    }
+    if (!updatedLocal && !updatedPg) {
+      return false;
     }
     await this.addAuditLog({
       bookingId: "",
       bookingCode: "ADMIN_AUTH",
       action: "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u0625\u062F\u0627\u0631\u064A",
       performedBy,
-      details: `\u062A\u0645 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0644\u0644\u0645\u0633\u062A\u062E\u062F\u0645 (${username}) \u0628\u0646\u062C\u0627\u062D\u060C \u0648\u062A\u0634\u0641\u064A\u0631\u0647\u0627 \u0639\u0628\u0631 bcrypt \u0648\u0625\u0644\u063A\u0627\u0621 \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0642\u062F\u064A\u0645\u0629 \u0641\u0648\u0631\u0627\u064B.`
+      details: `\u062A\u0645 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0644\u0644\u0645\u0633\u062A\u062E\u062F\u0645 (${user?.username || clean}) \u0628\u0646\u062C\u0627\u062D\u060C \u0648\u062A\u0634\u0641\u064A\u0631\u0647\u0627 \u0639\u0628\u0631 bcrypt \u0648\u0625\u0644\u063A\u0627\u0621 \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0642\u062F\u064A\u0645\u0629 \u0641\u0648\u0631\u0627\u064B.`
     });
     return true;
   },
   // STRICT TEST BOOKING MANAGEMENT: Only bookings with isTest === true can be modified or deleted
   async updateTestBooking(id, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0644\u0644\u062D\u062C\u0632 (bookingId)");
+    }
+    if (cleanId.startsWith("CLB-")) {
+      throw new Error("\u0639\u0645\u0644\u064A\u0627\u062A \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A \u062A\u062A\u0637\u0644\u0628 \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A bookingId \u0641\u0642\u0637 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 bookingCode.");
+    }
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
@@ -2570,13 +4096,23 @@ var db = {
     return updatedBooking;
   },
   async deleteTestBooking(id, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0644\u0644\u062D\u062C\u0632 (bookingId)");
+    }
+    if (cleanId.startsWith("CLB-")) {
+      throw new Error("\u0639\u0645\u0644\u064A\u0627\u062A \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A \u062A\u062A\u0637\u0644\u0628 \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A bookingId \u0641\u0642\u0637 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 bookingCode.");
+    }
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
-    const isTest = Boolean(booking.isTest && booking.bookingCode !== "CLB-2026-5131");
+    if (isStrictlyProtectedBooking(booking)) {
+      throw new Error("\u0645\u0645\u0646\u0648\u0639 \u0645\u0646\u0639\u0627\u064B \u0642\u0627\u0637\u0639\u0627\u064B: \u0627\u0644\u062D\u062C\u0632 CLB-2026-5131 \u0644\u0644\u0639\u0645\u064A\u0644 \u0623\u062D\u0645\u062F \u0639\u0635\u0627\u0645 \u0627\u0644\u062F\u064A\u0646 \u062D\u0633\u064A\u0646 \u0647\u0648 \u062D\u062C\u0632 \u062D\u0642\u064A\u0642\u064A \u0645\u0639\u062A\u0645\u062F \u0648\u0645\u062D\u0645\u064A \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0627\u0644\u062D\u0630\u0641.");
+    }
+    const isTest = Boolean(booking.isTest) || classifyBookingRecord(booking) !== "PROTECTED_REAL";
     if (!isTest) {
-      throw new Error("\u0645\u0645\u0646\u0648\u0639 \u0645\u0646\u0639\u0627\u064B \u0628\u0627\u062A\u0627\u064B: \u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0633\u0648\u0649 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0642\u0637 (isTest: true). \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0644\u0644\u0639\u0645\u0644\u0627\u0621 \u0645\u062D\u0645\u064A\u0629 \u0648\u0644\u0627 \u064A\u062C\u0648\u0632 \u062D\u0630\u0641\u0647\u0627.");
+      throw new Error("\u0645\u0645\u0646\u0648\u0639 \u0645\u0646\u0639\u0627\u064B \u0628\u0627\u062A\u0627\u064B: \u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0633\u0648\u0649 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0623\u0648 \u0627\u0644\u062A\u0648\u0636\u064A\u062D\u064A\u0629. \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0644\u0644\u0639\u0645\u0644\u0627\u0621 \u0645\u062D\u0645\u064A\u0629 \u0648\u0644\u0627 \u064A\u062C\u0648\u0632 \u062D\u0630\u0641\u0647\u0627.");
     }
     const bookingCode = booking.bookingCode;
     const targetId = booking.id;
@@ -2584,20 +4120,29 @@ var db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          await client.bookingItem.deleteMany({ where: { bookingId: targetId } });
-          await client.payment.deleteMany({ where: { bookingId: targetId } });
-          await client.factoryOrder.deleteMany({ where: { bookingId: targetId } });
-          await client.auditLog.deleteMany({ where: { bookingId: targetId } });
-          await client.booking.delete({ where: { id: targetId } });
+          await client.$transaction(async (tx) => {
+            await tx.bookingItem.deleteMany({ where: { bookingId: targetId } });
+            await tx.payment.deleteMany({ where: { bookingId: targetId } });
+            await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: targetId } } });
+            await tx.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+            await tx.auditLog.deleteMany({ where: { bookingId: targetId } });
+            await tx.booking.delete({ where: { id: targetId } });
+          });
         }
       } catch (err) {
         logServerError(err, "db.deleteTestBooking.prisma");
       }
     }
     memoryDB = loadLocalDB();
-    memoryDB.bookings = memoryDB.bookings.filter((b) => b.id !== targetId && b.bookingCode !== bookingCode);
+    memoryDB.bookings = memoryDB.bookings.filter((b) => b.id !== targetId);
     memoryDB.payments = memoryDB.payments.filter((p) => p.bookingId !== targetId);
+    const removedOrderIds = new Set(
+      (memoryDB.factoryOrders || []).filter((fo) => fo.bookingId === targetId).map((fo) => fo.id)
+    );
     memoryDB.factoryOrders = memoryDB.factoryOrders.filter((fo) => fo.bookingId !== targetId);
+    if (memoryDB.factoryPayments) {
+      memoryDB.factoryPayments = memoryDB.factoryPayments.filter((fp) => !removedOrderIds.has(fp.factoryOrderId));
+    }
     saveLocalDB(memoryDB);
     await this.addAuditLog({
       bookingId: "",
@@ -2608,10 +4153,284 @@ var db = {
     });
     return { success: true, bookingCode };
   },
-  async updateBookingByAdmin(id, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
-    const booking = await this.getBookingById(id);
+  /**
+   * Delete an explicitly CANCELLED booking individually.
+   * Strictly enforces:
+   * - bookingId primary key only (rejects bookingCode)
+   * - booking.status === 'CANCELLED' (strictly rejects all active statuses)
+   * - Absolute refusal if booking is CLB-2026-5131
+   * - No active financial payments or obligations (paidAmount === 0 and no valid payments)
+   * - No active factory payments
+   * - Cascade cleanup and full audit trail
+   */
+  async deleteCancelledBooking(id, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const cleanId = (id || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0644\u0644\u062D\u062C\u0632 (bookingId)");
+    }
+    if (cleanId.startsWith("CLB-")) {
+      throw new Error("\u0639\u0645\u0644\u064A\u0627\u062A \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u062A\u062A\u0637\u0644\u0628 \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A bookingId \u0641\u0642\u0637 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 bookingCode \u0644\u0645\u0646\u0639 \u062A\u062F\u0627\u062E\u0644 \u0627\u0644\u0633\u062C\u0644\u0627\u062A.");
+    }
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
-      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      throw new Error("\u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062D\u0630\u0641\u0647 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    }
+    if (isStrictlyProtectedBooking(booking)) {
+      throw new Error("\u0645\u0645\u0646\u0648\u0639 \u0645\u0646\u0639\u0627\u064B \u0642\u0627\u0637\u0639\u0627\u064B: \u0627\u0644\u062D\u062C\u0632 CLB-2026-5131 \u0644\u0644\u0639\u0645\u064A\u0644 \u0623\u062D\u0645\u062F \u0639\u0635\u0627\u0645 \u0627\u0644\u062F\u064A\u0646 \u062D\u0633\u064A\u0646 \u0647\u0648 \u062D\u062C\u0632 \u062D\u0642\u064A\u0642\u064A \u0645\u0639\u062A\u0645\u062F \u0648\u0645\u062D\u0645\u064A \u0646\u0647\u0627\u0626\u064A\u0627\u064B \u0645\u0646 \u0623\u064A \u062D\u0630\u0641.");
+    }
+    if (booking.status !== "CANCELLED") {
+      throw new Error(`\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u062D\u062C\u0632: \u062E\u0627\u0635\u064A\u0629 \u0627\u0644\u062D\u0630\u0641 \u0645\u062E\u0635\u0635\u0629 \u062D\u0635\u0631\u064A\u0627\u064B \u0644\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0644\u063A\u0627\u0629 (CANCELLED). \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u062D\u0627\u0644\u064A\u0629: (${booking.status}) \u0648\u0647\u0648 \u0645\u062D\u0645\u064A \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0627\u0644\u062D\u0630\u0641.`);
+    }
+    const validPayments = (booking.payments || []).filter((p) => p.status !== "CANCELLED" && p.amount > 0);
+    if (validPayments.length > 0 || booking.paidAmount && booking.paidAmount > 0) {
+      throw new Error(`\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0644\u0648\u062C\u0648\u062F \u0645\u062F\u0641\u0648\u0639\u0627\u062A \u0645\u0627\u0644\u064A\u0629 \u0645\u0633\u062C\u0644\u0629 \u0628\u0642\u064A\u0645\u0629 (${booking.paidAmount} \u062C.\u0645). \u064A\u062C\u0628 \u0625\u0644\u063A\u0627\u0621 \u0648\u062A\u0633\u0648\u064A\u0629 \u0627\u0644\u062F\u0641\u0639\u0627\u062A \u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0623\u0648\u0644\u0627\u064B \u0623\u0648 \u0627\u0644\u0625\u0628\u0642\u0627\u0621 \u0639\u0644\u0649 \u0627\u0644\u0633\u062C\u0644 \u0644\u0644\u0623\u063A\u0631\u0627\u0636 \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u064A\u0629.`);
+    }
+    const factoryOrdersWithPaid = (booking.factoryOrders || []).filter((fo) => (fo.paidToFactoryAmount || 0) > 0);
+    if (factoryOrdersWithPaid.length > 0) {
+      throw new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0644\u0627\u0631\u062A\u0628\u0627\u0637\u0647 \u0628\u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0645\u0635\u0646\u0639 \u0639\u0644\u064A\u0647 \u0645\u062F\u0641\u0648\u0639\u0627\u062A \u0645\u0633\u062F\u062F\u0629 \u0644\u0644\u0645\u0635\u0646\u0639. \u064A\u0631\u062C\u0649 \u062A\u0633\u0648\u064A\u0629 \u0633\u062C\u0644\u0627\u062A \u0627\u0644\u0645\u0635\u0646\u0639 \u0623\u0648\u0644\u0627\u064B.");
+    }
+    const bookingCode = booking.bookingCode;
+    const targetId = booking.id;
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.bookingItem.deleteMany({ where: { bookingId: targetId } });
+            await tx.payment.deleteMany({ where: { bookingId: targetId } });
+            await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: targetId } } });
+            await tx.factoryOrder.deleteMany({ where: { bookingId: targetId } });
+            await tx.auditLog.deleteMany({ where: { bookingId: targetId } });
+            await tx.booking.delete({ where: { id: targetId } });
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.deleteCancelledBooking.prisma");
+        throw new Error(`\u0641\u0634\u0644 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A: ${err?.message || "\u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639"}`);
+      }
+    }
+    memoryDB = loadLocalDB();
+    memoryDB.bookings = memoryDB.bookings.filter((b) => b.id !== targetId);
+    memoryDB.payments = memoryDB.payments.filter((p) => p.bookingId !== targetId);
+    const removedOrderIds = new Set(
+      (memoryDB.factoryOrders || []).filter((fo) => fo.bookingId === targetId).map((fo) => fo.id)
+    );
+    memoryDB.factoryOrders = memoryDB.factoryOrders.filter((fo) => fo.bookingId !== targetId);
+    if (memoryDB.factoryPayments) {
+      memoryDB.factoryPayments = memoryDB.factoryPayments.filter((fp) => !removedOrderIds.has(fp.factoryOrderId));
+    }
+    saveLocalDB(memoryDB);
+    await this.addAuditLog({
+      bookingId: "",
+      bookingCode,
+      action: "\u062D\u0630\u0641 \u062D\u062C\u0632 \u0645\u0644\u063A\u064A",
+      performedBy,
+      details: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0644\u063A\u064A \u0631\u0642\u0645 ${bookingCode} (\u0627\u0644\u0645\u0639\u0631\u0641: ${targetId}) \u0646\u0647\u0627\u0626\u064A\u0627\u064B \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}) \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u062E\u0644\u0648\u0647 \u0645\u0646 \u0623\u064A \u0645\u062F\u0641\u0648\u0639\u0627\u062A \u0645\u0627\u0644\u064A\u0629.`
+    });
+    return {
+      success: true,
+      bookingCode,
+      message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0644\u063A\u064A \u0631\u0642\u0645 ${bookingCode} \u0628\u0646\u062C\u0627\u062D.`
+    };
+  },
+  /**
+   * Bulk Delete CANCELLED Bookings.
+   * Safe iteration validating each booking independently.
+   */
+  async deleteBatchCancelledBookings(ids, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0642\u0627\u0626\u0645\u0629 \u0645\u0639\u0631\u0651\u0641\u0627\u062A \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0644\u063A\u0627\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062D\u0630\u0641\u0647\u0627");
+    }
+    const deletedCodes = [];
+    const skipped = [];
+    for (const rawId of ids) {
+      const cleanId = (rawId || "").trim();
+      if (!cleanId || cleanId.startsWith("CLB-")) {
+        skipped.push({ id: rawId, reason: "\u0627\u0644\u0645\u0639\u0631\u0641 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D \u0623\u0648 \u062A\u0645 \u062A\u0645\u0631\u064A\u0631 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632 \u0628\u062F\u0644\u0627\u064B \u0645\u0646 bookingId" });
+        continue;
+      }
+      try {
+        const res = await this.deleteCancelledBooking(cleanId, performedBy);
+        deletedCodes.push(res.bookingCode);
+      } catch (err) {
+        skipped.push({ id: cleanId, reason: err.message || "\u0641\u0634\u0644 \u0627\u0644\u062D\u0630\u0641" });
+      }
+    }
+    if (deletedCodes.length > 0) {
+      await this.addAuditLog({
+        bookingId: "",
+        bookingCode: "SYSTEM",
+        action: "\u062D\u0630\u0641 \u062C\u0645\u0627\u0639\u064A \u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0645\u0644\u063A\u0627\u0629",
+        performedBy,
+        details: `\u0642\u0627\u0645 (${performedBy}) \u0628\u0639\u0645\u0644\u064A\u0629 \u062D\u0630\u0641 \u062C\u0645\u0627\u0639\u064A \u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0645\u0644\u063A\u0627\u0629: \u062A\u0645 \u062D\u0630\u0641 (${deletedCodes.length}) \u062D\u062C\u0632 \u0628\u0646\u062C\u0627\u062D [${deletedCodes.join(", ")}]\u060C \u0648\u062A\u062E\u0637\u064A (${skipped.length}) \u062D\u062C\u0632 \u0644\u0623\u0633\u0628\u0627\u0628 \u0623\u0645\u0646\u064A\u0629 \u0623\u0648 \u0645\u0627\u0644\u064A\u0629.`
+      });
+    }
+    return {
+      success: true,
+      totalRequested: ids.length,
+      deletedCount: deletedCodes.length,
+      deletedCodes,
+      skipped
+    };
+  },
+  /**
+   * Database Inventory & Pre-Deletion Scan
+   * Categorizes all records into:
+   * 1. PROTECTED_REAL (CLB-2026-5131)
+   * 2. CONFIRMED_TEST (explicit isTest = true or test names/phones)
+   * 3. LEGACY_DEMO (mock demo seed records)
+   * 4. CANCELLED (all cancelled bookings)
+   */
+  async getDatabaseInventory() {
+    const all = await this.getBookings();
+    const protectedBookings = [];
+    const confirmedTestBookings = [];
+    const legacyDemoBookings = [];
+    const cancelledBookings = [];
+    const enrichedAll = [];
+    for (const b of all) {
+      const cat = classifyBookingRecord(b);
+      enrichedAll.push({ ...b, classification: cat });
+      if (cat === "PROTECTED_REAL") {
+        protectedBookings.push(b);
+      } else if (cat === "CONFIRMED_TEST") {
+        confirmedTestBookings.push(b);
+      } else {
+        legacyDemoBookings.push(b);
+      }
+      if (b.status === "CANCELLED" && cat !== "PROTECTED_REAL") {
+        cancelledBookings.push(b);
+      }
+    }
+    return {
+      summary: {
+        total: all.length,
+        protectedReal: protectedBookings.length,
+        confirmedTest: confirmedTestBookings.length,
+        legacyDemo: legacyDemoBookings.length,
+        cancelled: cancelledBookings.length
+      },
+      protectedBookings,
+      confirmedTestBookings,
+      legacyDemoBookings,
+      cancelledBookings,
+      allBookings: enrichedAll
+    };
+  },
+  /**
+   * Permanent Cascade Deletion for Test & Demo Bookings
+   * Removes from PostgreSQL tables and JSON storage with 100% cascade.
+   * Strictly enforces exclusion and hard refusal for CLB-2026-5131.
+   */
+  async deleteBookingsPermanently(bookingIds, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0641\u0627\u062A \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062D\u0630\u0641\u0647\u0627 \u0646\u0647\u0627\u0626\u064A\u0627\u064B");
+    }
+    const deletedCodes = [];
+    const skipped = [];
+    const idsToDelete = [];
+    const bookingsToDelete = [];
+    for (const rawId of bookingIds) {
+      const cleanId = (rawId || "").trim();
+      if (!cleanId) continue;
+      const booking = await this.resolveBookingAnyIdentifier(cleanId);
+      if (!booking) {
+        skipped.push({ id: cleanId, reason: "\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A" });
+        continue;
+      }
+      if (isStrictlyProtectedBooking(booking)) {
+        skipped.push({
+          id: booking.id,
+          code: booking.bookingCode,
+          reason: "\u0645\u062D\u0638\u0648\u0631 \u062A\u0645\u0627\u0645\u0627\u064B: \u0627\u0644\u062D\u062C\u0632 CLB-2026-5131 \u0647\u0648 \u062D\u062C\u0632 \u062D\u0642\u064A\u0642\u064A \u0645\u0639\u062A\u0645\u062F \u0644\u0644\u0639\u0645\u064A\u0644 \u0623\u062D\u0645\u062F \u0639\u0635\u0627\u0645 \u0627\u0644\u062F\u064A\u0646 \u0648\u0645\u062D\u0645\u064A \u0646\u0647\u0627\u0626\u064A\u0627\u064B \u0645\u0646 \u0623\u064A \u062D\u0630\u0641 \u0623\u0648 \u062A\u0639\u062F\u064A\u0644."
+        });
+        continue;
+      }
+      if (!idsToDelete.includes(booking.id)) {
+        idsToDelete.push(booking.id);
+        deletedCodes.push(booking.bookingCode);
+        bookingsToDelete.push(booking);
+      }
+    }
+    if (idsToDelete.length === 0) {
+      const remaining2 = (await this.getBookings()).length;
+      return {
+        success: true,
+        totalRequested: bookingIds.length,
+        deletedCount: 0,
+        deletedCodes: [],
+        skipped,
+        remainingCount: remaining2
+      };
+    }
+    for (const b of bookingsToDelete) {
+      const activePayments = (b.payments || []).filter((p) => p.status === "VALID");
+      const paidTotal = activePayments.reduce((acc, p) => acc + Number(p.amount), 0);
+      const ordersCount = (b.factoryOrders || []).length;
+      const archiveSummary = `[\u0623\u0631\u0634\u0641\u0629 \u0648\u062A\u0648\u062B\u064A\u0642 \u0642\u0628\u0644 \u0627\u0644\u062D\u0630\u0641 \u0627\u0644\u0646\u0647\u0627\u0626\u064A]: \u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 (${b.bookingCode}) \u0646\u0647\u0627\u0626\u064A\u0627\u064B \u0628\u0648\u0627\u0633\u0637\u0629 (${performedBy}). \u062A\u0641\u0627\u0635\u064A\u0644 \u0627\u0644\u0639\u0645\u064A\u0644: ${b.customerName} (${b.customerPhone})\u060C \u0627\u0644\u062D\u0627\u0644\u0629: ${b.status}\u060C \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0648\u062C\u0628\u0627\u062A: ${b.totalMealsCount} \u0648\u062C\u0628\u0629\u060C \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0642\u064A\u0645\u0629: ${b.totalDistributorPrice} \u062C\u060C \u0627\u0644\u0645\u0633\u062F\u062F: ${paidTotal} \u062C (${activePayments.length} \u062F\u0641\u0639\u0627\u062A)\u060C \u0623\u0648\u0627\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639: ${ordersCount}. \u0633\u062C\u0644 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0645\u062D\u0641\u0648\u0638 \u0628\u0627\u0644\u0643\u0627\u0645\u0644 \u0644\u0644\u0623\u063A\u0631\u0627\u0636 \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u064A\u0629.`;
+      await this.addAuditLog({
+        bookingId: "",
+        bookingCode: b.bookingCode,
+        action: "\u062D\u0630\u0641 \u062D\u062C\u0632 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \u0648\u0623\u0631\u0634\u0641\u062A\u0647",
+        performedBy,
+        details: archiveSummary
+      });
+    }
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          await client.$transaction(async (tx) => {
+            await tx.auditLog.updateMany({
+              where: { bookingId: { in: idsToDelete } },
+              data: { bookingId: null }
+            });
+            await tx.bookingItem.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.payment.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.factoryPayment.deleteMany({ where: { factoryOrder: { bookingId: { in: idsToDelete } } } });
+            await tx.factoryOrder.deleteMany({ where: { bookingId: { in: idsToDelete } } });
+            await tx.booking.deleteMany({ where: { id: { in: idsToDelete } } });
+          });
+        }
+      } catch (err) {
+        logServerError(err, "db.deleteBookingsPermanently.prisma");
+      }
+    }
+    memoryDB = loadLocalDB();
+    const idSet = new Set(idsToDelete);
+    memoryDB.bookings = memoryDB.bookings.filter((b) => !idSet.has(b.id));
+    memoryDB.payments = memoryDB.payments.filter((p) => !idSet.has(p.bookingId));
+    const removedOrderIds = new Set(
+      (memoryDB.factoryOrders || []).filter((fo) => idSet.has(fo.bookingId)).map((fo) => fo.id)
+    );
+    memoryDB.factoryOrders = memoryDB.factoryOrders.filter((fo) => !idSet.has(fo.bookingId));
+    if (memoryDB.factoryPayments) {
+      memoryDB.factoryPayments = memoryDB.factoryPayments.filter((fp) => !removedOrderIds.has(fp.factoryOrderId));
+    }
+    for (const log of memoryDB.auditLogs) {
+      if (log.bookingId && idSet.has(log.bookingId)) {
+        log.bookingId = "";
+      }
+    }
+    saveLocalDB(memoryDB);
+    const remaining = (await this.getBookings()).length;
+    return {
+      success: true,
+      totalRequested: bookingIds.length,
+      deletedCount: deletedCodes.length,
+      deletedCodes,
+      skipped,
+      remainingCount: remaining
+    };
+  },
+  async updateBookingByAdmin(id, updates, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
+    const cleanId = (id || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0639\u0631\u0641 \u0627\u0644\u062D\u062C\u0632 \u0623\u0648 \u0643\u0648\u062F \u0627\u0644\u062D\u062C\u0632");
+    }
+    const booking = await this.resolveBookingAnyIdentifier(cleanId);
+    if (!booking) {
+      throw new Error(`\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062D\u062C\u0632 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A (\u0627\u0644\u0645\u0639\u0631\u0651\u0641 \u0623\u0648 \u0627\u0644\u0643\u0648\u062F: "${cleanId}")`);
     }
     const meals = await this.getMeals(true);
     const mealsMap = new Map(meals.map((m) => [m.code, m]));
@@ -2637,19 +4456,32 @@ var db = {
         totalMealsCount += quantity;
         const baseDistributorPrice = meal.distributorPrice;
         const baseFactoryPrice = meal.factoryPrice || 0;
+        const sweetOpt = item.orientalSweetOption || "none";
+        let orientalSweetDistributorDelta = 0;
+        let orientalSweetFactoryDelta = 0;
+        let sweetLabel = "\u0628\u062F\u0648\u0646 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+        if (sweetOpt === "add_with_juice") {
+          orientalSweetDistributorDelta = 20;
+          orientalSweetFactoryDelta = 10;
+          sweetLabel = "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+20 \u062C)";
+        } else if (sweetOpt === "replace_juice") {
+          orientalSweetDistributorDelta = 15;
+          orientalSweetFactoryDelta = 5;
+          sweetLabel = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15 \u062C)";
+        }
         let distributorDrinkDelta = 0;
         let factoryDrinkDelta = 0;
-        if (meal.hasJuice) {
+        if (sweetOpt !== "replace_juice" && meal.hasJuice) {
           if (item.drinkOption === "no_juice") {
             distributorDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
-            factoryDrinkDelta = -CELEBRE_CONFIG.drinkAdjustments.noJuiceDiscount;
+            factoryDrinkDelta = -FACTORY_PEPSI_ACCOUNTING.totalJuiceDeduction;
           } else if (item.drinkOption === "pepsi") {
             distributorDrinkDelta = CELEBRE_CONFIG.drinkAdjustments.pepsiExtra;
             factoryDrinkDelta = FACTORY_PEPSI_ACCOUNTING.netAdjustment;
           }
         }
-        const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta);
-        const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta);
+        const unitDistributorPrice = Math.max(0, baseDistributorPrice + distributorDrinkDelta + orientalSweetDistributorDelta);
+        const unitFactoryPrice = Math.max(0, baseFactoryPrice + factoryDrinkDelta + orientalSweetFactoryDelta);
         const itemTotalDistributor = unitDistributorPrice * quantity;
         const itemTotalFactory = unitFactoryPrice * quantity;
         totalDistributorPrice += itemTotalDistributor;
@@ -2662,11 +4494,14 @@ var db = {
           ingredients: meal.ingredients,
           quantity,
           drinkOption: item.drinkOption,
+          orientalSweetOption: sweetOpt,
+          orientalSweetLabel: sweetLabel,
           baseDistributorPrice,
           unitDistributorPrice,
           totalDistributorPrice: itemTotalDistributor,
           baseFactoryPrice,
           factoryDrinkAdjustment: factoryDrinkDelta,
+          factoryOrientalSweetAdjustment: orientalSweetFactoryDelta,
           unitFactoryPrice,
           totalFactoryPrice: itemTotalFactory
         };
@@ -2747,6 +4582,7 @@ var db = {
                 ingredients: it.ingredients,
                 quantity: it.quantity,
                 drinkOption: it.drinkOption,
+                orientalSweetOption: it.orientalSweetOption || "none",
                 baseDistributorPrice: it.baseDistributorPrice,
                 unitDistributorPrice: it.unitDistributorPrice,
                 totalDistributorPrice: it.totalDistributorPrice,
@@ -2771,7 +4607,14 @@ var db = {
     return updatedBooking;
   },
   async confirmBooking(id, performedBy = "\u0627\u0644\u0625\u062F\u0627\u0631\u0629") {
-    const booking = await this.getBookingById(id);
+    const cleanId = (id || "").trim();
+    if (!cleanId) {
+      throw new Error("\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0644\u0644\u062D\u062C\u0632 (bookingId)");
+    }
+    if (cleanId.startsWith("CLB-")) {
+      throw new Error("\u0639\u0645\u0644\u064A\u0627\u062A \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632 \u062A\u062A\u0637\u0644\u0628 \u0627\u0644\u0645\u0639\u0631\u0641 \u0627\u0644\u0623\u0633\u0627\u0633\u064A bookingId \u0641\u0642\u0637 \u0648\u0644\u0627 \u062A\u0642\u0628\u0644 bookingCode.");
+    }
+    const booking = await this.getBookingByPrimaryId(cleanId);
     if (!booking) {
       throw new Error("\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
     }
@@ -2857,42 +4700,93 @@ var db = {
   }
 };
 function buildFactoryWhatsAppMessage(factoryOrder, booking, factoryPhone) {
-  const itemsText = factoryOrder.items.map((it) => {
+  const itemsText = factoryOrder.items.map((it, idx) => {
     let drinkText = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
-    if (it.drinkOption === "pepsi") {
+    if (it.orientalSweetOption === "replace_juice") {
+      drinkText = "\u0627\u0644\u0639\u0635\u064A\u0631 \u0645\u0633\u062A\u0628\u062F\u0644 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+    } else if (it.drinkOption === "pepsi") {
       drinkText = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A";
     } else if (it.drinkOption === "no_juice") {
       drinkText = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631";
     } else if (it.drinkLabel) {
       drinkText = it.drinkLabel;
     }
-    return [
-      `\u2022 *\u0627\u0644\u0648\u062C\u0628\u0629:* ${it.mealName} (${it.mealCode})`,
-      `  - *\u062E\u064A\u0627\u0631 \u0627\u0644\u0645\u0634\u0631\u0648\u0628:* ${drinkText}`,
+    let sweetText = "";
+    if (it.orientalSweetOption === "add_with_juice") {
+      sweetText = "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0627\u062D\u062A\u0641\u0627\u0638 \u0628\u0627\u0644\u0639\u0635\u064A\u0631 (+10 \u062C \u0644\u0644\u0645\u0635\u0646\u0639)";
+    } else if (it.orientalSweetOption === "replace_juice") {
+      sweetText = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+5 \u062C \u0644\u0644\u0645\u0635\u0646\u0639)";
+    } else if (it.orientalSweetLabel && it.orientalSweetLabel !== "\u0628\u062F\u0648\u0646 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A") {
+      sweetText = it.orientalSweetLabel;
+    }
+    const itemHeader = factoryOrder.items.length > 1 ? `*\u0637\u0644\u0628 (${idx + 1}):* ` : "";
+    const row = [
+      `\u2022 ${itemHeader}*\u0627\u0644\u0648\u062C\u0628\u0629:* ${it.mealName} (${it.mealCode})`,
+      `  - *\u062E\u064A\u0627\u0631 \u0627\u0644\u0645\u0634\u0631\u0648\u0628:* ${drinkText}`
+    ];
+    if (sweetText) {
+      row.push(`  - *\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A:* ${sweetText}`);
+    }
+    row.push(
       `  - *\u0627\u0644\u0643\u0645\u064A\u0629:* ${it.quantity} \u0628\u0648\u0643\u0633`,
       `  - *\u0633\u0639\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0639\u062F\u0651\u0644 \u0644\u0644\u0628\u0648\u0643\u0633:* ${it.unitFactoryPrice ?? 0} \u062C.\u0645`,
       `  - *\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0635\u0646\u0641 \u0644\u0644\u0645\u0635\u0646\u0639:* ${it.totalFactoryPrice ?? 0} \u062C.\u0645`,
       `  - *\u0627\u0644\u0645\u0643\u0648\u0646\u0627\u062A:* ${it.ingredients}`
-    ].join("\n");
+    );
+    return row.join("\n");
   }).join("\n\n");
   const totalCost = factoryOrder.factoryCostTotal || 0;
+  const totalBoxes = factoryOrder.items.reduce((sum, it) => sum + (it.quantity || 0), 0) || booking.totalMealsCount;
+  const validPayments = (factoryOrder.payments || []).filter((p) => p.status === "VALID");
+  const paidToFactory = factoryOrder.paidToFactoryAmount !== void 0 ? factoryOrder.paidToFactoryAmount : validPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const remainingToFactory = totalCost - paidToFactory;
+  const paymentSummaryLines = [];
+  if (paidToFactory > 0 || validPayments.length > 0) {
+    paymentSummaryLines.push(
+      `*\u0627\u0644\u0645\u062F\u0641\u0648\u0639 \u0644\u0644\u0645\u0635\u0646\u0639 (\u0627\u0644\u0639\u0631\u0628\u0648\u0646 / \u0627\u0644\u062F\u0641\u0639\u0627\u062A):* ${paidToFactory.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`
+    );
+    if (remainingToFactory < 0) {
+      paymentSummaryLines.push(
+        `*\u0631\u0635\u064A\u062F \u062F\u0627\u0626\u0646 (\u0633\u062F\u0627\u062F \u0628\u0627\u0644\u0632\u064A\u0627\u062F\u0629 \u0644\u0644\u0645\u0635\u0646\u0639):* +${Math.abs(remainingToFactory).toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`
+      );
+    } else {
+      paymentSummaryLines.push(
+        `*\u0627\u0644\u0645\u062A\u0628\u0642\u064A \u0644\u0644\u0645\u0635\u0646\u0639:* ${remainingToFactory.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`
+      );
+    }
+    if (validPayments.length > 0) {
+      paymentSummaryLines.push(`*\u062A\u0641\u0627\u0635\u064A\u0644 \u062F\u0641\u0639\u0627\u062A \u0627\u0644\u0645\u0635\u0646\u0639 (${validPayments.length}):*`);
+      validPayments.forEach((p, idx) => {
+        const typeLabel = formatFactoryPaymentTypeLabel(p.paymentType);
+        const methodLabel = formatFactoryPaymentMethodLabel(p.method);
+        const recPart = p.receiptNumber ? ` | \u0645\u0631\u062C\u0639: ${p.receiptNumber}` : "";
+        const notePart = p.notes ? ` (${p.notes})` : "";
+        paymentSummaryLines.push(
+          `  ${idx + 1}. ${typeLabel}: ${p.amount.toLocaleString("ar-EG")} \u062C.\u0645 - ${methodLabel} - \u0628\u062A\u0627\u0631\u064A\u062E ${p.date}${recPart}${notePart}`
+        );
+      });
+    }
+  }
   const lines = [
     `*\u0623\u0645\u0631 \u062A\u0634\u063A\u064A\u0644 \u0645\u0637\u0628\u062E \u0648\u0645\u0635\u0646\u0639 C\xC9L\xC8BRE CATERING*`,
     `-----------------------------------------`,
     `*\u0631\u0642\u0645 \u0623\u0645\u0631 \u0627\u0644\u062A\u0634\u063A\u064A\u0644:* ${factoryOrder.orderNumber} (\u0627\u0644\u0625\u0635\u062F\u0627\u0631 v${factoryOrder.version})`,
     `*\u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0645\u0631\u062C\u0639\u064A:* ${booking.bookingCode}`,
-    `*\u062A\u0627\u0631\u064A\u062E \u0648\u0645\u0648\u0639\u062F \u0627\u0644\u062A\u0633\u0644\u064A\u0645:* ${factoryOrder.eventDate} \u0627\u0644\u0633\u0627\u0639\u0629 ${factoryOrder.deliveryTime}`,
+    `*\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0639\u0645\u064A\u0644:* ${booking.customerName} | \u0647\u0627\u062A\u0641: ${booking.customerPhone}`,
+    ...booking.customerWhatsapp && booking.customerWhatsapp !== booking.customerPhone ? [`*\u0648\u0627\u062A\u0633\u0627\u0628 \u0627\u0644\u0639\u0645\u064A\u0644:* ${booking.customerWhatsapp}`] : [],
+    ...booking.eventName ? [`*\u0627\u0644\u0645\u0646\u0627\u0633\u0628\u0629:* ${booking.eventName}`] : [],
+    `*\u0627\u0644\u062A\u0627\u0631\u064A\u062E:* ${factoryOrder.eventDate}`,
+    `*\u0627\u0644\u0648\u0642\u062A:* ${factoryOrder.deliveryTime}`,
     `*\u0645\u0643\u0627\u0646 \u0627\u0644\u062A\u0633\u0644\u064A\u0645:* ${factoryOrder.deliveryLocation}`,
-    `*\u0627\u0644\u0639\u0645\u064A\u0644 / \u0627\u0644\u0645\u0633\u062A\u0644\u0645:* ${booking.customerName} (${booking.customerPhone})`,
     `-----------------------------------------`,
-    `*\u0628\u064A\u0627\u0646 \u0627\u0644\u0648\u062C\u0628\u0627\u062A \u0648\u062A\u0643\u0644\u0641\u0629 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0644\u0644\u0645\u0635\u0646\u0639:*`,
+    `*\u062A\u0641\u0627\u0635\u064A\u0644 \u0627\u0644\u0637\u0644\u0628 (${factoryOrder.items.length} ${factoryOrder.items.length > 1 ? "\u0623\u0635\u0646\u0627\u0641" : "\u0635\u0646\u0641"}):*`,
     itemsText,
+    ...booking.notes && booking.notes.trim() ? [`
+*\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0627\u0644\u0639\u0645\u064A\u0644 \u0639\u0644\u0649 \u0627\u0644\u0637\u0644\u0628:* ${booking.notes.trim()}`] : [],
     `-----------------------------------------`,
-    `*\u0625\u062C\u0645\u0627\u0644\u064A \u0639\u062F\u062F \u0627\u0644\u0628\u0648\u0643\u0633\u0627\u062A:* ${booking.totalMealsCount} \u0628\u0648\u0643\u0633`,
-    `*\u0625\u062C\u0645\u0627\u0644\u064A \u062A\u0643\u0644\u0641\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0628\u0639\u062F \u0627\u0644\u062A\u0639\u062F\u064A\u0644:* ${totalCost.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`,
-    `*\u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u062A\u0639\u0628\u0626\u0629 \u0648\u0627\u0644\u062A\u063A\u0644\u064A\u0641:* ${factoryOrder.packagingNotes}`,
-    `-----------------------------------------`,
-    `*\u062A\u0646\u0628\u064A\u0647 \u062A\u0634\u063A\u064A\u0644\u064A:* \u0647\u0630\u0647 \u0648\u062B\u064A\u0642\u0629 \u062A\u0634\u063A\u064A\u0644 \u0648\u062A\u0643\u0644\u0641\u0629 \u0645\u0635\u0646\u0639 \u0631\u0633\u0645\u064A\u0629 \u0635\u0627\u062F\u0631\u0629 \u0645\u0646 \u0625\u062F\u0627\u0631\u0629 \u0633\u064A\u0644\u064A\u0628\u0631\u064A (\u062A\u062A\u0636\u0645\u0646 \u0623\u0633\u0639\u0627\u0631 \u0627\u0644\u0645\u0635\u0646\u0639 \u0627\u0644\u0645\u0639\u062F\u0651\u0644\u0629 \u0641\u0642\u0637 \u0648\u062E\u0627\u0644\u064A\u0629 \u062A\u0645\u0627\u0645\u0627\u064B \u0645\u0646 \u0623\u0633\u0639\u0627\u0631 \u0648\u0647\u0648\u0627\u0645\u0634 \u0631\u0628\u062D \u0627\u0644\u0645\u0648\u0632\u0639).`
+    `*\u0625\u062C\u0645\u0627\u0644\u064A \u0639\u062F\u062F \u0627\u0644\u0628\u0648\u0643\u0633\u0627\u062A:* ${totalBoxes} \u0628\u0648\u0643\u0633`,
+    `*\u0625\u062C\u0645\u0627\u0644\u064A \u062A\u0643\u0644\u0641\u0629 \u0623\u0645\u0631 \u0627\u0644\u0645\u0635\u0646\u0639:* ${totalCost.toLocaleString("ar-EG")} \u062C\u0646\u064A\u0647 \u0645\u0635\u0631\u064A`,
+    ...paymentSummaryLines
   ];
   const messageText = lines.join("\n");
   const cleanPhone = (factoryPhone || "").replace(/\D/g, "");
@@ -2991,7 +4885,12 @@ function getMetaDiagnosticStatus() {
 }
 function buildBookingWhatsAppMessage(booking) {
   const itemsSummary = booking.items.map((it) => {
-    const drinkLabel = it.drinkOption === "no_juice" ? "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (-5\u062C)" : it.drinkOption === "pepsi" ? "\u0628\u064A\u0628\u0633\u064A (+10\u062C)" : "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629";
+    let drinkLabel = it.drinkOption === "no_juice" ? "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (-5\u062C)" : it.drinkOption === "pepsi" ? "\u0628\u064A\u0628\u0633\u064A (+10\u062C)" : "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629";
+    if (it.orientalSweetOption === "replace_juice") {
+      drinkLabel = "\u0627\u0644\u0639\u0635\u064A\u0631 \u0645\u0633\u062A\u0628\u062F\u0644 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15\u062C)";
+    } else if (it.orientalSweetOption === "add_with_juice") {
+      drinkLabel += " + \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+20\u062C)";
+    }
     return `\u2022 \u0643\u0648\u062F: ${it.mealCode} | \u0627\u0644\u0639\u062F\u062F: ${it.quantity} \u0648\u062C\u0628\u0629 | ${drinkLabel} | \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A: ${it.totalDistributorPrice} \u062C`;
   }).join("\n");
   const rawText = `*\u0637\u0644\u0628 \u062D\u062C\u0632 \u062C\u062F\u064A\u062F - C\xC9L\xC8BRE CATERING*
@@ -3076,6 +4975,32 @@ async function notifyBookingViaMeta(booking) {
       channel: "DIRECT_LINK_FALLBACK",
       note: "\u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0627\u0644\u062E\u0627\u0631\u062C\u064A \u0628\u0640 Meta\u060C \u0648\u0627\u0644\u062D\u062C\u0632 \u0645\u062D\u0641\u0648\u0638 \u0628\u0627\u0644\u0643\u0627\u0645\u0644 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A."
     };
+  }
+}
+async function sendAdminRecoveryOtpViaMeta(username, otp) {
+  if (!isMetaAutomatedConfigured()) {
+    return false;
+  }
+  try {
+    const response = await fetch(`https://graph.facebook.com/${META_CONFIG.apiVersion}/me/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${META_CONFIG.pageAccessToken}`
+      },
+      body: JSON.stringify({
+        messaging_type: "UPDATE",
+        recipient: {
+          phone_number: META_CONFIG.officialWhatsAppNumber
+        },
+        message: {
+          text: `\u0631\u0645\u0632 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0644\u0648\u062D\u0629 \u0627\u0644\u0625\u062F\u0627\u0631\u0629 \u0644\u062D\u0633\u0627\u0628 (${username}) \u0647\u0648: ${otp} (\u0635\u0627\u0644\u062D \u0644\u0645\u062F\u0629 10 \u062F\u0642\u0627\u0626\u0642 \u0648\u0644\u0644\u0645\u0631\u0629 \u0627\u0644\u0648\u0627\u062D\u062F\u0629 \u0641\u0642\u0637).`
+        }
+      })
+    });
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -3465,10 +5390,458 @@ function generateMenuPdfHtml(meals, autoPrint = false) {
 </html>`;
 }
 
+// src/server/bookingPdfGenerator.ts
+function generateBookingPdfHtml(booking, autoPrint = false) {
+  const verifiedPaid = booking.paidAmount || 0;
+  const total = booking.totalDistributorPrice || 0;
+  const remaining = Math.max(0, total - verifiedPaid);
+  const itemsRows = (booking.items || []).map((it, idx) => {
+    let drinkText = "\u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 \u0627\u0644\u0642\u064A\u0627\u0633\u064A";
+    if (it.orientalSweetOption === "replace_juice") {
+      drinkText = "\u0627\u0644\u0639\u0635\u064A\u0631 \u0645\u0633\u062A\u0628\u062F\u0644 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A";
+    } else if (it.drinkOption === "pepsi") {
+      drinkText = "\u0643\u0627\u0646\u0632 \u0628\u064A\u0628\u0633\u064A (+10 \u062C)";
+    } else if (it.drinkOption === "no_juice") {
+      drinkText = "\u0628\u062F\u0648\u0646 \u0639\u0635\u064A\u0631 (-5 \u062C)";
+    }
+    let sweetText = "\u2014";
+    if (it.orientalSweetOption === "add_with_juice") {
+      sweetText = "\u0625\u0636\u0627\u0641\u0629 \u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A \u0645\u0639 \u0627\u0644\u0639\u0635\u064A\u0631 (+20 \u062C)";
+    } else if (it.orientalSweetOption === "replace_juice") {
+      sweetText = "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0627\u0644\u0639\u0635\u064A\u0631 \u0628\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A (+15 \u062C)";
+    }
+    const unitPrice = it.unitDistributorPrice || Math.round(it.totalDistributorPrice / (it.quantity || 1));
+    return `
+      <tr>
+        <td style="text-align: center; font-weight: bold; color: #7A0C2E;">${idx + 1}</td>
+        <td>
+          <div style="font-weight: 800; color: #1e293b; font-size: 11.5px;">${it.mealName}</div>
+          <div style="font-size: 9.5px; color: #64748b; line-height: 1.3; margin-top: 2px;">${it.ingredients}</div>
+        </td>
+        <td style="text-align: center;">
+          <span style="display: inline-block; padding: 2px 8px; background: #FAF8F5; border: 1px solid #E2D5BA; border-radius: 6px; font-weight: 800; font-size: 11px; color: #7A0C2E;">
+            ${it.quantity} \u0628\u0648\u0643\u0633
+          </span>
+        </td>
+        <td style="font-size: 10px; color: #334155;">${drinkText}</td>
+        <td style="font-size: 10px; color: ${it.orientalSweetOption && it.orientalSweetOption !== "none" ? "#7A0C2E; font-weight: bold;" : "#94a3b8;"}">${sweetText}</td>
+        <td style="text-align: center; font-size: 11px; font-weight: 700; color: #334155;">${unitPrice.toLocaleString("en-US")} \u062C</td>
+        <td style="text-align: center; font-size: 11.5px; font-weight: 900; color: #7A0C2E;">${it.totalDistributorPrice.toLocaleString("en-US")} \u062C</td>
+      </tr>
+    `;
+  }).join("");
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>\u0625\u0634\u0639\u0627\u0631 \u062D\u062C\u0632 \u0645\u0639\u062A\u0645\u062F \u0648\u0645\u0633\u062F\u062F \u0627\u0644\u0639\u0631\u0628\u0648\u0646 | ${booking.bookingCode} | C\xC9L\xC8BRE CATERING</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --burgundy: #7A0C2E;
+      --burgundy-dark: #560820;
+      --gold: #C59B27;
+      --gold-dark: #9A7718;
+      --gold-light: #DFC066;
+      --cream: #FAF8F5;
+      --border: #E8DCC0;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+      background-color: #f1f5f9;
+      color: #1e293b;
+      direction: rtl;
+      text-align: right;
+      padding: 16px;
+      font-size: 11px;
+    }
+    .page-a4 {
+      width: 210mm;
+      min-height: 297mm;
+      max-height: 297mm;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 2px solid var(--gold);
+      border-radius: 12px;
+      padding: 10mm 12mm;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.06);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .no-print {
+      max-width: 210mm;
+      margin: 0 auto 12px auto;
+      background: white;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-family: 'Cairo', sans-serif;
+      font-weight: 700;
+      font-size: 11px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-gold {
+      background: var(--gold);
+      color: white;
+      border: none;
+    }
+    .btn-gold:hover {
+      background: var(--gold-dark);
+    }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: #475569;
+    }
+    .btn-outline:hover {
+      background: #f8fafc;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--gold);
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+    }
+    .brand-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 19px;
+      font-weight: 900;
+      color: var(--burgundy-dark);
+      letter-spacing: 0.5px;
+    }
+    .brand-sub {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--gold-dark);
+    }
+    .badge-confirmed {
+      background: #ecfdf5;
+      color: #047857;
+      border: 1.5px solid #10b981;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 11px;
+      text-align: center;
+    }
+    .booking-number {
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--burgundy);
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* Client & Event Info Grid */
+    .info-card {
+      background: var(--cream);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 14px;
+      font-size: 10.5px;
+    }
+    .info-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .info-label {
+      color: #64748b;
+      font-weight: 600;
+      min-width: 90px;
+    }
+    .info-value {
+      color: #0f172a;
+      font-weight: 800;
+    }
+    .phone-highlight {
+      font-family: monospace;
+      font-size: 12px;
+      color: var(--burgundy);
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      direction: ltr;
+      display: inline-block;
+    }
+
+    /* Table */
+    .table-container {
+      margin-bottom: 8px;
+      flex-grow: 1;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10.5px;
+    }
+    th {
+      background: var(--burgundy);
+      color: white;
+      padding: 6px 8px;
+      font-weight: 800;
+      font-size: 10.5px;
+      border: 1px solid #560820;
+    }
+    td {
+      padding: 5px 8px;
+      border: 1px solid #e2e8f0;
+      vertical-align: middle;
+    }
+    tr:nth-child(even) td {
+      background: #fafafa;
+    }
+
+    /* Financial Summary Box */
+    .finance-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .finance-box {
+      border: 1.5px solid var(--gold);
+      border-radius: 8px;
+      padding: 6px 10px;
+      text-align: center;
+      background: #ffffff;
+    }
+    .finance-box.highlight {
+      background: #fefce8;
+      border-color: #ca8a04;
+    }
+    .finance-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #64748b;
+    }
+    .finance-val {
+      font-size: 13.5px;
+      font-weight: 900;
+      color: var(--burgundy-dark);
+      margin-top: 1px;
+    }
+    .finance-val.green {
+      color: #059669;
+    }
+
+    /* Notes */
+    .notes-box {
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 9.5px;
+      margin-bottom: 8px;
+      color: #475569;
+    }
+
+    /* Footer */
+    .footer {
+      border-top: 1.5px solid var(--gold);
+      padding-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 9.5px;
+      color: #64748b;
+    }
+    .footer-hotline {
+      font-weight: 900;
+      font-size: 11px;
+      color: var(--burgundy);
+      direction: ltr;
+      display: inline-block;
+    }
+
+    @page {
+      size: A4 portrait;
+      margin: 8mm;
+    }
+
+    @media print {
+      body {
+        background: white !important;
+        padding: 0 !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .page-a4 {
+        border: 1.5px solid var(--gold) !important;
+        box-shadow: none !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 285mm !important;
+        border-radius: 0 !important;
+        padding: 8mm 10mm !important;
+        page-break-after: avoid !important;
+        page-break-inside: avoid !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Controls for browser preview -->
+  <div class="no-print">
+    <div>
+      <span style="font-weight: 800; color: #7A0C2E;">\u0625\u064A\u0635\u0627\u0644 \u062D\u062C\u0632 \u0645\u0639\u062A\u0645\u062F \u0648\u0645\u0633\u062F\u062F \u0627\u0644\u0639\u0631\u0628\u0648\u0646 (A4 \u0635\u0641\u062D\u0629 \u0648\u0627\u062D\u062F\u0629)</span>
+      <span style="font-size: 10px; color: #64748b; margin-right: 8px;">\u0645\u062E\u0635\u0635 \u0644\u0644\u0639\u0645\u064A\u0644 \u0648\u0645\u0646\u062F\u0648\u0628 \u0627\u0644\u062A\u0633\u0644\u064A\u0645</span>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button onclick="window.print()" class="btn btn-gold">
+        \u{1F5A8}\uFE0F \u0637\u0628\u0627\u0639\u0629 \u0623\u0648 \u062D\u0641\u0638 \u0643\u0645\u0644\u0641 PDF
+      </button>
+      <a href="https://wa.me/2${booking.customerPhone}?text=${encodeURIComponent(`\u0623\u0647\u0644\u0627\u064B \u0628\u062D\u0636\u0631\u062A\u0643 \u0623\u0633\u062A\u0627\u0630 ${booking.customerName}\u060C \u0645\u0631\u0641\u0642 \u0625\u0634\u0639\u0627\u0631 \u062D\u062C\u0632\u0643 \u0627\u0644\u0645\u0639\u062A\u0645\u062F \u0628\u0631\u0642\u0645 ${booking.bookingCode} \u0645\u0639 \u0633\u064A\u0644\u064A\u0628\u0631\u064A \u0643\u0627\u062A\u0631\u064A\u0646\u062C.`)}" target="_blank" class="btn btn-outline">
+        \u{1F4AC} \u0645\u0634\u0627\u0631\u0643\u0629 \u0628\u0627\u0644\u0648\u0627\u062A\u0633\u0627\u0628
+      </a>
+    </div>
+  </div>
+
+  <div class="page-a4">
+    <!-- Header -->
+    <div class="header">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <img src="${CELEBRE_CONFIG.logoUrl}" alt="Celebre Catering Logo" style="height: 48px; width: auto; object-fit: contain;" />
+        <div>
+          <div class="brand-title">C\xC9L\xC8BRE CATERING</div>
+          <div class="brand-sub">\u0643\u0644 \u0645\u0646\u0627\u0633\u0628\u0629.. \u0623\u062D\u0644\u0649 \u0645\u0639 \u0633\u064A\u0644\u064A\u0628\u0631\u064A | \u0643\u0627\u062A\u0631\u064A\u0646\u062C \u0627\u0644\u0645\u0646\u0627\u0633\u0628\u0627\u062A \u0648\u0627\u0644\u0623\u0641\u0631\u0627\u062D</div>
+        </div>
+      </div>
+      <div style="text-align: left;">
+        <div class="badge-confirmed">
+          \u2713 \u0625\u0634\u0639\u0627\u0631 \u062D\u062C\u0632 \u0645\u0639\u062A\u0645\u062F \u0648\u0645\u0633\u062F\u062F \u0627\u0644\u0639\u0631\u0628\u0648\u0646
+          <span class="booking-number">${booking.bookingCode}</span>
+        </div>
+        <div style="font-size: 9px; color: #64748b; margin-top: 2px;">
+          \u0625\u0635\u062F\u0627\u0631 v${booking.version || 1} \u2022 ${(/* @__PURE__ */ new Date()).toLocaleDateString("ar-EG")}
+        </div>
+      </div>
+    </div>
+
+    <!-- Client & Event Info Card -->
+    <div class="info-card">
+      <div class="info-row">
+        <span class="info-label">\u0627\u0633\u0645 \u0627\u0644\u0639\u0645\u064A\u0644:</span>
+        <span class="info-value">${booking.customerName}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">\u0627\u0644\u0645\u0646\u0627\u0633\u0628\u0629:</span>
+        <span class="info-value">${booking.eventName}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">\u0631\u0642\u0645 \u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644:</span>
+        <span class="info-value phone-highlight">${booking.customerPhone}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">\u062A\u0627\u0631\u064A\u062E \u0648\u0645\u0648\u0639\u062F \u0627\u0644\u062A\u0633\u0644\u064A\u0645:</span>
+        <span class="info-value">${booking.eventDate} \u0627\u0644\u0633\u0627\u0639\u0629 ${booking.deliveryTime}</span>
+      </div>
+      <div class="info-row" style="grid-column: span 2;">
+        <span class="info-label">\u0645\u0643\u0627\u0646 \u0648\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u062A\u0633\u0644\u064A\u0645:</span>
+        <span class="info-value">${booking.deliveryGovernorate} \u2013 ${booking.deliveryAddress}</span>
+      </div>
+    </div>
+
+    <!-- Meals Table -->
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 25px;">#</th>
+            <th>\u0627\u0644\u0648\u062C\u0628\u0629 \u0648\u0627\u0644\u0645\u0643\u0648\u0646\u0627\u062A</th>
+            <th style="width: 75px; text-align: center;">\u0627\u0644\u0643\u0645\u064A\u0629</th>
+            <th style="width: 120px;">\u0627\u0644\u0645\u0634\u0631\u0648\u0628</th>
+            <th style="width: 135px;">\u0642\u0637\u0639\u0629 \u0634\u0631\u0642\u064A</th>
+            <th style="width: 70px; text-align: center;">\u0633\u0639\u0631 \u0627\u0644\u0648\u062C\u0628\u0629</th>
+            <th style="width: 80px; text-align: center;">\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Financial Breakdown -->
+    <div class="finance-grid">
+      <div class="finance-box">
+        <div class="finance-label">\u0625\u062C\u0645\u0627\u0644\u064A \u0642\u064A\u0645\u0629 \u0627\u0644\u0637\u0644\u0628</div>
+        <div class="finance-val">${total.toLocaleString("en-US")} \u062C.\u0645</div>
+      </div>
+      <div class="finance-box highlight">
+        <div class="finance-label">\u0627\u0644\u0639\u0631\u0628\u0648\u0646 \u0627\u0644\u0645\u0633\u062F\u062F \u0641\u0639\u0644\u064A\u0627\u064B</div>
+        <div class="finance-val green">${verifiedPaid.toLocaleString("en-US")} \u062C.\u0645</div>
+      </div>
+      <div class="finance-box">
+        <div class="finance-label">\u0627\u0644\u0645\u062A\u0628\u0642\u064A \u0627\u0644\u0645\u0633\u062A\u062D\u0642 \u0639\u0646\u062F \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645</div>
+        <div class="finance-val">${remaining.toLocaleString("en-US")} \u062C.\u0645</div>
+      </div>
+    </div>
+
+    <!-- Customer Notes -->
+    <div class="notes-box">
+      <strong>\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0648\u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u0639\u0645\u064A\u0644:</strong>
+      <span>${booking.notes && booking.notes.trim() ? booking.notes.trim() : "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0625\u0636\u0627\u0641\u064A\u0629. \u0627\u0644\u062A\u0639\u0628\u0626\u0629 \u0641\u064A \u0639\u0644\u0628\u0629 \u0633\u064A\u0644\u064A\u0628\u0631\u064A \u0627\u0644\u0628\u064A\u0636\u0627\u0621 \u0627\u0644\u0631\u0633\u0645\u064A\u0629 \u0645\u0639 \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644 \u0645\u0639\u0637\u0631."}</span>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div>
+        <span>\u0627\u0644\u062A\u0639\u0628\u0626\u0629 \u0627\u0644\u0631\u0633\u0645\u064A\u0629 \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629: <strong>\u0627\u0644\u0639\u0644\u0628\u0629 \u0627\u0644\u0628\u064A\u0636\u0627\u0621 \u0627\u0644\u0641\u0627\u062E\u0631\u0629 \u0644\u0640 Celebre Catering</strong></span>
+        <span style="margin: 0 6px;">\u2022</span>
+        <span>\u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0631\u0626\u064A\u0633\u064A: \u0627\u0644\u0642\u0627\u0647\u0631\u0629 \u0648\u0627\u0644\u062C\u064A\u0632\u0629</span>
+      </div>
+      <div>
+        <span>\u0627\u0644\u062E\u0637 \u0627\u0644\u0633\u0627\u062E\u0646 \u0648\u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A: </span>
+        <span class="footer-hotline">01284484868</span>
+        <span style="margin: 0 6px;">\u2022</span>
+        <span>celebre-eg.com</span>
+      </div>
+    </div>
+  </div>
+
+  ${autoPrint ? '<script>window.addEventListener("DOMContentLoaded", () => window.print());</script>' : ""}
+</body>
+</html>`;
+}
+
 // scripts/migrate-to-postgres.ts
 import fs3 from "fs";
 import path3 from "path";
-import { PrismaClient as PrismaClient2 } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 async function runSafeMigration() {
   const databaseUrl2 = process.env.DATABASE_URL;
   if (!databaseUrl2) {
@@ -3476,7 +5849,7 @@ async function runSafeMigration() {
     process.exit(1);
   }
   const formattedUrl = formatDatabaseUrl(databaseUrl2);
-  const prisma2 = new PrismaClient2({
+  const prisma2 = new PrismaClient({
     datasources: {
       db: {
         url: formattedUrl
@@ -3537,10 +5910,17 @@ async function runSafeMigration() {
       });
     }
     console.log(`\u2705 \u062A\u0645 \u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0640 ${sourceMeals.length} \u0648\u062C\u0628\u0629 \u0628\u0646\u062C\u0627\u062D.`);
-    console.log("\n--- 2. \u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0640 35 (\u0645\u0639 \u062D\u0638\u0631 \u0627\u0644\u062A\u0643\u0631\u0627\u0631 \u0648\u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0627\u062A \u0627\u0644\u0622\u0645\u0646\u0629) ---");
+    console.log("\n--- 2. \u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0639\u062A\u0645\u062F\u0629 (\u0645\u0639 \u0627\u0633\u062A\u0628\u0639\u0627\u062F \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0648\u0627\u0644\u0648\u0647\u0645\u064A\u0629 \u062A\u0645\u0627\u0645\u0627\u064B) ---");
     let insertedBookings = 0;
     let existingBookings = 0;
-    for (const b of sourceBookings) {
+    const verifiedSourceBookings = sourceBookings.filter((b) => {
+      if (b.bookingCode === "CLB-2026-5131" || b.customerPhone === "01158855911") return true;
+      if (b.isTest) return false;
+      const name = (b.customerName || "").toLowerCase();
+      if (name.includes("\u062A\u062C\u0631\u0628") || name.includes("\u0641\u062D\u0635") || name.includes("\u0627\u062E\u062A\u0628\u0627\u0631") || name.includes("\u062A\u0633\u062A")) return false;
+      return false;
+    });
+    for (const b of verifiedSourceBookings) {
       await prisma2.$transaction(async (tx) => {
         const existing = await tx.booking.findUnique({
           where: { bookingCode: b.bookingCode }
@@ -3692,289 +6072,6 @@ async function runSafeMigration() {
 }
 if (process.argv[1] && process.argv[1].endsWith("migrate-to-postgres.ts")) {
   runSafeMigration();
-}
-
-// src/server/schemaInit.ts
-import pg from "pg";
-var REQUIRED_TABLES = [
-  "meals",
-  "bookings",
-  "booking_items",
-  "payments",
-  "factory_orders",
-  "factory_payments",
-  "audit_logs",
-  "admin_users"
-];
-var TABLE_DDL_QUERIES = {
-  meals: `
-    CREATE TABLE IF NOT EXISTS "meals" (
-      "id" TEXT PRIMARY KEY,
-      "code" TEXT UNIQUE NOT NULL,
-      "name" TEXT NOT NULL,
-      "category" TEXT NOT NULL,
-      "ingredients" TEXT NOT NULL,
-      "distributorPrice" DOUBLE PRECISION NOT NULL,
-      "factoryPrice" DOUBLE PRECISION NOT NULL,
-      "hasJuice" BOOLEAN NOT NULL DEFAULT true,
-      "isActive" BOOLEAN NOT NULL DEFAULT true,
-      "image" TEXT,
-      "version" INTEGER NOT NULL DEFAULT 1,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  bookings: `
-    CREATE TABLE IF NOT EXISTS "bookings" (
-      "id" TEXT PRIMARY KEY,
-      "bookingCode" TEXT UNIQUE NOT NULL,
-      "securityCode" TEXT NOT NULL,
-      "customerName" TEXT NOT NULL,
-      "customerPhone" TEXT NOT NULL,
-      "customerWhatsapp" TEXT,
-      "preferredContact" TEXT NOT NULL DEFAULT 'whatsapp',
-      "eventName" TEXT NOT NULL,
-      "eventDate" TEXT NOT NULL,
-      "deliveryTime" TEXT NOT NULL,
-      "deliveryGovernorate" TEXT NOT NULL,
-      "deliveryAddress" TEXT NOT NULL,
-      "notes" TEXT,
-      "totalMealsCount" INTEGER NOT NULL,
-      "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
-      "totalFactoryPrice" DOUBLE PRECISION,
-      "profitMargin" DOUBLE PRECISION,
-      "paidAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
-      "remainingAmount" DOUBLE PRECISION NOT NULL,
-      "status" TEXT NOT NULL DEFAULT 'INITIAL',
-      "statusNotes" TEXT,
-      "isTest" BOOLEAN NOT NULL DEFAULT false,
-      "version" INTEGER NOT NULL DEFAULT 1,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  booking_items: `
-    CREATE TABLE IF NOT EXISTS "booking_items" (
-      "id" TEXT PRIMARY KEY,
-      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
-      "mealId" TEXT,
-      "mealCode" TEXT NOT NULL,
-      "mealName" TEXT NOT NULL,
-      "category" TEXT NOT NULL,
-      "ingredients" TEXT NOT NULL,
-      "quantity" INTEGER NOT NULL,
-      "drinkOption" TEXT NOT NULL DEFAULT 'standard',
-      "baseDistributorPrice" DOUBLE PRECISION NOT NULL,
-      "unitDistributorPrice" DOUBLE PRECISION NOT NULL,
-      "totalDistributorPrice" DOUBLE PRECISION NOT NULL,
-      "baseFactoryPrice" DOUBLE PRECISION,
-      "unitFactoryPrice" DOUBLE PRECISION,
-      "totalFactoryPrice" DOUBLE PRECISION,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  payments: `
-    CREATE TABLE IF NOT EXISTS "payments" (
-      "id" TEXT PRIMARY KEY,
-      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
-      "amount" DOUBLE PRECISION NOT NULL,
-      "method" TEXT NOT NULL,
-      "date" TEXT NOT NULL,
-      "notes" TEXT,
-      "receiptNumber" TEXT,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  factory_orders: `
-    CREATE TABLE IF NOT EXISTS "factory_orders" (
-      "id" TEXT PRIMARY KEY,
-      "orderNumber" TEXT UNIQUE NOT NULL,
-      "bookingId" TEXT NOT NULL REFERENCES "bookings"("id") ON DELETE CASCADE,
-      "bookingCode" TEXT NOT NULL,
-      "version" INTEGER NOT NULL DEFAULT 1,
-      "status" TEXT NOT NULL DEFAULT 'PENDING',
-      "eventDate" TEXT NOT NULL,
-      "deliveryTime" TEXT NOT NULL,
-      "deliveryLocation" TEXT NOT NULL,
-      "itemsJson" TEXT NOT NULL,
-      "packagingNotes" TEXT,
-      "factoryCostTotal" DOUBLE PRECISION DEFAULT 0,
-      "paidAmount" DOUBLE PRECISION DEFAULT 0,
-      "remainingAmount" DOUBLE PRECISION DEFAULT 0,
-      "paymentStatus" TEXT DEFAULT 'UNPAID',
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  factory_payments: `
-    CREATE TABLE IF NOT EXISTS "factory_payments" (
-      "id" TEXT PRIMARY KEY,
-      "factoryOrderId" TEXT NOT NULL REFERENCES "factory_orders"("id") ON DELETE CASCADE,
-      "factoryOrderNumber" TEXT NOT NULL,
-      "bookingId" TEXT NOT NULL,
-      "bookingCode" TEXT NOT NULL,
-      "amount" DOUBLE PRECISION NOT NULL,
-      "method" TEXT NOT NULL,
-      "date" TEXT NOT NULL,
-      "notes" TEXT,
-      "receiptNumber" TEXT,
-      "recordedBy" TEXT NOT NULL DEFAULT '\u0627\u0644\u0625\u062F\u0627\u0631\u0629',
-      "status" TEXT NOT NULL DEFAULT 'VALID',
-      "cancelledBy" TEXT,
-      "cancelledAt" TIMESTAMP(3),
-      "cancelReason" TEXT,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  audit_logs: `
-    CREATE TABLE IF NOT EXISTS "audit_logs" (
-      "id" TEXT PRIMARY KEY,
-      "bookingId" TEXT REFERENCES "bookings"("id") ON DELETE SET NULL,
-      "bookingCode" TEXT NOT NULL,
-      "action" TEXT NOT NULL,
-      "performedBy" TEXT NOT NULL,
-      "details" TEXT NOT NULL,
-      "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `,
-  admin_users: `
-    CREATE TABLE IF NOT EXISTS "admin_users" (
-      "id" TEXT PRIMARY KEY,
-      "username" TEXT UNIQUE NOT NULL,
-      "email" TEXT UNIQUE NOT NULL,
-      "name" TEXT NOT NULL,
-      "passwordHash" TEXT NOT NULL,
-      "role" TEXT NOT NULL DEFAULT 'admin',
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `
-};
-async function checkTablesStatus(client) {
-  try {
-    const rawTables = await client.$queryRaw`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public'
-    `;
-    const existing = rawTables.map((t) => t.table_name);
-    const existingRequired = REQUIRED_TABLES.filter((t) => existing.includes(t));
-    const missing = REQUIRED_TABLES.filter((t) => !existing.includes(t));
-    return {
-      allReady: missing.length === 0,
-      existingTables: existingRequired,
-      missingTables: missing
-    };
-  } catch (err) {
-    logServerError(err, "SchemaInit.CheckTables");
-    return {
-      allReady: false,
-      existingTables: [],
-      missingTables: REQUIRED_TABLES
-    };
-  }
-}
-async function ensureSchemaReady(client) {
-  const status = await checkTablesStatus(client);
-  const created = [];
-  const errors = [];
-  if (!status.allReady) {
-    for (const tableName of status.missingTables) {
-      const ddl = TABLE_DDL_QUERIES[tableName];
-      if (ddl) {
-        try {
-          await client.$executeRawUnsafe(ddl);
-          created.push(tableName);
-        } catch (err) {
-          logServerError(err, `SchemaInit.Prisma.${tableName}`);
-          errors.push(`Prisma ${tableName}: ${err?.message?.slice(0, 100)}`);
-        }
-      }
-    }
-    const midCheck = await checkTablesStatus(client);
-    if (!midCheck.allReady && process.env.DATABASE_URL) {
-      const rawUrl = process.env.DATABASE_URL;
-      const formattedUrl = formatDatabaseUrl(rawUrl);
-      const pgUrl = new URL(formattedUrl);
-      pgUrl.searchParams.delete("sslmode");
-      const pgClient = new pg.Client({
-        connectionString: pgUrl.toString(),
-        connectionTimeoutMillis: 7e3,
-        ssl: {
-          rejectUnauthorized: true,
-          ca: SUPABASE_ROOT_CA,
-          servername: pgUrl.hostname
-        }
-      });
-      try {
-        await pgClient.connect();
-        for (const tableName of midCheck.missingTables) {
-          const ddl = TABLE_DDL_QUERIES[tableName];
-          if (ddl) {
-            try {
-              await pgClient.query(ddl);
-              if (!created.includes(tableName)) {
-                created.push(tableName);
-              }
-            } catch (pgErr) {
-              logServerError(pgErr, `SchemaInit.pgClient.${tableName}`);
-              errors.push(`pg ${tableName}: ${pgErr?.message?.slice(0, 100)}`);
-            }
-          }
-        }
-      } catch (connErr) {
-        errors.push(`pg connection: ${connErr?.message?.slice(0, 100)}`);
-      } finally {
-        try {
-          await pgClient.end();
-        } catch {
-        }
-      }
-    }
-  }
-  try {
-    await client.$executeRawUnsafe('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
-  } catch {
-  }
-  try {
-    const mealCount = await client.meal.count();
-    if (mealCount === 0) {
-      for (const m of INITIAL_MEALS) {
-        await client.meal.create({
-          data: {
-            id: `meal-${m.code}`,
-            code: m.code,
-            name: m.name,
-            category: m.category,
-            ingredients: m.ingredients,
-            distributorPrice: m.distributorPrice,
-            factoryPrice: m.factoryPrice ?? 0,
-            hasJuice: m.hasJuice ?? true,
-            isActive: m.isActive ?? true,
-            image: m.image
-          }
-        }).catch(() => {
-        });
-      }
-    } else {
-      await client.meal.updateMany({
-        where: { code: "Sale-12" },
-        data: {
-          name: "\u0628\u0627\u062A\u064A\u0629",
-          ingredients: "\u0642\u0637\u0639\u0629 \u062C\u0627\u062A\u0648\u0629 \u0645\u063A\u0644\u0641\u0629 + \u0628\u0627\u062A\u064A\u0629 + \u0639\u0635\u064A\u0631 \u0628\u062E\u064A\u0631\u0629 + \u0634\u0648\u0643\u0629 \u0648\u0645\u0646\u062F\u064A\u0644"
-        }
-      }).catch(() => {
-      });
-    }
-  } catch {
-  }
-  const postCheck = await checkTablesStatus(client);
-  return {
-    success: postCheck.allReady,
-    created,
-    tablesFound: postCheck.existingTables,
-    errors
-  };
 }
 
 // src/server/authSession.ts
@@ -4129,7 +6226,6 @@ function revokeAllUserSessions(userId, res) {
 // src/server/routes.ts
 import pg2 from "pg";
 var apiRouter = Router();
-var JWT_SECRET2 = process.env.JWT_SECRET || "celebre-catering-jwt-super-secret-key-2026";
 function requireAuth(req, res, next) {
   const result = validateAdminSession(req, res);
   if (!result.valid || !result.user) {
@@ -4406,6 +6502,49 @@ apiRouter.get("/bookings/track", async (req, res) => {
     res.status(500).json({ error: err.message || "\u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0639\u0646 \u0627\u0644\u062D\u062C\u0632" });
   }
 });
+apiRouter.get("/bookings/:id/pdf", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { download, print, verify } = req.query;
+    const booking = await db.getBookingById(id);
+    if (!booking) {
+      res.status(404).json({ error: "\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      return;
+    }
+    if (verify && typeof verify === "string") {
+      const allowed = await db.trackBooking(booking.bookingCode, verify);
+      if (!allowed) {
+        res.status(403).json({ error: "\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u063A\u064A\u0631 \u0645\u062A\u0637\u0627\u0628\u0642" });
+        return;
+      }
+    }
+    const eligibleStatuses = ["CONFIRMED", "IN_PRODUCTION", "READY_FOR_DELIVERY", "DELIVERED", "COMPLETED"];
+    if (!eligibleStatuses.includes(booking.status)) {
+      res.status(400).json({
+        error: `\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0635\u062F\u0627\u0631 \u0625\u064A\u0635\u0627\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0631\u0633\u0645\u064A \u0644\u0623\u0646 \u0627\u0644\u062D\u062C\u0632 \u062D\u0627\u0644\u064A\u0627\u064B \u0641\u064A \u062D\u0627\u0644\u0629 (${booking.status}). \u064A\u0634\u062A\u0631\u0637 \u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632 \u0623\u0648\u0644\u0627\u064B.`,
+        code: "BOOKING_NOT_CONFIRMED"
+      });
+      return;
+    }
+    const verifiedDeposit = Number(booking.paidAmount) || 0;
+    if (verifiedDeposit <= 0) {
+      res.status(400).json({
+        error: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0635\u062F\u0627\u0631 \u0625\u064A\u0635\u0627\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0631\u0633\u0645\u064A \u0625\u0644\u0627 \u0628\u0639\u062F \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0627\u0644\u0639\u0631\u0628\u0648\u0646 \u0627\u0644\u0645\u0627\u0644\u064A\u0629 (\u0627\u0644\u0645\u0628\u0644\u063A \u0627\u0644\u0645\u0633\u062F\u062F \u0623\u0643\u0628\u0631 \u0645\u0646 \u0635\u0641\u0631).",
+        code: "DEPOSIT_NOT_RECORDED"
+      });
+      return;
+    }
+    const html = generateBookingPdfHtml(booking, print === "true");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    if (download === "true") {
+      res.setHeader("Content-Disposition", `attachment; filename="Celebre-Confirmation-${booking.bookingCode}.html"`);
+    }
+    res.send(html);
+  } catch (err) {
+    console.error("Error generating client booking PDF:", err);
+    res.status(500).json({ error: err.message || "\u062A\u0639\u0630\u0631 \u0625\u0635\u062F\u0627\u0631 \u0625\u064A\u0635\u0627\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632" });
+  }
+});
 apiRouter.post("/admin/auth/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -4495,6 +6634,189 @@ apiRouter.post("/admin/auth/change-password", requireAuth, async (req, res) => {
 apiRouter.get("/admin/auth/me", requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
+var recoveryRateBuckets = /* @__PURE__ */ new Map();
+var usedRecoveryTokens = /* @__PURE__ */ new Set();
+var recoveryOtpAttempts = /* @__PURE__ */ new Map();
+function checkRecoveryRateLimit(key, maxRequests, windowMs = 15 * 60 * 1e3) {
+  const now = Date.now();
+  const bucket = recoveryRateBuckets.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    recoveryRateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= maxRequests) {
+    return false;
+  }
+  bucket.count += 1;
+  return true;
+}
+function timingSafeHashEqual(a, b) {
+  const hashA = crypto2.createHash("sha256").update(a).digest();
+  const hashB = crypto2.createHash("sha256").update(b).digest();
+  return crypto2.timingSafeEqual(hashA, hashB);
+}
+apiRouter.get("/admin/auth/recovery-options", (_req, res) => {
+  const configuredKey = (process.env.ADMIN_RECOVERY_KEY || "").trim();
+  res.json({
+    recoveryKeyConfigured: configuredKey.length >= 8,
+    metaWhatsAppConfigured: isMetaAutomatedConfigured()
+  });
+});
+apiRouter.post("/admin/auth/request-reset", async (req, res) => {
+  try {
+    const rawUsername = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+    if (!rawUsername || rawUsername.length > 120) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0623\u0648\u0644\u0627\u064B" });
+      return;
+    }
+    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown";
+    if (!checkRecoveryRateLimit(`req:${clientIp}:${rawUsername.toLowerCase()}`, 5, 15 * 60 * 1e3)) {
+      res.status(429).json({ error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 \u0644\u0637\u0644\u0628\u0627\u062A \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F 15 \u062F\u0642\u064A\u0642\u0629." });
+      return;
+    }
+    const user = await db.findAdminUser(rawUsername);
+    const jti = crypto2.randomUUID();
+    const otp = crypto2.randomBytes(5).toString("hex").toUpperCase();
+    const otpHmac = crypto2.createHmac("sha256", JWT_SECRET).update(`${otp}:${jti}`).digest("hex");
+    let deliveredViaWhatsApp = false;
+    if (user) {
+      console.info(
+        `[ADMIN_PASSWORD_RESET] Username: ${user.username} | One-Time Recovery Code: ${otp} | Valid for 10 minutes (jti=${jti})`
+      );
+      deliveredViaWhatsApp = await sendAdminRecoveryOtpViaMeta(user.username, otp);
+      await db.addAuditLog({
+        bookingId: "",
+        bookingCode: "ADMIN_AUTH",
+        action: "\u0637\u0644\u0628 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u0625\u062F\u0627\u0631\u064A",
+        performedBy: user.username,
+        details: `\u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0645\u0624\u0642\u062A \u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 (${user.username})${deliveredViaWhatsApp ? " \u0648\u0625\u0631\u0633\u0627\u0644\u0647 \u0639\u0628\u0631 WhatsApp API" : " \u0641\u064A \u0633\u062C\u0644 \u0627\u0644\u062E\u0627\u062F\u0645 \u0627\u0644\u0622\u0645\u0646"}.`
+      });
+    }
+    const challengeToken = jwt2.sign(
+      {
+        purpose: "admin_password_reset",
+        username: user ? user.username : rawUsername,
+        jti,
+        otpHmac
+      },
+      JWT_SECRET,
+      { expiresIn: "10m" }
+    );
+    res.json({
+      success: true,
+      challengeToken,
+      expiresInSeconds: 600,
+      deliveredViaWhatsApp,
+      message: "\u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0633\u062C\u0644\u0627\u064B\u060C \u0641\u0642\u062F \u062A\u0645 \u0625\u0635\u062F\u0627\u0631 \u0631\u0645\u0632 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0635\u0627\u0644\u062D \u0644\u0645\u062F\u0629 10 \u062F\u0642\u0627\u0626\u0642 \u0641\u064A \u0633\u062C\u0644 \u0627\u0644\u062E\u0627\u062F\u0645 \u0627\u0644\u0622\u0645\u0646 (Server Logs)" + (isMetaAutomatedConfigured() ? " \u0648\u0625\u0631\u0633\u0627\u0644\u0647 \u0625\u0644\u0649 \u0648\u0627\u062A\u0633\u0627\u0628 \u0627\u0644\u0625\u062F\u0627\u0631\u0629." : ".")
+    });
+  } catch (err) {
+    logServerError(err, "admin.auth.requestReset");
+    res.status(500).json({ error: "\u062A\u0639\u0630\u0631 \u0645\u0639\u0627\u0644\u062C\u0629 \u0637\u0644\u0628 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" });
+  }
+});
+apiRouter.post("/admin/auth/reset-password", async (req, res) => {
+  try {
+    const rawUsername = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+    const method = req.body?.method === "recovery_key" ? "recovery_key" : "server_otp";
+    const recoveryCode = typeof req.body?.recoveryCode === "string" ? req.body.recoveryCode.trim() : "";
+    const challengeToken = typeof req.body?.challengeToken === "string" ? req.body.challengeToken.trim() : "";
+    const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword : "";
+    const confirmPassword = typeof req.body?.confirmPassword === "string" ? req.body.confirmPassword : "";
+    if (!rawUsername || !recoveryCode || !newPassword || !confirmPassword) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u0627\u0633\u062A\u0643\u0645\u0627\u0644 \u062C\u0645\u064A\u0639 \u0627\u0644\u062D\u0642\u0648\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629" });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u063A\u064A\u0631 \u0645\u062A\u0637\u0627\u0628\u0642\u0629 \u0645\u0639 \u0627\u0644\u062A\u0623\u0643\u064A\u062F" });
+      return;
+    }
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      res.status(400).json({ error: "\u064A\u062C\u0628 \u0623\u0646 \u062A\u062A\u0643\u0648\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0645\u0646 8 \u0625\u0644\u0649 128 \u062D\u0631\u0641\u0627\u064B" });
+      return;
+    }
+    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown";
+    if (!checkRecoveryRateLimit(`reset:${clientIp}`, 10, 15 * 60 * 1e3)) {
+      res.status(429).json({ error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0639\u062F\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u062A\u0639\u064A\u064A\u0646 \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 15 \u062F\u0642\u064A\u0642\u0629." });
+      return;
+    }
+    if (method === "recovery_key") {
+      const configuredKey = (process.env.ADMIN_RECOVERY_KEY || "").trim();
+      if (configuredKey.length < 8) {
+        res.status(400).json({
+          error: "\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0627\u0644\u0633\u0631\u064A (ADMIN_RECOVERY_KEY) \u063A\u064A\u0631 \u0645\u0636\u0628\u0648\u0637 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645. \u0627\u0633\u062A\u062E\u062F\u0645 \u062E\u064A\u0627\u0631 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0645\u0624\u0642\u062A \u0645\u0646 \u0633\u062C\u0644 \u0627\u0644\u062E\u0627\u062F\u0645."
+        });
+        return;
+      }
+      if (!timingSafeHashEqual(recoveryCode, configuredKey)) {
+        res.status(401).json({ error: "\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0627\u0644\u0633\u0631\u064A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" });
+        return;
+      }
+    } else {
+      if (!challengeToken) {
+        res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u0637\u0644\u0628 \u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0627\u0644\u0645\u0624\u0642\u062A \u0623\u0648\u0644\u0627\u064B \u0642\u0628\u0644 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u062A\u0639\u064A\u064A\u0646" });
+        return;
+      }
+      let decoded;
+      try {
+        decoded = jwt2.verify(challengeToken, JWT_SECRET);
+      } catch {
+        res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0623\u0648 \u0623\u0646\u0647 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u060C \u064A\u0631\u062C\u0649 \u0637\u0644\u0628 \u0631\u0645\u0632 \u062C\u062F\u064A\u062F" });
+        return;
+      }
+      if (!decoded || decoded.purpose !== "admin_password_reset" || !decoded.jti || !decoded.otpHmac) {
+        res.status(401).json({ error: "\u0637\u0644\u0628 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
+        return;
+      }
+      if (usedRecoveryTokens.has(decoded.jti)) {
+        res.status(401).json({ error: "\u062A\u0645 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0647\u0630\u0627 \u0645\u0633\u0628\u0642\u0627\u064B \u0623\u0648 \u062A\u0645 \u0625\u0628\u0637\u0627\u0644\u0647\u060C \u064A\u0631\u062C\u0649 \u0637\u0644\u0628 \u0631\u0645\u0632 \u062C\u062F\u064A\u062F" });
+        return;
+      }
+      const attempts = recoveryOtpAttempts.get(decoded.jti) || 0;
+      if (attempts >= 5) {
+        usedRecoveryTokens.add(decoded.jti);
+        res.status(429).json({ error: "\u062A\u0645 \u0627\u0633\u062A\u0646\u0641\u0627\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0625\u062F\u062E\u0627\u0644 \u0627\u0644\u0631\u0645\u0632\u060C \u064A\u0631\u062C\u0649 \u0637\u0644\u0628 \u0631\u0645\u0632 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u062C\u062F\u064A\u062F" });
+        return;
+      }
+      const expectedHmac = crypto2.createHmac("sha256", JWT_SECRET).update(`${recoveryCode.toUpperCase()}:${decoded.jti}`).digest("hex");
+      if (!timingSafeHashEqual(expectedHmac, String(decoded.otpHmac))) {
+        recoveryOtpAttempts.set(decoded.jti, attempts + 1);
+        res.status(401).json({ error: "\u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0627\u0644\u0645\u0624\u0642\u062A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" });
+        return;
+      }
+      const userCheck = await db.findAdminUser(rawUsername);
+      if (!userCheck || userCheck.username.toLowerCase() !== String(decoded.username).toLowerCase()) {
+        res.status(401).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062D\u0633\u0627\u0628 \u0644\u0627 \u062A\u0637\u0627\u0628\u0642 \u0637\u0644\u0628 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F" });
+        return;
+      }
+      usedRecoveryTokens.add(decoded.jti);
+    }
+    const user = await db.findAdminUser(rawUsername);
+    if (!user) {
+      res.status(404).json({ error: "\u062A\u0639\u0630\u0631 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u062D\u0633\u0627\u0628 \u0627\u0644\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628" });
+      return;
+    }
+    const salt = bcrypt2.genSaltSync(10);
+    const newPasswordHash = bcrypt2.hashSync(newPassword, salt);
+    const updated = await db.updateAdminPassword(
+      user.username,
+      newPasswordHash,
+      `\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 (${method === "recovery_key" ? "\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F" : "\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0645\u0624\u0642\u062A"})`
+    );
+    if (!updated) {
+      res.status(500).json({ error: "\u062A\u0639\u0630\u0631 \u062A\u062D\u062F\u064A\u062B \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A" });
+      return;
+    }
+    revokeAllUserSessions(user.id, res);
+    res.json({
+      success: true,
+      username: user.username,
+      message: "\u062A\u0645 \u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0628\u0646\u062C\u0627\u062D \u0648\u0625\u0644\u063A\u0627\u0621 \u062C\u0645\u064A\u0639 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0633\u0627\u0628\u0642\u0629. \u064A\u0645\u0643\u0646\u0643 \u0627\u0644\u0622\u0646 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629."
+    });
+  } catch (err) {
+    logServerError(err, "admin.auth.resetPassword");
+    res.status(500).json({ error: err.message || "\u062D\u062F\u062B \u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" });
+  }
+});
 apiRouter.get("/admin/meals", requireAuth, async (req, res) => {
   try {
     const isSuperOrAdmin = req.user?.role === "super_admin" || req.user?.role === "admin";
@@ -4575,6 +6897,42 @@ apiRouter.get("/admin/bookings/:id", requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+apiRouter.get("/admin/bookings/:id/pdf", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { download, print } = req.query;
+    const booking = await db.getBookingById(id);
+    if (!booking) {
+      res.status(404).json({ error: "\u0627\u0644\u062D\u062C\u0632 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      return;
+    }
+    const eligibleStatuses = ["CONFIRMED", "IN_PRODUCTION", "READY_FOR_DELIVERY", "DELIVERED", "COMPLETED"];
+    if (!eligibleStatuses.includes(booking.status)) {
+      res.status(400).json({
+        error: `\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0635\u062F\u0627\u0631 \u0625\u064A\u0635\u0627\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0631\u0633\u0645\u064A \u0644\u0623\u0646 \u0627\u0644\u062D\u062C\u0632 \u062D\u0627\u0644\u064A\u0627\u064B \u0641\u064A \u062D\u0627\u0644\u0629 (${booking.status}). \u064A\u0634\u062A\u0631\u0637 \u062A\u0623\u0643\u064A\u062F \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062D\u062C\u0632 \u0623\u0648\u0644\u0627\u064B.`,
+        code: "BOOKING_NOT_CONFIRMED"
+      });
+      return;
+    }
+    const verifiedDeposit = Number(booking.paidAmount) || 0;
+    if (verifiedDeposit <= 0) {
+      res.status(400).json({
+        error: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0635\u062F\u0627\u0631 \u0625\u064A\u0635\u0627\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632 \u0627\u0644\u0631\u0633\u0645\u064A \u0625\u0644\u0627 \u0628\u0639\u062F \u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629 \u0627\u0644\u0639\u0631\u0628\u0648\u0646 \u0627\u0644\u0645\u0627\u0644\u064A\u0629 (\u0627\u0644\u0645\u0628\u0644\u063A \u0627\u0644\u0645\u0633\u062F\u062F \u0623\u0643\u0628\u0631 \u0645\u0646 \u0635\u0641\u0631).",
+        code: "DEPOSIT_NOT_RECORDED"
+      });
+      return;
+    }
+    const html = generateBookingPdfHtml(booking, print === "true");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    if (download === "true") {
+      res.setHeader("Content-Disposition", `attachment; filename="Celebre-Client-Confirmation-${booking.bookingCode}.html"`);
+    }
+    res.send(html);
+  } catch (err) {
+    console.error("Error generating admin client booking PDF:", err);
+    res.status(500).json({ error: err.message || "\u062A\u0639\u0630\u0631 \u0625\u0635\u062F\u0627\u0631 \u0625\u064A\u0635\u0627\u0644 \u062A\u0623\u0643\u064A\u062F \u0627\u0644\u062D\u062C\u0632" });
+  }
+});
 apiRouter.patch("/admin/bookings/:id", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
@@ -4628,8 +6986,8 @@ apiRouter.post("/admin/bookings/:id/payments", requireAuth, requireRole(["super_
       return;
     }
     const result = await db.addPayment({
-      bookingId: targetId,
-      bookingCode,
+      bookingId: bookingId || targetId,
+      bookingCode: bookingCode || (targetId.startsWith("CLB-") ? targetId : void 0),
       amount: Number(amount),
       method: method || "cash",
       date,
@@ -4639,7 +6997,8 @@ apiRouter.post("/admin/bookings/:id/payments", requireAuth, requireRole(["super_
     }, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
     res.json({ success: true, payment: result.payment, booking: result.booking });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    const sanitized = logServerError(err, "POST /admin/bookings/:id/payments");
+    res.status(400).json({ error: sanitized.errorMessage || err.message || "\u062D\u062F\u062B \u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u0641\u0639\u0629" });
   }
 });
 apiRouter.post("/admin/payments/:id/cancel", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -4759,6 +7118,78 @@ apiRouter.delete("/admin/bookings/:id/test-delete", requireAuth, requireRole(["s
     res.status(403).json({ error: err.message });
   }
 });
+apiRouter.delete("/admin/bookings/:id/cancelled", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.deleteCancelledBooking(id, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, message: result.message, bookingCode: result.bookingCode });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/bookings/bulk-delete-cancelled", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { bookingIds } = req.body || {};
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0642\u0627\u0626\u0645\u0629 \u0645\u0639\u0631\u0651\u0641\u0627\u062A \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u0645\u0644\u063A\u0627\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062D\u0630\u0641\u0647\u0627" });
+      return;
+    }
+    const result = await db.deleteBatchCancelledBookings(bookingIds, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.get("/admin/database/inventory", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const inventory = await db.getDatabaseInventory();
+    res.json(inventory);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "\u0641\u0634\u0644 \u0641\u062D\u0635 \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A" });
+  }
+});
+apiRouter.post("/admin/test-bookings/clean", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { bookingIds } = req.body || {};
+    if (!Array.isArray(bookingIds) || bookingIds.length === 0) {
+      res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0642\u0627\u0626\u0645\u0629 \u0645\u0639\u0631\u0641\u0627\u062A \u0627\u0644\u062D\u062C\u0648\u0632\u0627\u062A \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u062D\u0630\u0641\u0647\u0627 \u0646\u0647\u0627\u0626\u064A\u0627\u064B" });
+      return;
+    }
+    const result = await db.deleteBookingsPermanently(bookingIds, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.delete("/admin/bookings/:id", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const performer = req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629";
+    const auditPerformer = reason ? `${performer} (\u0627\u0644\u0633\u0628\u0628: ${reason.trim()})` : performer;
+    const result = await db.deleteBookingsPermanently([id], auditPerformer);
+    if (result.skipped.length > 0 && result.deletedCount === 0) {
+      res.status(400).json({ error: result.skipped[0].reason });
+      return;
+    }
+    res.json({ success: true, message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0648\u0623\u0631\u0634\u0641\u0629 \u0633\u062C\u0644\u0627\u062A\u0647 \u0628\u0646\u062C\u0627\u062D`, deletedCodes: result.deletedCodes });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+apiRouter.delete("/admin/bookings/:id/force-test", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.deleteBookingsPermanently([id], req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    if (result.skipped.length > 0 && result.deletedCount === 0) {
+      res.status(400).json({ error: result.skipped[0].reason });
+      return;
+    }
+    res.json({ success: true, message: `\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u062C\u0632 \u0628\u0646\u062C\u0627\u062D`, deletedCodes: result.deletedCodes });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 apiRouter.get("/admin/factory-orders", requireAuth, async (req, res) => {
   try {
     const orders = await db.getFactoryOrders();
@@ -4779,6 +7210,20 @@ apiRouter.get("/admin/factory-orders", requireAuth, async (req, res) => {
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+apiRouter.put("/admin/factory-orders/:id", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    if (body.paymentChanges !== void 0 && (typeof body.paymentChanges !== "object" || body.paymentChanges === null)) {
+      res.status(400).json({ error: "\u0635\u064A\u063A\u0629 \u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0627\u0644\u062F\u0641\u0639\u0627\u062A (paymentChanges) \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+      return;
+    }
+    const updated = await db.updateFactoryOrder(id, body, req.user?.name || req.user?.username || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    res.json({ success: true, factoryOrder: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 apiRouter.patch("/admin/factory-orders/:id/status", requireAuth, async (req, res) => {
@@ -4825,16 +7270,18 @@ apiRouter.get("/admin/factory-orders/:id/payments", requireAuth, requireRole(["s
 apiRouter.post("/admin/factory-orders/:id/payments", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, date, notes, receiptNumber } = req.body || {};
-    if (!amount || Number(amount) <= 0) {
+    const { amount, method, paymentType, date, notes, receiptNumber } = req.body || {};
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
       res.status(400).json({ error: "\u0642\u064A\u0645\u0629 \u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0635\u0646\u0639 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0631\u0642\u0645\u0627\u064B \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631" });
       return;
     }
     const result = await db.addFactoryPayment(
       {
         factoryOrderId: id,
-        amount: Number(amount),
+        amount: numAmount,
         method: method || "cash",
+        paymentType,
         date,
         notes,
         receiptNumber
@@ -4849,12 +7296,21 @@ apiRouter.post("/admin/factory-orders/:id/payments", requireAuth, requireRole(["
 apiRouter.put("/admin/factory-payments/:id", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const { amount, method, date, notes, receiptNumber } = req.body || {};
+    const { amount, method, paymentType, date, notes, receiptNumber } = req.body || {};
+    let parsedAmount;
+    if (amount !== void 0) {
+      parsedAmount = Number(amount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        res.status(400).json({ error: "\u0642\u064A\u0645\u0629 \u0627\u0644\u062F\u0641\u0639\u0629 \u0627\u0644\u0645\u0639\u062F\u0644\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0631\u0642\u0645\u0627\u064B \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631" });
+        return;
+      }
+    }
     const result = await db.updateFactoryPayment(
       id,
       {
-        amount: amount !== void 0 ? Number(amount) : void 0,
+        amount: parsedAmount,
         method,
+        paymentType,
         date,
         notes,
         receiptNumber
@@ -4903,6 +7359,40 @@ apiRouter.post("/admin/system/migrate", requireAuth, requireRole(["super_admin"]
     res.json({ success: true, stats });
   } catch (err) {
     res.status(500).json({ error: err?.message || "\u0641\u0634\u0644 \u062A\u0646\u0641\u064A\u0630 \u0627\u0644\u062A\u0631\u062D\u064A\u0644" });
+  }
+});
+apiRouter.get("/admin/system/rls-status", requireAuth, requireRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const client = getPrismaClient();
+    if (!client) {
+      res.json({
+        enabled: false,
+        storageMode: "resilient_storage",
+        message: "\u0627\u0644\u0646\u0638\u0627\u0645 \u064A\u0639\u0645\u0644 \u0628\u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0632\u064A\u0646 \u0627\u0644\u0645\u0631\u0646 (data/db.json). RLS \u0645\u0641\u0639\u0644 \u0639\u0644\u0649 \u0628\u064A\u0626\u0629 Supabase PostgreSQL."
+      });
+      return;
+    }
+    const report = await getRlsStatusReport(client);
+    res.json({
+      enabled: report.allSecured,
+      ...report
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+apiRouter.post("/admin/system/apply-rls", requireAuth, requireRole(["super_admin"]), async (req, res) => {
+  try {
+    const client = getPrismaClient();
+    if (!client) {
+      res.status(400).json({ error: "\u0642\u0627\u0639\u062F\u0629 \u0628\u064A\u0627\u0646\u0627\u062A PostgreSQL \u063A\u064A\u0631 \u0645\u062A\u0635\u0644\u0629 \u062D\u0627\u0644\u064A\u0627\u064B" });
+      return;
+    }
+    const result = await ensureRlsSecurity(client);
+    const report = await getRlsStatusReport(client);
+    res.json({ success: result.success, result, report });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
