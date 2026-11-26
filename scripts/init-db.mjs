@@ -178,6 +178,7 @@ export const DDL_STATEMENTS = [
         "bookingCode" TEXT NOT NULL,
         "amount" DOUBLE PRECISION NOT NULL,
         "method" TEXT NOT NULL,
+        "paymentType" TEXT NOT NULL DEFAULT 'GENERAL',
         "date" TEXT NOT NULL,
         "notes" TEXT,
         "receiptNumber" TEXT,
@@ -308,10 +309,23 @@ export async function runInitScript() {
       console.log('✅ Ready');
     }
 
-    // Ensure isTest column exists on bookings table
-    try {
-      await client.query('ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;');
-    } catch {}
+    // Ensure incremental columns exist safely on existing tables (non-destructive)
+    const columnAlterStatements = [
+      'ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "isTest" BOOLEAN NOT NULL DEFAULT false;',
+      'ALTER TABLE "booking_items" ADD COLUMN IF NOT EXISTS "orientalSweetOption" TEXT DEFAULT \'none\';',
+      'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "packagingNotes" TEXT;',
+      'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "factoryCostTotal" DOUBLE PRECISION DEFAULT 0;',
+      'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paidAmount" DOUBLE PRECISION DEFAULT 0;',
+      'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "remainingAmount" DOUBLE PRECISION DEFAULT 0;',
+      'ALTER TABLE "factory_orders" ADD COLUMN IF NOT EXISTS "paymentStatus" TEXT DEFAULT \'UNPAID\';',
+      'ALTER TABLE "factory_payments" ADD COLUMN IF NOT EXISTS "paymentType" TEXT NOT NULL DEFAULT \'GENERAL\';',
+      'UPDATE "factory_payments" SET "paymentType" = \'GENERAL\' WHERE "paymentType" IS NULL;',
+    ];
+    for (const alterSql of columnAlterStatements) {
+      try {
+        await client.query(alterSql);
+      } catch {}
+    }
 
     // Apply Supabase RLS hardening
     console.log('[Init-DB] Enforcing Supabase Row Level Security (RLS) on all production tables...');

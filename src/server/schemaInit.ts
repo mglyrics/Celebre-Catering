@@ -401,6 +401,18 @@ export async function ensureColumnsReady(client: PrismaClient): Promise<{ applie
   if (columnsMigrationRun) return { applied: 0, errors: [] };
   let applied = 0;
   const errors: string[] = [];
+
+  for (const tableName of ['factory_orders', 'factory_payments'] as const) {
+    const ddl = TABLE_DDL_QUERIES[tableName];
+    if (ddl) {
+      try {
+        await client.$executeRawUnsafe(ddl);
+      } catch (tblErr: any) {
+        errors.push(tblErr?.message || `Table ${tableName} check error`);
+      }
+    }
+  }
+
   for (const alterQuery of SCHEMA_COLUMN_MIGRATIONS) {
     try {
       await client.$executeRawUnsafe(alterQuery);
@@ -409,7 +421,9 @@ export async function ensureColumnsReady(client: PrismaClient): Promise<{ applie
       errors.push(colErr?.message || 'Error');
     }
   }
-  columnsMigrationRun = true;
+  if (errors.length === 0) {
+    columnsMigrationRun = true;
+  }
   return { applied, errors };
 }
 

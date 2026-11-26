@@ -348,13 +348,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (statsRes.ok) setStats(await statsRes.json());
       }
 
-      // Bookings
+      // Bookings & Factory Orders
+      let latestBookings: Booking[] | null = null;
+      let latestFactoryOrders: FactoryOrder[] | null = null;
+
       const bookingsRes = await fetch('/api/admin/bookings', { headers });
       if (bookingsRes.status === 401) {
         handleAuthError(401, await bookingsRes.json());
         return;
       }
-      if (bookingsRes.ok) setBookings(await bookingsRes.json());
+      if (bookingsRes.ok) {
+        latestBookings = await bookingsRes.json();
+        setBookings(latestBookings!);
+      }
 
       // Factory Orders
       const foRes = await fetch('/api/admin/factory-orders', { headers });
@@ -362,7 +368,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         handleAuthError(401, await foRes.json());
         return;
       }
-      if (foRes.ok) setFactoryOrders(await foRes.json());
+      if (foRes.ok) {
+        latestFactoryOrders = await foRes.json();
+        setFactoryOrders(latestFactoryOrders!);
+      }
+
+      // Keep currently opened booking modal synced with latest factory orders & payments
+      if (latestBookings) {
+        setSelectedBooking(prev => {
+          if (!prev) return null;
+          const fresh = latestBookings!.find(b => b.id === prev.id || b.bookingCode === prev.bookingCode);
+          if (!fresh) return prev;
+          const linkedFos = (latestFactoryOrders || []).filter(
+            fo => fo.bookingId === fresh.id || fo.bookingCode === fresh.bookingCode
+          );
+          return linkedFos.length > 0 ? { ...fresh, factoryOrders: linkedFos } : fresh;
+        });
+      }
 
       // Meals
       const mealsRes = await fetch('/api/admin/meals', { headers });
@@ -903,6 +925,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       setSelectedFactoryOrderForPayments(data.factoryOrder);
       setFactoryOrders(prev => prev.map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o));
+      setSelectedBooking(prev => {
+        if (!prev || (prev.id !== data.factoryOrder.bookingId && prev.bookingCode !== data.factoryOrder.bookingCode)) return prev;
+        const nextFos = (prev.factoryOrders || []).some(o => o.id === data.factoryOrder.id)
+          ? (prev.factoryOrders || []).map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o)
+          : [data.factoryOrder, ...(prev.factoryOrders || [])];
+        return { ...prev, factoryOrders: nextFos };
+      });
       handleCancelEditFactoryPayment();
       loadAllData();
     } catch (err: any) {
@@ -941,6 +970,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (data.factoryOrder) {
         setSelectedFactoryOrderForPayments(data.factoryOrder);
         setFactoryOrders(prev => prev.map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o));
+        setSelectedBooking(prev => {
+          if (!prev || (prev.id !== data.factoryOrder.bookingId && prev.bookingCode !== data.factoryOrder.bookingCode)) return prev;
+          const nextFos = (prev.factoryOrders || []).map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o);
+          return { ...prev, factoryOrders: nextFos };
+        });
       }
       setDeletingFactoryPayment(null);
       setDeleteFactoryPaymentReason('حذف دفعة مسجلة بالخطأ');
@@ -1148,6 +1182,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
       if (data.factoryOrder) {
         setFactoryOrders(prev => prev.map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o));
+        setSelectedBooking(prev => {
+          if (!prev || (prev.id !== data.factoryOrder.bookingId && prev.bookingCode !== data.factoryOrder.bookingCode)) return prev;
+          const nextFos = (prev.factoryOrders || []).some(o => o.id === data.factoryOrder.id)
+            ? (prev.factoryOrders || []).map(o => o.id === data.factoryOrder.id ? data.factoryOrder : o)
+            : [data.factoryOrder, ...(prev.factoryOrders || [])];
+          return { ...prev, factoryOrders: nextFos };
+        });
       }
       setEditingFactoryOrder(null);
       loadAllData();
@@ -4466,6 +4507,136 @@ APP_URL="https://celebre-eg.com"`}
                   )}
                 </div>
               </div>
+
+              {/* Linked Factory Orders & Factory Payments Management (Directly inside Booking Details) */}
+              {currentUser?.role !== 'factory' && (() => {
+                const linkedOrdersMap = new Map<string, FactoryOrder>();
+                for (const fo of selectedBooking.factoryOrders || []) {
+                  linkedOrdersMap.set(fo.id || fo.orderNumber, fo);
+                }
+                for (const fo of factoryOrders) {
+                  if (fo.bookingId === selectedBooking.id || fo.bookingCode === selectedBooking.bookingCode) {
+                    linkedOrdersMap.set(fo.id || fo.orderNumber, fo);
+                  }
+                }
+                const linkedFactoryOrders = Array.from(linkedOrdersMap.values());
+
+                return (
+                  <div className="bg-[#FCFBF9] p-4 rounded-2xl border border-[#EBDDC3] space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-[#7A0C2E] flex items-center gap-1.5 text-sm">
+                        <Package className="w-4 h-4 text-[#C59B27]" />
+                        <span>أوامر وحسابات تشغيل المصنع (المدفوعات والعربون)</span>
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-bold">
+                        ({linkedFactoryOrders.length} {linkedFactoryOrders.length === 1 ? 'أمر مصنع' : 'أوامر مصنع'})
+                      </span>
+                    </div>
+
+                    {linkedFactoryOrders.length === 0 ? (
+                      <div className="p-3.5 bg-white rounded-xl border border-dashed border-slate-300 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-slate-600 text-[11px]">
+                          لم يُصدر أمر تشغيل مصنع لهذا الحجز بعد. يمكنك إصدار أمر المصنع أولاً لتسجيل العربون ودفعات المصنع عليه.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenFactoryReview(selectedBooking.id)}
+                          disabled={isLoadingFactoryPreview}
+                          className="px-3.5 py-2 bg-[#7A0C2E] hover:bg-[#560820] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        >
+                          <Package className="w-3.5 h-3.5 text-[#DFC066]" />
+                          <span>إصدار أمر تشغيل المصنع</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {linkedFactoryOrders.map((fo) => {
+                          const pInfo = getFactoryPaymentStatusInfo(fo);
+                          const validPays = (fo.payments || []).filter(p => p.status === 'VALID');
+                          return (
+                            <div key={fo.id || fo.orderNumber} className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2.5 shadow-2xs">
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-sm text-[#7A0C2E]">{fo.orderNumber}</span>
+                                  <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-bold text-slate-600">v{fo.version}</span>
+                                </div>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${pInfo.bg} ${pInfo.border}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${pInfo.dot}`} />
+                                  <span>{pInfo.label}</span>
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="bg-[#FAF8F5] p-2 rounded-lg border border-slate-200">
+                                  <span className="text-[10px] text-slate-500 block">إجمالي المصنع</span>
+                                  <strong className="font-mono font-black text-slate-900">
+                                    {(fo.factoryCostTotal || 0).toLocaleString('ar-EG')} ج
+                                  </strong>
+                                </div>
+                                <div className="bg-emerald-50/70 p-2 rounded-lg border border-emerald-200">
+                                  <span className="text-[10px] text-emerald-700 block">المسدد للمصنع</span>
+                                  <strong className="font-mono font-black text-emerald-800">
+                                    {(fo.paidToFactoryAmount || 0).toLocaleString('ar-EG')} ج
+                                  </strong>
+                                </div>
+                                <div className="bg-[#FAF8F5] p-2 rounded-lg border border-slate-200">
+                                  <span className="text-[10px] text-slate-500 block">
+                                    {(fo.remainingToFactoryAmount ?? 0) < 0 ? 'سداد بالزيادة' : 'المتبقي للمصنع'}
+                                  </span>
+                                  <strong className={`font-mono font-black ${(fo.remainingToFactoryAmount ?? 0) < 0 ? 'text-purple-700' : (fo.remainingToFactoryAmount ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                    {(fo.remainingToFactoryAmount ?? 0) < 0
+                                      ? `+${Math.abs(fo.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج`
+                                      : `${(fo.remainingToFactoryAmount || 0).toLocaleString('ar-EG')} ج`}
+                                  </strong>
+                                </div>
+                              </div>
+
+                              {validPays.length > 0 && (
+                                <div className="space-y-1 pt-1 border-t border-slate-100">
+                                  {validPays.map((p) => (
+                                    <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-700 bg-[#FAF8F5] px-2.5 py-1.5 rounded-lg">
+                                      <span className="flex items-center gap-1.5">
+                                        <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                                          p.paymentType === 'DEPOSIT' ? 'bg-amber-100 text-amber-900' : 'bg-slate-200/70 text-slate-700'
+                                        }`}>
+                                          {getFactoryPaymentTypeLabel(p.paymentType)}
+                                        </span>
+                                        <span>{getFactoryPaymentMethodLabel(p.method)}</span>
+                                        <span className="font-mono text-slate-400">{p.date}</span>
+                                        {p.receiptNumber && <span className="font-mono text-slate-500">({p.receiptNumber})</span>}
+                                      </span>
+                                      <strong className="font-mono text-emerald-800">{p.amount.toLocaleString('ar-EG')} ج.م</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenFactoryPaymentsModal(fo)}
+                                  className="px-3.5 py-2 bg-[#7A0C2E] hover:bg-[#5E0923] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5" />
+                                  <span>إدارة دفعات المصنع ({fo.payments?.length || 0})</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditFactoryOrder(fo)}
+                                  className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                                >
+                                  <Edit className="w-3.5 h-3.5 text-blue-700" />
+                                  <span>تعديل أمر المصنع والدفعات (v{fo.version})</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Items List */}
               <div className="space-y-2 text-xs">

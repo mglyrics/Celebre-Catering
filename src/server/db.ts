@@ -166,6 +166,20 @@ import { prisma, getPrismaClient } from '../lib/prisma';
 import { logServerError, sanitizeError, SanitizedErrorInfo } from './safeLogger';
 import { ensureColumnsReady } from './schemaInit';
 
+function isSchemaMismatchError(err: any): boolean {
+  const msg = String(err?.message || '');
+  const code = String(err?.code || '');
+  return (
+    code === 'P2021' ||
+    code === 'P2022' ||
+    msg.includes('paymentType') ||
+    msg.includes('factory_payments') ||
+    msg.includes('factory_orders') ||
+    msg.includes('booking_items.') ||
+    msg.includes('does not exist')
+  );
+}
+
 let isPrismaConnected = false;
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -754,21 +768,37 @@ export const db = {
             ];
           }
 
-          const dbBookings = await client.booking.findMany({
-            where: whereClause,
-            include: {
-              items: true,
-              payments: true,
-              factoryOrders: {
-                include: {
-                  payments: { orderBy: { createdAt: 'desc' } },
-                },
-                orderBy: { createdAt: 'desc' },
+          const bookingInclude = {
+            items: true,
+            payments: true,
+            factoryOrders: {
+              include: {
+                payments: { orderBy: { createdAt: 'desc' as const } },
               },
-              auditLogs: true,
+              orderBy: { createdAt: 'desc' as const },
             },
-            orderBy: { createdAt: 'desc' },
-          });
+            auditLogs: true,
+          };
+
+          let dbBookings: any[];
+          try {
+            dbBookings = await client.booking.findMany({
+              where: whereClause,
+              include: bookingInclude,
+              orderBy: { createdAt: 'desc' },
+            });
+          } catch (queryErr: any) {
+            if (isSchemaMismatchError(queryErr)) {
+              await ensureColumnsReady(client).catch(() => {});
+              dbBookings = await client.booking.findMany({
+                where: whereClause,
+                include: bookingInclude,
+                orderBy: { createdAt: 'desc' },
+              });
+            } else {
+              throw queryErr;
+            }
+          }
 
           if (dbBookings && dbBookings.length > 0) {
             return dbBookings.map(b => ({
@@ -797,7 +827,7 @@ export const db = {
               version: b.version,
               createdAt: b.createdAt.toISOString(),
               updatedAt: b.updatedAt.toISOString(),
-              items: b.items.map(it => {
+              items: b.items.map((it: any) => {
                 const sweetOpt = ((it as any).orientalSweetOption || 'none') as OrientalSweetOption;
                 const sweetDist = sweetOpt === 'add_with_juice' ? 20 : sweetOpt === 'replace_juice' ? 15 : 0;
                 const sweetFact = sweetOpt === 'add_with_juice' ? 10 : sweetOpt === 'replace_juice' ? 5 : 0;
@@ -821,7 +851,7 @@ export const db = {
                   totalFactoryPrice: it.totalFactoryPrice || 0,
                 };
               }),
-              payments: b.payments.map(p => ({
+              payments: b.payments.map((p: any) => ({
                 id: p.id,
                 bookingId: p.bookingId,
                 amount: p.amount,
@@ -832,8 +862,8 @@ export const db = {
                 status: (p.notes && p.notes.includes('[ملغاة')) ? 'CANCELLED' : 'VALID',
                 createdAt: p.createdAt.toISOString(),
               })),
-              factoryOrders: (b.factoryOrders || []).map(fo => hydrateFactoryOrderFinancials(fo)),
-              auditLogs: b.auditLogs.map(al => ({
+              factoryOrders: (b.factoryOrders || []).map((fo: any) => hydrateFactoryOrderFinancials(fo)),
+              auditLogs: b.auditLogs.map((al: any) => ({
                 id: al.id,
                 bookingId: al.bookingId || '',
                 bookingCode: al.bookingCode || b.bookingCode || '',
@@ -888,6 +918,17 @@ export const db = {
         const client = getPrismaClient();
         if (client) {
           let b: any = null;
+          const bookingDetailInclude = {
+            items: true,
+            payments: true,
+            factoryOrders: {
+              include: {
+                payments: { orderBy: { createdAt: 'desc' as const } },
+              },
+              orderBy: { createdAt: 'desc' as const },
+            },
+            auditLogs: true,
+          };
           try {
             b = await client.booking.findFirst({
               where: {
@@ -896,21 +937,11 @@ export const db = {
                   { bookingCode: id },
                 ],
               },
-              include: {
-                items: true,
-                payments: true,
-                factoryOrders: {
-                  include: {
-                    payments: { orderBy: { createdAt: 'desc' } },
-                  },
-                  orderBy: { createdAt: 'desc' },
-                },
-                auditLogs: true,
-              },
+              include: bookingDetailInclude,
             });
           } catch (findErr: any) {
-            if (String(findErr?.message || '').includes('booking_items.')) {
-              ensureColumnsReady(client).catch(() => {});
+            if (isSchemaMismatchError(findErr)) {
+              await ensureColumnsReady(client).catch(() => {});
               b = await client.booking.findFirst({
                 where: {
                   OR: [
@@ -918,16 +949,7 @@ export const db = {
                     { bookingCode: id },
                   ],
                 },
-                include: {
-                  payments: true,
-                  factoryOrders: {
-                    include: {
-                      payments: { orderBy: { createdAt: 'desc' } },
-                    },
-                    orderBy: { createdAt: 'desc' },
-                  },
-                  auditLogs: true,
-                },
+                include: bookingDetailInclude,
               });
             } else {
               throw findErr;
@@ -1046,36 +1068,28 @@ export const db = {
         const client = getPrismaClient();
         if (client) {
           let dbBooking: any = null;
+          const primaryInclude = {
+            items: true,
+            payments: { orderBy: { createdAt: 'desc' as const } },
+            factoryOrders: {
+              include: {
+                payments: { orderBy: { createdAt: 'desc' as const } },
+              },
+              orderBy: { createdAt: 'desc' as const },
+            },
+            auditLogs: { orderBy: { timestamp: 'desc' as const } },
+          };
           try {
             dbBooking = await client.booking.findUnique({
               where: { id: cleanId },
-              include: {
-                items: true,
-                payments: { orderBy: { createdAt: 'desc' } },
-                factoryOrders: {
-                  include: {
-                    payments: { orderBy: { createdAt: 'desc' } },
-                  },
-                  orderBy: { createdAt: 'desc' },
-                },
-                auditLogs: { orderBy: { timestamp: 'desc' } },
-              },
+              include: primaryInclude,
             });
           } catch (findErr: any) {
-            if (String(findErr?.message || '').includes('booking_items.')) {
-              ensureColumnsReady(client).catch(() => {});
+            if (isSchemaMismatchError(findErr)) {
+              await ensureColumnsReady(client).catch(() => {});
               dbBooking = await client.booking.findUnique({
                 where: { id: cleanId },
-                include: {
-                  payments: { orderBy: { createdAt: 'desc' } },
-                  factoryOrders: {
-                    include: {
-                      payments: { orderBy: { createdAt: 'desc' } },
-                    },
-                    orderBy: { createdAt: 'desc' },
-                  },
-                  auditLogs: { orderBy: { timestamp: 'desc' } },
-                },
+                include: primaryInclude,
               });
             } else {
               throw findErr;
@@ -1605,7 +1619,12 @@ export const db = {
                 include: {
                   items: true,
                   payments: { orderBy: { createdAt: 'desc' } },
-                  factoryOrders: true,
+                  factoryOrders: {
+                    include: {
+                      payments: { orderBy: { createdAt: 'desc' } },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                  },
                   auditLogs: true,
                 },
               });
@@ -2215,11 +2234,25 @@ export const db = {
       throw new Error(`يوجد بالفعل أمر مصنع صادر لهذا الحجز (${latest.orderNumber} - الإصدار v${latest.version}). إذا تم تعديل الحجز وتريد إصدار نسخة عمل جديدة للمصنع، يرجى تأكيد خيار "إصدار نسخة عمل جديدة".`);
     }
 
+    const pgOrderNumbers = new Set<string>();
+    if (databaseUrl) {
+      try {
+        const client = getPrismaClient();
+        if (client) {
+          const existingPgOrders = await client.factoryOrder.findMany({ select: { orderNumber: true } });
+          for (const row of existingPgOrders) {
+            if (row.orderNumber) pgOrderNumbers.add(row.orderNumber);
+          }
+        }
+      } catch {}
+    }
+
     const version = options?.targetVersion !== undefined ? options.targetVersion : (uniqueExisting.length + 1);
     memoryDB.factoryOrderCounter = Math.max(memoryDB.factoryOrderCounter || 100, 100);
     do {
       memoryDB.factoryOrderCounter += 1;
     } while (
+      pgOrderNumbers.has(`FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`) ||
       memoryDB.factoryOrders.some(o => o.orderNumber === `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`) ||
       memoryDB.factoryPayments.some(p => p.factoryOrderNumber === `FO-2026-${String(memoryDB.factoryOrderCounter).padStart(3, '0')}`)
     );
@@ -2248,13 +2281,12 @@ export const db = {
       updatedAt: new Date().toISOString(),
     };
 
-    memoryDB.factoryOrders.unshift(factoryOrder);
-
-    // Save to PostgreSQL if databaseUrl is present
+    // Save to PostgreSQL first if databaseUrl is present
     if (databaseUrl) {
       try {
         const client = getPrismaClient();
         if (client) {
+          await ensureColumnsReady(client).catch(() => {});
           await client.factoryOrder.create({
             data: {
               id: factoryOrder.id,
@@ -2289,8 +2321,11 @@ export const db = {
         }
       } catch (err: any) {
         logServerError(err, 'db.createFactoryOrder.prisma');
+        throw new Error(`فشل حفظ أمر المصنع في قاعدة البيانات: ${err?.message || 'خطأ في الاتصال بقاعدة البيانات'}`);
       }
     }
+
+    memoryDB.factoryOrders.unshift(factoryOrder);
 
     // Update memory booking
     const memBooking = memoryDB.bookings.find(b => b.id === booking.id);
@@ -2340,7 +2375,7 @@ export const db = {
               orderBy: { createdAt: 'desc' },
             });
           } catch (queryErr: any) {
-            if (String(queryErr?.message || '').includes('paymentType')) {
+            if (isSchemaMismatchError(queryErr)) {
               await ensureColumnsReady(client).catch(() => {});
               dbOrders = await client.factoryOrder.findMany({
                 include: {
@@ -2396,7 +2431,7 @@ export const db = {
           }
         }
       } catch (err: any) {
-        if (String(err?.message || '').includes('paymentType')) {
+        if (isSchemaMismatchError(err)) {
           try {
             const client = getPrismaClient();
             if (client) {
@@ -2426,9 +2461,21 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
-          const list = await client.factoryPayment.findMany({
-            orderBy: { createdAt: 'desc' },
-          });
+          let list: any[];
+          try {
+            list = await client.factoryPayment.findMany({
+              orderBy: { createdAt: 'desc' },
+            });
+          } catch (queryErr: any) {
+            if (isSchemaMismatchError(queryErr)) {
+              await ensureColumnsReady(client).catch(() => {});
+              list = await client.factoryPayment.findMany({
+                orderBy: { createdAt: 'desc' },
+              });
+            } else {
+              throw queryErr;
+            }
+          }
           return list.map(mapFactoryPaymentRecord);
         }
       } catch (err: any) {
@@ -2497,10 +2544,11 @@ export const db = {
       updatedAt: nowIso,
     };
 
-    // Recalculate balances
+    // Recalculate balances (fallback to itemsTotal for legacy orders with 0/null factoryCostTotal)
     const priorValidPayments = (order.payments || []).filter(p => p.status === 'VALID');
     const newPaid = priorValidPayments.reduce((acc, p) => acc + p.amount, 0) + numAmount;
-    const costTotal = order.factoryCostTotal || 0;
+    const itemsTotal = (order.items || []).reduce((acc: number, item: any) => acc + (Number(item.totalFactoryPrice) || 0), 0);
+    const costTotal = (order.factoryCostTotal && order.factoryCostTotal > 0) ? order.factoryCostTotal : itemsTotal;
     const newRemaining = costTotal - newPaid;
     const newStatus = calculateFactoryPaymentStatus(newPaid, costTotal);
 
@@ -2535,6 +2583,7 @@ export const db = {
             await tx.factoryOrder.update({
               where: { id: order.id },
               data: {
+                factoryCostTotal: costTotal,
                 paidAmount: newPaid,
                 remainingAmount: newRemaining,
                 paymentStatus: newStatus,
@@ -2556,6 +2605,7 @@ export const db = {
         }
       } catch (err: any) {
         logServerError(err, 'db.addFactoryPayment.prisma');
+        throw new Error(`فشل حفظ دفعة المصنع في قاعدة البيانات: ${err?.message || 'خطأ في الاتصال بقاعدة البيانات'}`);
       }
     }
 
@@ -2626,6 +2676,7 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
+          await ensureColumnsReady(client).catch(() => {});
           const dbPay = await client.factoryPayment.findUnique({ where: { id: cleanPayId } });
           if (dbPay) {
             payment = mapFactoryPaymentRecord(dbPay);
@@ -2740,6 +2791,7 @@ export const db = {
             await tx.factoryOrder.update({
               where: { id: order!.id },
               data: {
+                factoryCostTotal: costTotal,
                 paidAmount: newPaid,
                 remainingAmount: newRemaining,
                 paymentStatus: newStatus,
@@ -2761,6 +2813,7 @@ export const db = {
         }
       } catch (err: any) {
         logServerError(err, 'db.updateFactoryPayment.prisma');
+        throw new Error(`فشل تعديل دفعة المصنع في قاعدة البيانات: ${err?.message || 'خطأ في الاتصال بقاعدة البيانات'}`);
       }
     }
 
@@ -2822,6 +2875,7 @@ export const db = {
       try {
         const client = getPrismaClient();
         if (client) {
+          await ensureColumnsReady(client).catch(() => {});
           const dbPay = await client.factoryPayment.findUnique({ where: { id: cleanPayId } });
           if (dbPay) {
             payment = mapFactoryPaymentRecord(dbPay);
@@ -2879,6 +2933,7 @@ export const db = {
             await tx.factoryOrder.update({
               where: { id: order!.id },
               data: {
+                factoryCostTotal: costTotal,
                 paidAmount: newPaid,
                 remainingAmount: newRemaining,
                 paymentStatus: newStatus,
@@ -2900,6 +2955,7 @@ export const db = {
         }
       } catch (err: any) {
         logServerError(err, 'db.deleteFactoryPayment.prisma');
+        throw new Error(`فشل حذف دفعة المصنع من قاعدة البيانات: ${err?.message || 'خطأ في الاتصال بقاعدة البيانات'}`);
       }
     }
 
